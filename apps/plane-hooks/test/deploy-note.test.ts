@@ -7,7 +7,17 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const URL_ = "https://terminal-abc123-liq.vercel.app";
 
 function note(texts: string[], overrides: Partial<DeployNote> = {}): DeployNote {
-	return { deploymentId: "dpl_ok1", project: "terminal", target: "production", sha: SHA, url: URL_, texts, ...overrides };
+	return {
+		deploymentId: "dpl_ok1",
+		project: "terminal",
+		target: "production",
+		sha: SHA,
+		url: URL_,
+		texts,
+		source: "vercel",
+		keyLimit: 10,
+		...overrides,
+	};
 }
 
 let plane: FakePlane;
@@ -115,5 +125,19 @@ describe("postDeployNotes", () => {
 		expect(plane.commentsOf(ops12.id)[0]?.comment_html).toBe(
 			`<p>Выкачено: <code>terminal</code> → production · <code>0123456</code> · javascript:alert(1)</p>`,
 		);
+	});
+
+	test("external_source заметки — источник события", async () => {
+		await post(note(["ops-12"], { deploymentId: "gh:staging:" + SHA, source: "github" }));
+		expect(plane.commentsOf(ops12.id)[0]).toMatchObject({
+			external_id: `note:gh:staging:${SHA}:OPS-12`,
+			external_source: "github",
+		});
+	});
+
+	test("лимит ключей берётся из заметки", async () => {
+		const many = Array.from({ length: 12 }, (_, i) => `OPS-${i + 1}`).join(" ");
+		expect(await post(note([many], { keyLimit: 11 }))).toHaveLength(11);
+		expect(await post(note([many], { deploymentId: "dpl_ok2" }))).toHaveLength(10);
 	});
 });

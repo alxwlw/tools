@@ -102,6 +102,8 @@ describe("parseGrafanaWebhook: восстановление", () => {
 			occurrence: "2026-10-06T10:00:00Z",
 			at: "2026-10-06T10:07:30Z",
 			noteHtml: "<p>Погас 2026-10-06 10:07 UTC</p>",
+			title: "[prod] ServiceDown: order-gateway is down",
+			env: "prod",
 		});
 	});
 });
@@ -119,5 +121,19 @@ describe("parseGrafanaWebhook: чужая форма → BadPayload", () => {
 	];
 	test.each(bad.map((body, index) => [index, body] as const))("случай %d", (_index, body) => {
 		expect(() => parseGrafanaWebhook(body)).toThrow(BadPayload);
+	});
+});
+
+describe("поля для отметки", () => {
+	test("срабатывание и восстановление несут заголовок задачи и env", async () => {
+		const [firingProd, firingStaging] = parseGrafanaWebhook(await fixture("grafana-firing.json"));
+		expect(firingProd).toMatchObject({ status: "firing", env: "prod" });
+		expect(firingStaging).toMatchObject({ status: "firing", env: "staging" });
+		const [resolved] = parseGrafanaWebhook(await fixture("grafana-resolved.json"));
+		expect(resolved).toMatchObject({
+			status: "resolved",
+			title: "[prod] ServiceDown: order-gateway is down",
+			env: "prod",
+		});
 	});
 });

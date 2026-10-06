@@ -1,4 +1,4 @@
-# plane-hooks — Grafana/Vercel → Plane webhook receiver.
+# plane-hooks — Grafana/Vercel/backend-deploy CI → Plane webhook receiver.
 # Spec: docs/superpowers/specs/2026-10-06-plane-hooks-design.md
 FROM oven/bun:1.3.14-alpine
 

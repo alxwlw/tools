@@ -210,3 +210,50 @@ describe("PlaneClient: ошибки", () => {
 		expect(await failure(client.listStates("p1"))).toBeDefined();
 	});
 });
+
+describe("ограничитель темпа", () => {
+	test("каждый запрос сначала получает место у ограничителя, и только потом уходит в fetch", async () => {
+		const events: string[] = [];
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const client = new PlaneClient({
+			baseUrl: "https://plane.test",
+			workspace: "liq-egn",
+			apiKey: "key-1",
+			limiter: {
+				acquire: async () => {
+					events.push("acquire");
+					await gate;
+				},
+			},
+			fetch: async () => {
+				events.push("fetch");
+				return new Response(JSON.stringify({ results: [], next_page_results: false }), { status: 200 });
+			},
+		});
+		const pending = client.listStates("p-ops");
+		await Bun.sleep(5);
+		expect(events).toEqual(["acquire"]);
+		release();
+		await pending;
+		expect(events).toEqual(["acquire", "fetch"]);
+	});
+
+	// Negative guard: passes without a limiter; it catches a timeout signal created before acquire(), which would already have expired by the time the call runs.
+	test("ожидание в очереди не съедает таймаут вызова", async () => {
+		const client = new PlaneClient({
+			baseUrl: "https://plane.test",
+			workspace: "liq-egn",
+			apiKey: "key-1",
+			timeoutMs: 20,
+			limiter: { acquire: () => Bun.sleep(60) },
+			fetch: async (_url, init) => {
+				if (init.signal?.aborted) throw new Error("aborted before the request was sent");
+				return new Response(JSON.stringify({ results: [], next_page_results: false }), { status: 200 });
+			},
+		});
+		await expect(client.listStates("p-ops")).resolves.toEqual([]);
+	});
+});

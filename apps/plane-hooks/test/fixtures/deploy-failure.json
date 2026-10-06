@@ -1,0 +1,11 @@
+{
+  "repository": "liqu-fi/monorepo",
+  "environment": "staging",
+  "outcome": "failure",
+  "stage": "bootstrap-smoke",
+  "sha": "89abcdef0123456789abcdef0123456789abcdef",
+  "runId": "37483709613",
+  "runAttempt": "2",
+  "runUrl": "https://github.com/liqu-fi/monorepo/actions/runs/37483709613",
+  "commits": []
+}

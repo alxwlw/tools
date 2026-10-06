@@ -1,4 +1,5 @@
 import { isRecord } from "./payload.ts";
+import { SlidingWindow } from "./rate.ts";
 
 export type Priority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -65,9 +66,14 @@ export type PlaneClientOptions = {
 	apiKey: string;
 	timeoutMs?: number;
 	fetch?: Fetch;
+	/** Every request waits here first; default — one SlidingWindow of PLANE_RATE_MAX per PLANE_RATE_WINDOW_MS. */
+	limiter?: { acquire(): Promise<void> };
 };
 
 const PAGE_SIZE = "100";
+/** Plane's default API_KEY_RATE_LIMIT is 60/minute per key; 50 leaves room for whatever else uses the token. */
+export const PLANE_RATE_MAX = 50;
+export const PLANE_RATE_WINDOW_MS = 60_000;
 const MAX_PAGES = 50;
 const LABEL_COLOR = "#d9534f";
 
@@ -76,12 +82,14 @@ export class PlaneClient implements PlaneApi {
 	readonly #apiKey: string;
 	readonly #timeoutMs: number;
 	readonly #fetch: Fetch;
+	readonly #limiter: { acquire(): Promise<void> };
 
 	constructor(options: PlaneClientOptions) {
 		this.#root = `${options.baseUrl.replace(/\/+$/, "")}/api/v1/workspaces/${encodeURIComponent(options.workspace)}`;
 		this.#apiKey = options.apiKey;
 		this.#timeoutMs = options.timeoutMs ?? 10_000;
 		this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
+		this.#limiter = options.limiter ?? new SlidingWindow({ max: PLANE_RATE_MAX, windowMs: PLANE_RATE_WINDOW_MS });
 	}
 
 	createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert> {
@@ -175,6 +183,8 @@ export class PlaneClient implements PlaneApi {
 		body?: unknown,
 		allowed: readonly number[] = [],
 	): Promise<{ status: number; body: unknown }> {
+		// Waiting for a slot happens before the per-call timeout starts: a queued request never times out unsent.
+		await this.#limiter.acquire();
 		const res = await this.#fetch(`${this.#root}${path}`, {
 			method,
 			headers: { "X-API-Key": this.#apiKey, "Content-Type": "application/json", Accept: "application/json" },

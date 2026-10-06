@@ -188,6 +188,8 @@ describe("deployment.succeeded", () => {
 			sha: SHA,
 			url: "https://terminal-def456-liq.vercel.app",
 			texts: [BRANCH, "feat: ship [OPS-12]"],
+			source: "vercel",
+			keyLimit: 10,
 		});
 	});
 
@@ -233,5 +235,29 @@ describe("прочее", () => {
 	];
 	test.each(bad.map((body, index) => [index, body] as const))("чужая форма %d → BadPayload", (_index, body) => {
 		expect(() => parseVercelWebhook(body)).toThrow(BadPayload);
+	});
+});
+
+describe("сводка для отметки в Grafana", () => {
+	test("упавший деплой: ✗, проект, target, sha7", async () => {
+		const ev = await event("vercel-deployment-error.json");
+		if (ev.kind !== "failed") throw new Error("expected failed");
+		expect(ev.summary).toEqual({ title: "✗ terminal → production упал · 0123456", env: "production", sha: SHA });
+	});
+
+	test("успешный деплой: проект → target · sha7", async () => {
+		const ev = succeeded(await event("vercel-deployment-succeeded.json"));
+		expect(ev.summary).toEqual({ title: "terminal → production · 0123456", env: "production", sha: SHA });
+	});
+
+	test("без sha в заголовке id деплоя, sha нет", async () => {
+		const ev = succeeded(await event("vercel-deployment-succeeded.json", (b) => delete b.payload.deployment.meta));
+		expect(ev.summary.title).toBe("terminal → production · dpl_ok1");
+		expect(ev.summary.sha).toBeUndefined();
+	});
+
+	test("target preview попадает в env", async () => {
+		const ev = succeeded(await event("vercel-deployment-succeeded.json", (b) => (b.payload.target = null)));
+		expect(ev.summary.env).toBe("preview");
 	});
 });

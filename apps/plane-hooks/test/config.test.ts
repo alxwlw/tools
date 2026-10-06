@@ -9,6 +9,7 @@ const valid = {
 	PLANE_HOOKS_PLANE_API_KEY: "plane_api_secret_value",
 	PLANE_HOOKS_GRAFANA_TOKEN: TOKEN,
 	PLANE_HOOKS_VERCEL_SECRET: "vercel_secret_value",
+	PLANE_HOOKS_DEPLOY_SECRET: "deploy_secret_value",
 };
 
 function message(env: Record<string, string | undefined>): string {
@@ -30,6 +31,7 @@ describe("loadConfig", () => {
 			planeApiKey: "plane_api_secret_value",
 			grafanaToken: TOKEN,
 			vercelSecret: "vercel_secret_value",
+			deploySecret: "deploy_secret_value",
 		});
 	});
 
@@ -72,6 +74,11 @@ describe("loadConfig", () => {
 		expect(loadConfig({ ...valid, PLANE_HOOKS_PROJECT_ID: " 0A1B2C3D-4E5F-6789-ABCD-EF0123456789\n" }).projectId).toBe(
 			"0A1B2C3D-4E5F-6789-ABCD-EF0123456789",
 		);
+	});
+
+	test("пустой PLANE_HOOKS_DEPLOY_SECRET — сервис не стартует, ошибка называет переменную", () => {
+		const text = message({ ...valid, PLANE_HOOKS_DEPLOY_SECRET: "  " });
+		expect(text).toContain("PLANE_HOOKS_DEPLOY_SECRET");
 	});
 
 	test("URL Plane без схемы — ошибка", () => {

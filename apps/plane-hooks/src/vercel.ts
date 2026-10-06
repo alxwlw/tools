@@ -1,11 +1,12 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import type { DeployNote, DeployTarget } from "./deploy-note.ts";
+import type { DeployOutcome, DeployTarget } from "./deploy-note.ts";
 import { esc, link, p, truncate } from "./html.ts";
 import type { IncidentSignal } from "./incident.ts";
 import { BadPayload, isRecord, optString } from "./payload.ts";
 
 const TITLE_MAX = 200;
 const BRANCH_MAX = 80;
+const KEY_LIMIT = 10;
 
 /** 40 hex digits — the only shape an HMAC-SHA1 signature can take; anything else fails before the body is read. */
 export function isVercelSignatureShaped(header: string | null): header is string {
@@ -19,10 +20,7 @@ export function verifyVercelSignature(raw: Uint8Array, header: string | null, se
 	return timingSafeEqual(expected, Buffer.from(header, "hex"));
 }
 
-export type VercelEvent =
-	| { kind: "failed"; signal: IncidentSignal }
-	| { kind: "succeeded"; resolve: IncidentSignal; note: DeployNote }
-	| { kind: "ignored"; type: string };
+export type VercelEvent = DeployOutcome | { kind: "ignored"; type: string };
 
 /**
  * Vercel account webhook → what plane-hooks does about it (spec «Поток Vercel»).
@@ -58,6 +56,7 @@ export function parseVercelWebhook(body: unknown): VercelEvent {
 	const url = /^https?:\/\//i.test(host) ? host : `https://${host}`;
 	const key = `deploy:${projectId}:${target}:${branchKey(branch)}`;
 	const at = timestamp(body.createdAt);
+	const label = sha7 ?? deploymentId;
 
 	if (type === "deployment.error") {
 		const links = [link(inspector, "Инспектор Vercel"), link(url, url)].filter((html): html is string => html !== null);
@@ -82,6 +81,7 @@ export function parseVercelWebhook(body: unknown): VercelEvent {
 				priority: target === "production" ? "high" : "medium",
 				label: "deploy-failed",
 			},
+			summary: { title: `✗ ${name} → ${target} упал · ${label}`, env: target, sha },
 		};
 	}
 
@@ -101,7 +101,10 @@ export function parseVercelWebhook(body: unknown): VercelEvent {
 			sha,
 			url,
 			texts: [ref, message].filter((text): text is string => text !== null),
+			source: "vercel",
+			keyLimit: KEY_LIMIT,
 		},
+		summary: { title: `${name} → ${target} · ${label}`, env: target, sha },
 	};
 }
 

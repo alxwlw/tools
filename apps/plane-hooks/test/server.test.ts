@@ -4,10 +4,13 @@ import type { DeployNote, DeployNoteResult } from "../src/deploy-note.ts";
 import type { IncidentResult, IncidentSignal } from "../src/incident.ts";
 import { PlaneApiError } from "../src/plane.ts";
 import { createHandler, type LogEntry, MAX_BODY_BYTES } from "../src/server.ts";
-import { fixtureBytes } from "./fixtures.ts";
+import { fixture, fixtureBytes } from "./fixtures.ts";
 
+const SHA = "0123456789abcdef0123456789abcdef01234567";
 const TOKEN = `ph_${"a1".repeat(24)}`;
 const SECRET = "vercel-test-secret";
+const DEPLOY_SECRET = "deploy-test-secret";
+const DEPLOY_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const BASE = "http://plane-hooks:8080";
 
 type Options = {
@@ -22,6 +25,7 @@ function harness(options: Options = {}) {
 	const handler = createHandler({
 		grafanaToken: TOKEN,
 		vercelSecret: SECRET,
+		deploySecret: DEPLOY_SECRET,
 		incidents: {
 			report: async (signal) => {
 				signals.push(signal);
@@ -47,6 +51,16 @@ function vercel(raw: Uint8Array, signature: string | null = createHmac("sha1", S
 	const headers: Record<string, string> = { "content-type": "application/json" };
 	if (signature !== null) headers["x-vercel-signature"] = signature;
 	return new Request(`${BASE}/hooks/vercel`, { method: "POST", headers, body: raw });
+}
+
+function deployRequest(
+	raw: Uint8Array,
+	signature: string | null = createHmac("sha256", DEPLOY_SECRET).update(raw).digest("hex"),
+	headers: Record<string, string> = {},
+): Request {
+	const all: Record<string, string> = { "content-type": "application/json", ...headers };
+	if (signature !== null) all["x-plane-hooks-signature"] = signature;
+	return new Request(`${BASE}/hooks/deploy`, { method: "POST", headers: all, body: raw });
 }
 
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -338,6 +352,8 @@ describe("лог и ответы: поля строк", () => {
 			workItemId: null,
 			error: "PlaneApiError: Plane POST /comments/ → 500",
 		});
+		expect(logs.filter((l) => l.annotation !== undefined)).toHaveLength(1);
+		expect(logs[1]?.annotation).toBeUndefined();
 	});
 
 	test("сбой, не являющийся Error → «unknown error»", async () => {
@@ -366,6 +382,10 @@ describe("лог и ответы: поля строк", () => {
 				action: "error",
 				workItemId: null,
 				ms: expect.any(Number),
+				annotation: "deploy",
+				title: "✗ terminal → production упал · 0123456",
+				env: "production",
+				sha: SHA,
 				error: "Error: Plane project p-ops has no default state",
 			},
 		]);
@@ -427,5 +447,230 @@ describe("ms в логе", () => {
 		});
 		await handler(grafana(await fixtureBytes("grafana-firing.json")));
 		expect(logs[0]?.ms).toBeGreaterThanOrEqual(15);
+	});
+});
+
+describe("поля отметки в логе", () => {
+	test("новое срабатывание алерта — отметка «инцидент» с заголовком задачи и env", async () => {
+		const { handler, logs, signals } = harness();
+		expect((await handler(grafana(await fixtureBytes("grafana-firing.json")))).status).toBe(200);
+		expect(logs[0]).toMatchObject({
+			annotation: "incident",
+			title: "Сработал: [prod] ServiceDown: order-gateway is down",
+			env: "production",
+		});
+		const second = signals[1] as { title: string };
+		expect(logs[1]).toMatchObject({ annotation: "incident", title: `Сработал: ${second.title}`, env: "staging" });
+	});
+
+	test("алерт без метки env: отметка в словаре деплоев (production), заголовок остаётся [prod]", async () => {
+		const body = JSON.stringify({
+			alerts: [
+				{
+					status: "firing",
+					fingerprint: "fp-no-env",
+					startsAt: "2026-10-06T10:00:00Z",
+					labels: { alertname: "NoEnv", severity: "critical" },
+					annotations: {},
+				},
+			],
+		});
+		const { handler, logs } = harness();
+		expect((await handler(grafana(body))).status).toBe(200);
+		expect(logs[0]).toMatchObject({ annotation: "incident", title: "Сработал: [prod] NoEnv", env: "production" });
+	});
+
+	test.each(["created", "reopened", "commented"] as const)("срабатывание с действием %s — отметка есть", async (action) => {
+		const { handler, logs } = harness({ report: async () => ({ action, workItemId: "w1" }) });
+		await handler(grafana(await fixtureBytes("grafana-firing.json")));
+		expect(logs.every((l) => l.annotation === "incident")).toBe(true);
+	});
+
+	test("повтор (noop) и ошибка Plane у алерта — без отметки", async () => {
+		const noop = harness({ report: async () => ({ action: "noop", workItemId: "w1" }) });
+		await noop.handler(grafana(await fixtureBytes("grafana-firing.json")));
+		expect(noop.logs.some((l) => "annotation" in l && l.annotation !== undefined)).toBe(false);
+		const failing = harness({
+			report: async () => {
+				throw new PlaneApiError(500, "POST", "/x/");
+			},
+		});
+		await failing.handler(grafana(await fixtureBytes("grafana-firing.json")));
+		expect(failing.logs.some((l) => l.annotation !== undefined)).toBe(false);
+	});
+
+	test("восстановление: commented — «Погас», noop — без отметки", async () => {
+		const commented = harness({ report: async () => ({ action: "commented", workItemId: "w1" }) });
+		await commented.handler(grafana(await fixtureBytes("grafana-resolved.json")));
+		expect(commented.logs[0]).toMatchObject({
+			annotation: "incident",
+			title: "Погас: [prod] ServiceDown: order-gateway is down",
+			env: "production",
+		});
+		const noop = harness({ report: async () => ({ action: "noop", workItemId: "w1" }) });
+		await noop.handler(grafana(await fixtureBytes("grafana-resolved.json")));
+		expect(noop.logs[0]?.annotation).toBeUndefined();
+	});
+
+	test.each([
+		["created", 200],
+		["noop", 200],
+	] as const)("упавший деплой Vercel (%s) — отметка «деплой» на строке события", async (action, status) => {
+		const { handler, logs } = harness({ report: async () => ({ action, workItemId: "w1" }) });
+		expect((await handler(vercel(await fixtureBytes("vercel-deployment-error.json")))).status).toBe(status);
+		expect(logs).toHaveLength(1);
+		expect(logs[0]).toMatchObject({
+			event: "deployment.error",
+			annotation: "deploy",
+			title: "✗ terminal → production упал · 0123456",
+			env: "production",
+			sha: SHA,
+		});
+	});
+
+	test("упавший деплой Vercel при ошибке Plane — отметка всё равно есть, ответ 502", async () => {
+		const { handler, logs } = harness({
+			report: async () => {
+				throw new PlaneApiError(503, "POST", "/x/");
+			},
+		});
+		expect((await handler(vercel(await fixtureBytes("vercel-deployment-error.json")))).status).toBe(502);
+		expect(logs[0]).toMatchObject({ action: "error", annotation: "deploy" });
+	});
+
+	test("успешный деплой Vercel — ровно одна строка с отметкой, у строк заметок её нет", async () => {
+		const { handler, logs } = harness({
+			report: async () => ({ action: "noop", workItemId: null }),
+			notes: async () => [
+				{ key: "OPS-12", action: "commented", workItemId: "w12", ms: 3 },
+				{ key: "MONO-3", action: "skipped", workItemId: null, ms: 1 },
+			],
+		});
+		expect((await handler(vercel(await fixtureBytes("vercel-deployment-succeeded.json")))).status).toBe(200);
+		const marked = logs.filter((l) => l.annotation !== undefined);
+		expect(marked).toHaveLength(1);
+		expect(marked[0]).toMatchObject({
+			event: "deployment.succeeded",
+			annotation: "deploy",
+			title: "terminal → production · 0123456",
+			env: "production",
+			sha: SHA,
+		});
+		expect(logs).toHaveLength(3);
+	});
+});
+
+describe("/hooks/deploy", () => {
+	test.each([null, "short", "z".repeat(64)])("подпись %p не той формы → 401 до чтения тела, без строки лога", async (signature) => {
+		const { handler, logs, signals } = harness();
+		const req = deployRequest(await fixtureBytes("deploy-failure.json"), signature);
+		expect((await handler(req)).status).toBe(401);
+		expect(req.bodyUsed).toBe(false);
+		expect(logs).toEqual([]);
+		expect(signals).toHaveLength(0);
+	});
+
+	test("подпись правильной формы, но чужая → 401 после чтения тела, без строки лога", async () => {
+		const { handler, logs } = harness();
+		const req = deployRequest(await fixtureBytes("deploy-failure.json"), "0".repeat(64));
+		expect((await handler(req)).status).toBe(401);
+		expect(req.bodyUsed).toBe(true);
+		expect(logs).toEqual([]);
+	});
+
+	test("чужая подпись при плохом теле → 401 без строки лога: подпись проверяется до разбора", async () => {
+		const bodies = [
+			new TextEncoder().encode("{not json"),
+			bytes({ ...(await fixture("deploy-failure.json")), environment: "preview" }),
+		];
+		for (const raw of bodies) {
+			const { handler, logs } = harness();
+			expect((await handler(deployRequest(raw, "0".repeat(64)))).status).toBe(401);
+			expect(logs).toEqual([]);
+		}
+	});
+
+	test("тело больше 1 MiB → 413 без строки лога (до аутентификации)", async () => {
+		const { handler, logs } = harness();
+		const raw = await fixtureBytes("deploy-failure.json");
+		const res = await handler(deployRequest(raw, "0".repeat(64), { "content-length": String(MAX_BODY_BYTES + 1) }));
+		expect(res.status).toBe(413);
+		expect(logs).toEqual([]);
+	});
+
+	test("не JSON → 400 и строка rejected с источником github", async () => {
+		const { handler, logs } = harness();
+		const raw = new TextEncoder().encode("{not json");
+		expect((await handler(deployRequest(raw))).status).toBe(400);
+		expect(logs).toEqual([
+			{ source: "github", event: "rejected", key: "-", action: "error", workItemId: null, ms: 0, error: "invalid json" },
+		]);
+	});
+
+	test("неверная форма события → 400 и rejected с текстом ошибки разбора", async () => {
+		const { handler, logs } = harness();
+		const raw = bytes({ ...(await fixture("deploy-failure.json")), environment: "preview" });
+		const res = await handler(deployRequest(raw));
+		expect(res.status).toBe(400);
+		expect(await res.text()).toBe("deploy: environment must be staging or production");
+		expect(logs[0]).toMatchObject({
+			source: "github",
+			event: "rejected",
+			error: "BadPayload: deploy: environment must be staging or production",
+		});
+	});
+
+	test("провал → сигнал срабатывания, 200, отметка «деплой» на строке события", async () => {
+		const { handler, logs, signals } = harness();
+		expect((await handler(deployRequest(await fixtureBytes("deploy-failure.json")))).status).toBe(200);
+		expect(signals).toHaveLength(1);
+		expect(signals[0]).toMatchObject({ status: "firing", source: "github", key: "deploy:monorepo:staging" });
+		expect(logs).toEqual([
+			{
+				source: "github",
+				event: "deployment.error",
+				key: "deploy:monorepo:staging",
+				action: "created",
+				workItemId: "w1",
+				ms: expect.any(Number),
+				annotation: "deploy",
+				title: "✗ monorepo → staging упал · 89abcde · bootstrap-smoke",
+				env: "staging",
+				sha: DEPLOY_SHA,
+			},
+		]);
+	});
+
+	test("успех → восстановление и заметки, строки заметок с источником github, отметка одна", async () => {
+		const { handler, logs, signals, notes } = harness({ report: async () => ({ action: "noop", workItemId: null }) });
+		expect((await handler(deployRequest(await fixtureBytes("deploy-success.json")))).status).toBe(200);
+		expect(signals[0]).toMatchObject({ status: "resolved", key: "deploy:monorepo:production" });
+		expect(notes[0]).toMatchObject({ deploymentId: `gh:production:${DEPLOY_SHA}`, source: "github", keyLimit: 50 });
+		expect(logs.filter((l) => l.annotation === "deploy")).toHaveLength(1);
+		expect(logs[0]).toMatchObject({ source: "github", event: "deployment.succeeded", annotation: "deploy" });
+		expect(logs[1]).toMatchObject({ source: "github", event: "deployment.succeeded", key: "OPS-12", action: "commented" });
+	});
+
+	test("успех без коммитов (повторный деплой того же sha) → 200 и отметка есть", async () => {
+		const { handler, logs, notes } = harness({ notes: async () => [] });
+		const raw = bytes({ ...(await fixture("deploy-success.json")), commits: [] });
+		expect((await handler(deployRequest(raw))).status).toBe(200);
+		expect(notes[0]?.texts).toEqual([]);
+		expect(logs).toHaveLength(1);
+		expect(logs[0]).toMatchObject({ annotation: "deploy", title: "monorepo → production · 89abcde" });
+	});
+
+	test("ошибка Plane → 502", async () => {
+		const { handler } = harness({
+			report: async () => {
+				throw new PlaneApiError(503, "POST", "/x/");
+			},
+		});
+		expect((await handler(deployRequest(await fixtureBytes("deploy-failure.json")))).status).toBe(502);
+	});
+
+	test("GET /hooks/deploy → 405", async () => {
+		const { handler } = harness();
+		expect((await handler(new Request(`${BASE}/hooks/deploy`))).status).toBe(405);
 	});
 });

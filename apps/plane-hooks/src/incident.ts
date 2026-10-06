@@ -1,7 +1,7 @@
 import { type PlaneApi, PlaneApiError, type Priority, type WorkItemRef } from "./plane.ts";
 import { ttl } from "./ttl.ts";
 
-export type Source = "grafana" | "vercel";
+export type Source = "grafana" | "vercel" | "github";
 export type IncidentLabel = "alert" | "deploy-failed";
 
 /**
@@ -21,6 +21,8 @@ export type IncidentSignal =
 			noteHtml: string;
 			priority: Extract<Priority, "urgent" | "high" | "medium">;
 			label: IncidentLabel;
+			/** Environment of an alert, for the Grafana annotation (spec «Отметки в Grafana»). */
+			env?: string;
 	  }
 	| {
 			status: "resolved";
@@ -30,6 +32,9 @@ export type IncidentSignal =
 			occurrence?: string;
 			at: string;
 			noteHtml: string;
+			/** Same title as the firing work item: the annotation text of the resolution. */
+			title?: string;
+			env?: string;
 	  };
 
 export type IncidentAction = "created" | "commented" | "reopened" | "noop";

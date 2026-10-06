@@ -21,6 +21,13 @@ function toSignal(alert: unknown, index: number): IncidentSignal {
 	if (fingerprint === null) throw new BadPayload(`${where} has no fingerprint`);
 	if (!isTimestamp(alert.startsAt)) throw new BadPayload(`${where} has no valid startsAt`);
 	const startsAt = alert.startsAt;
+	const labels = stringMap(alert.labels);
+	const annotations = stringMap(alert.annotations);
+	// An empty label value means "no label" in Prometheus/Grafana — hence ||, not ??.
+	const env = labels.env || "prod";
+	const name = labels.alertname || "alert";
+	const summary = annotations.summary;
+	const title = truncate(`[${env}] ${name}${summary ? `: ${summary}` : ""}`, TITLE_MAX);
 
 	if (alert.status === "resolved") {
 		if (!isTimestamp(alert.endsAt)) throw new BadPayload(`${where} is resolved without a valid endsAt`);
@@ -31,27 +38,24 @@ function toSignal(alert: unknown, index: number): IncidentSignal {
 			occurrence: startsAt,
 			at: alert.endsAt,
 			noteHtml: p(`Погас ${utc(alert.endsAt)} UTC`),
+			title,
+			env,
 		};
 	}
 	if (alert.status !== "firing") throw new BadPayload(`${where} has an unknown status`);
 
-	const labels = stringMap(alert.labels);
-	const annotations = stringMap(alert.annotations);
-	// An empty label value means "no label" in Prometheus/Grafana — hence ||, not ??.
-	const env = labels.env || "prod";
-	const name = labels.alertname || "alert";
-	const summary = annotations.summary;
 	return {
 		status: "firing",
 		source: "grafana",
 		key: fingerprint,
 		occurrence: startsAt,
 		at: startsAt,
-		title: truncate(`[${env}] ${name}${summary ? `: ${summary}` : ""}`, TITLE_MAX),
+		title,
 		bodyHtml: describeAlert(alert, labels, annotations),
 		noteHtml: p(`Сработал ${utc(startsAt)} UTC`),
 		priority: env === "staging" ? "high" : "urgent",
 		label: "alert",
+		env,
 	};
 }
 

@@ -6,6 +6,7 @@ export type Config = {
 	planeApiKey: string;
 	grafanaToken: string;
 	vercelSecret: string;
+	deploySecret: string;
 };
 
 const REQUIRED = {
@@ -15,6 +16,7 @@ const REQUIRED = {
 	planeApiKey: "PLANE_HOOKS_PLANE_API_KEY",
 	grafanaToken: "PLANE_HOOKS_GRAFANA_TOKEN",
 	vercelSecret: "PLANE_HOOKS_VERCEL_SECRET",
+	deploySecret: "PLANE_HOOKS_DEPLOY_SECRET",
 } as const;
 
 // Grafana re-parses env-substituted provisioning values through YAML type
@@ -53,5 +55,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 		planeApiKey: read(REQUIRED.planeApiKey),
 		grafanaToken,
 		vercelSecret: read(REQUIRED.vercelSecret),
+		deploySecret: read(REQUIRED.deploySecret),
 	};
 }
