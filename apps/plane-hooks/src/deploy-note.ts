@@ -1,0 +1,65 @@
+import { esc, link, p } from "./html.ts";
+import { type PlaneApi, PlaneApiError } from "./plane.ts";
+import { extractWorkItemKeys } from "./work-item-keys.ts";
+
+export type DeployTarget = "production" | "staging" | "preview";
+
+/** A successful deploy, reduced to what a work item comment needs. `texts` — branch and commit message to look for keys in. */
+export type DeployNote = {
+	deploymentId: string;
+	project: string;
+	target: DeployTarget;
+	sha?: string;
+	url: string;
+	texts: string[];
+};
+
+export type DeployNoteAction = "commented" | "noop" | "skipped";
+/** `ms` — how long this key's Plane calls took. */
+export type DeployNoteResult = { key: string; action: DeployNoteAction; workItemId: string | null; ms: number };
+
+/**
+ * «Выкачено» comment on every work item whose key (`OPS-12`) the branch or the
+ * commit message mentions (spec «Поток Vercel»). Keyed by deployment and work
+ * item, so a redelivered event adds nothing. Keys go one by one: at most 10.
+ */
+export async function postDeployNotes(
+	deps: { plane: PlaneApi; projectIdentifiers: () => Promise<ReadonlySet<string>> },
+	note: DeployNote,
+): Promise<DeployNoteResult[]> {
+	if (note.texts.length === 0) return [];
+	const keys = extractWorkItemKeys(note.texts, await deps.projectIdentifiers());
+	const results: DeployNoteResult[] = [];
+	for (const key of keys) {
+		const started = performance.now();
+		const result = await postOne(deps.plane, note, key);
+		results.push({ ...result, ms: Math.round(performance.now() - started) });
+	}
+	return results;
+}
+
+async function postOne(plane: PlaneApi, note: DeployNote, key: string): Promise<Omit<DeployNoteResult, "ms">> {
+	try {
+		const item = await plane.getWorkItemByKey(key);
+		if (item === null) return { key, action: "skipped", workItemId: null };
+		const comment = await plane.createComment(item.project, item.id, {
+			comment_html: noteHtml(note),
+			external_id: `note:${note.deploymentId}:${key}`,
+			external_source: "vercel",
+		});
+		return { key, action: comment.created ? "commented" : "noop", workItemId: item.id };
+	} catch (err) {
+		// The bot is not a member of that project (403) or the item vanished (404): skip this key, keep the rest.
+		if (err instanceof PlaneApiError && (err.status === 403 || err.status === 404)) {
+			return { key, action: "skipped", workItemId: null };
+		}
+		throw err;
+	}
+}
+
+function noteHtml(note: DeployNote): string {
+	const parts = [`Выкачено: <code>${esc(note.project)}</code> → ${esc(note.target)}`];
+	if (note.sha) parts.push(`<code>${esc(note.sha.slice(0, 7))}</code>`);
+	parts.push(link(note.url, note.url) ?? esc(note.url));
+	return p(parts.join(" · "));
+}

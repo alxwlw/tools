@@ -1,0 +1,28 @@
+{
+	"id": "evt_ok_1",
+	"type": "deployment.succeeded",
+	"createdAt": 1791281400000,
+	"region": "fra1",
+	"payload": {
+		"team": { "id": "team_liq" },
+		"user": { "id": "user_1" },
+		"project": { "id": "prj_terminal" },
+		"deployment": {
+			"id": "dpl_ok1",
+			"url": "terminal-def456-liq.vercel.app",
+			"name": "terminal",
+			"meta": {
+				"githubCommitRef": "feat/ops-12-plane-hooks",
+				"githubCommitSha": "0123456789abcdef0123456789abcdef01234567",
+				"githubCommitMessage": "feat: ship [OPS-12]"
+			}
+		},
+		"links": {
+			"deployment": "https://vercel.com/liq/terminal/dpl_ok1",
+			"project": "https://vercel.com/liq/terminal"
+		},
+		"target": "production",
+		"plan": "pro",
+		"regions": ["fra1"]
+	}
+}
