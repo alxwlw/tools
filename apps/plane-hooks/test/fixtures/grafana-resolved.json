@@ -7,7 +7,7 @@
 			"status": "resolved",
 			"labels": {
 				"alertname": "ServiceDown",
-				"grafana_folder": "LiqCx",
+				"grafana_folder": "Alerts",
 				"job": "order-gateway",
 				"severity": "critical"
 			},

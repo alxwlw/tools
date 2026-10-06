@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@liqcx-infra/plane-hooks",
+      "name": "@liqu-fi-infra/plane-hooks",
       "devDependencies": {
         "@types/bun": "^1.3.0",
         "typescript": "^5.9.0",
