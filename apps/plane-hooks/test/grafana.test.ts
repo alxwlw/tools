@@ -35,7 +35,7 @@ describe("parseGrafanaWebhook: срабатывание", () => {
 		expect(body).toContain("<p>order-gateway is down</p>");
 		expect(body).toContain("<p>up == 0 for 2m</p>");
 		expect(body).toContain("<li><code>job</code>: order-gateway</li>");
-		expect(body).toContain('<a href="https://grafana.hype.cheap/alerting/grafana/abc/view?orgId=1">Правило</a>');
+		expect(body).toContain('<a href="https://grafana.liqu.si/alerting/grafana/abc/view?orgId=1">Правило</a>');
 		expect(body).toContain("alertmanager=grafana&amp;matcher=alertname%3DServiceDown");
 		expect(body).toContain(">Runbook</a>");
 		expect(body).not.toContain("Дашборд");

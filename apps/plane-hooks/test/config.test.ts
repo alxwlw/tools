@@ -3,7 +3,7 @@ import { loadConfig } from "../src/config.ts";
 
 const TOKEN = `ph_${"0a".repeat(24)}`;
 const valid = {
-	PLANE_HOOKS_PLANE_URL: "https://plane.hype.cheap/",
+	PLANE_HOOKS_PLANE_URL: "https://plane.liqu.si/",
 	PLANE_HOOKS_WORKSPACE: "liq-egn",
 	PLANE_HOOKS_PROJECT_ID: "11111111-2222-3333-4444-555555555555",
 	PLANE_HOOKS_PLANE_API_KEY: "plane_api_secret_value",
@@ -25,7 +25,7 @@ describe("loadConfig", () => {
 	test("полный набор: порт по умолчанию, URL без завершающего слэша", () => {
 		expect(loadConfig(valid)).toEqual({
 			port: 8080,
-			planeUrl: "https://plane.hype.cheap",
+			planeUrl: "https://plane.liqu.si",
 			workspace: "liq-egn",
 			projectId: "11111111-2222-3333-4444-555555555555",
 			planeApiKey: "plane_api_secret_value",
@@ -60,7 +60,7 @@ describe("loadConfig", () => {
 	});
 
 	test("ID проекта не UUID (вставлен URL проекта) — ошибка с именем переменной, без значения", () => {
-		const url = "plane.hype.cheap/liq-egn/projects/11111111-2222-3333-4444-555555555555/issues/";
+		const url = "plane.liqu.si/liq-egn/projects/11111111-2222-3333-4444-555555555555/issues/";
 		for (const bad of [url, `https://${url}`, "OPS", "11111111-2222-3333-4444-55555555555"]) {
 			const text = message({ ...valid, PLANE_HOOKS_PROJECT_ID: bad });
 			expect(text).toBe(
@@ -82,7 +82,7 @@ describe("loadConfig", () => {
 	});
 
 	test("URL Plane без схемы — ошибка", () => {
-		expect(message({ ...valid, PLANE_HOOKS_PLANE_URL: "plane.hype.cheap" })).toContain("PLANE_HOOKS_PLANE_URL");
+		expect(message({ ...valid, PLANE_HOOKS_PLANE_URL: "plane.liqu.si" })).toContain("PLANE_HOOKS_PLANE_URL");
 	});
 });
 
