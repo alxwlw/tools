@@ -2,6 +2,7 @@ import { loadConfig } from "./config.ts";
 import { postDeployNotes } from "./deploy-note.ts";
 import { createIncidentReporter } from "./incident.ts";
 import { PlaneClient } from "./plane.ts";
+import { publishRelease } from "./release.ts";
 import { MAX_BODY_BYTES, createHandler, describeError, text } from "./server.ts";
 import { ttl } from "./ttl.ts";
 
@@ -35,6 +36,7 @@ const server = Bun.serve({
 		deploySecret: config.deploySecret,
 		incidents: createIncidentReporter({ plane, projectId: config.projectId }),
 		deployNotes: (note) => postDeployNotes({ plane, projectIdentifiers }, note),
+		releases: (draft, items) => publishRelease({ plane }, draft, items),
 		log,
 	}),
 });

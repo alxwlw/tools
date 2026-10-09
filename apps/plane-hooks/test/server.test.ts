@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
-import type { DeployNote, DeployNoteResult } from "../src/deploy-note.ts";
+import type { DeployNote, DeployNoteResult, ReleaseDraft } from "../src/deploy-note.ts";
 import type { IncidentResult, IncidentSignal } from "../src/incident.ts";
 import { PlaneApiError } from "../src/plane.ts";
+import type { ReleaseItem, ReleaseResult } from "../src/release.ts";
 import { createHandler, type LogEntry, MAX_BODY_BYTES } from "../src/server.ts";
 import { fixture, fixtureBytes } from "./fixtures.ts";
 
@@ -16,12 +17,15 @@ const BASE = "http://plane-hooks:8080";
 type Options = {
 	report?: (signal: IncidentSignal) => Promise<IncidentResult>;
 	notes?: (note: DeployNote) => Promise<DeployNoteResult[]>;
+	releases?: (draft: ReleaseDraft, items: ReleaseItem[]) => Promise<ReleaseResult>;
 };
 
 function harness(options: Options = {}) {
 	const signals: IncidentSignal[] = [];
 	const notes: DeployNote[] = [];
 	const logs: LogEntry[] = [];
+	const releases: { draft: ReleaseDraft; items: ReleaseItem[] }[] = [];
+	const order: string[] = [];
 	const handler = createHandler({
 		grafanaToken: TOKEN,
 		vercelSecret: SECRET,
@@ -33,12 +37,18 @@ function harness(options: Options = {}) {
 			},
 		},
 		deployNotes: async (note) => {
+			order.push("notes");
 			notes.push(note);
 			return options.notes ? options.notes(note) : [{ key: "OPS-12", action: "commented", workItemId: "w12", ms: 3 }];
 		},
+		releases: async (draft, items) => {
+			order.push("release");
+			releases.push({ draft, items });
+			return options.releases ? options.releases(draft, items) : { action: "created", releaseId: "r1" };
+		},
 		log: (entry) => logs.push(entry),
 	});
-	return { handler, signals, notes, logs };
+	return { handler, signals, notes, logs, releases, order };
 }
 
 function grafana(body: string | Uint8Array, authorization: string | null = `Bearer ${TOKEN}`): Request {
@@ -656,7 +666,8 @@ describe("/hooks/deploy", () => {
 		const raw = bytes({ ...(await fixture("deploy-success.json")), commits: [] });
 		expect((await handler(deployRequest(raw))).status).toBe(200);
 		expect(notes[0]?.texts).toEqual([]);
-		expect(logs).toHaveLength(1);
+		expect(logs).toHaveLength(2);
+		expect(logs[1]).toMatchObject({ event: "release", action: "created" });
 		expect(logs[0]).toMatchObject({ annotation: "deploy", title: "monorepo → production · 89abcde" });
 	});
 
@@ -667,6 +678,70 @@ describe("/hooks/deploy", () => {
 			},
 		});
 		expect((await handler(deployRequest(await fixtureBytes("deploy-failure.json")))).status).toBe(502);
+	});
+
+	test("прод-успех → релиз после заметок, с id задач из заметок; строка release в логе", async () => {
+		const { handler, logs, releases, order } = harness({
+			notes: async () => [
+				{ key: "OPS-12", action: "commented", workItemId: "w12", ms: 1 },
+				{ key: "MONO-3", action: "skipped", workItemId: null, ms: 1 },
+				{ key: "OPS-13", action: "noop", workItemId: "w13", ms: 1 },
+			],
+		});
+		expect((await handler(deployRequest(await fixtureBytes("deploy-success.json")))).status).toBe(200);
+		expect(order).toEqual(["notes", "release"]);
+		expect(releases).toHaveLength(1);
+		expect(releases[0]?.draft).toMatchObject({ repository: "liqu-fi/monorepo", sha: DEPLOY_SHA });
+		expect(releases[0]?.items).toEqual([
+			{ key: "OPS-12", workItemId: "w12" },
+			{ key: "OPS-13", workItemId: "w13" },
+		]);
+		expect(logs.at(-1)).toEqual({
+			source: "github",
+			event: "release",
+			key: `release:liqu-fi/monorepo@${DEPLOY_SHA}`,
+			action: "created",
+			workItemId: null,
+			ms: expect.any(Number),
+			releaseId: "r1",
+		});
+	});
+
+	test("staging-успех → релиза нет", async () => {
+		const { handler, releases } = harness();
+		const raw = bytes({ ...(await fixture("deploy-success.json")), environment: "staging" });
+		expect((await handler(deployRequest(raw))).status).toBe(200);
+		expect(releases).toEqual([]);
+	});
+
+	test("сбой релиза (403) → 200, «Выкачено» на месте, строка release с level warn", async () => {
+		const { handler, logs } = harness({
+			releases: async () => {
+				throw new PlaneApiError(403, "POST", "/releases/");
+			},
+		});
+		expect((await handler(deployRequest(await fixtureBytes("deploy-success.json")))).status).toBe(200);
+		expect(logs.some((l) => l.key === "OPS-12" && l.action === "commented")).toBe(true);
+		expect(logs.at(-1)).toEqual({
+			source: "github",
+			event: "release",
+			key: `release:liqu-fi/monorepo@${DEPLOY_SHA}`,
+			action: "error",
+			workItemId: null,
+			ms: expect.any(Number),
+			level: "warn",
+			error: "PlaneApiError: Plane POST /releases/ → 403",
+		});
+	});
+
+	test("сбой заметок → 502, релиз не трогается", async () => {
+		const { handler, releases } = harness({
+			notes: async () => {
+				throw new PlaneApiError(503, "POST", "/x/");
+			},
+		});
+		expect((await handler(deployRequest(await fixtureBytes("deploy-success.json")))).status).toBe(502);
+		expect(releases).toEqual([]);
 	});
 
 	test("GET /hooks/deploy → 405", async () => {

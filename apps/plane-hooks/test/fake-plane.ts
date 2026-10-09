@@ -2,6 +2,7 @@ import {
 	type CommentSummary,
 	type LabelSummary,
 	type NewComment,
+	type NewRelease,
 	type NewWorkItem,
 	type PlaneApi,
 	PlaneApiError,
@@ -27,9 +28,14 @@ import {
  * Duplicate checks are read-then-insert with a yield in between — like Plane's
  * own view code — so concurrent calls race here exactly as they would in prod.
  * listComments answers newest first: callers must not rely on list order.
+ *
+ * Releases: whether Plane answers 409 to a duplicate release external_id is not probed, so createRelease always
+ * creates — a caller that skips findReleaseByExternalId gets a second release here, as it might in prod.
  */
 export type FakeWorkItem = NewWorkItem & { id: string; project: string; sequence: number; state: string };
 export type FakeComment = NewComment & { id: string; project: string; workItemId: string; created_at: string };
+
+export type FakeRelease = NewRelease & { id: string; changelog: string; workItemIds: string[] };
 
 export const STATES: StateSummary[] = [
 	{ id: "st-backlog", group: "backlog", default: true },
@@ -43,6 +49,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 export class FakePlane implements PlaneApi {
 	readonly workItems: FakeWorkItem[] = [];
 	readonly comments: FakeComment[] = [];
+	readonly releases: FakeRelease[] = [];
 	readonly labels = new Map<string, LabelSummary[]>();
 	readonly calls: string[] = [];
 	readonly forbiddenProjects = new Set<string>();
@@ -196,6 +203,31 @@ export class FakePlane implements PlaneApi {
 		return label;
 	}
 
+	async findReleaseByExternalId(source: string, externalId: string): Promise<{ id: string } | null> {
+		this.#enter("findReleaseByExternalId");
+		const found = this.releases.find((r) => r.external_source === source && r.external_id === externalId);
+		return found ? { id: found.id } : null;
+	}
+
+	async createRelease(release: NewRelease): Promise<Upsert> {
+		this.#enter("createRelease");
+		await tick();
+		const created: FakeRelease = { ...release, id: `r${++this.#sequence}`, changelog: "", workItemIds: [] };
+		this.releases.push(created);
+		return { id: created.id, created: true };
+	}
+
+	async updateReleaseChangelog(releaseId: string, html: string): Promise<void> {
+		this.#enter("updateReleaseChangelog");
+		this.#release(releaseId).changelog = html;
+	}
+
+	async addReleaseWorkItems(releaseId: string, workItemIds: readonly string[]): Promise<void> {
+		this.#enter("addReleaseWorkItems");
+		const release = this.#release(releaseId);
+		for (const id of workItemIds) if (!release.workItemIds.includes(id)) release.workItemIds.push(id);
+	}
+
 	#enter(method: keyof PlaneApi, projectId?: string): void {
 		this.calls.push(method);
 		const failure = this.#failures.get(method);
@@ -206,6 +238,12 @@ export class FakePlane implements PlaneApi {
 		if (projectId !== undefined && this.forbiddenProjects.has(projectId)) {
 			throw new PlaneApiError(403, "FAKE", method);
 		}
+	}
+
+	#release(releaseId: string): FakeRelease {
+		const release = this.releases.find((r) => r.id === releaseId);
+		if (!release) throw new PlaneApiError(404, "FAKE", `/releases/${releaseId}/`);
+		return release;
 	}
 
 	#item(projectId: string, workItemId: string): FakeWorkItem {

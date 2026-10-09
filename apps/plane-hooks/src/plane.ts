@@ -18,6 +18,15 @@ export type NewComment = {
 	external_source: string;
 };
 
+export type NewRelease = {
+	name: string;
+	status: "released";
+	/** YYYY-MM-DD — what the Plane UI labels "Target date". */
+	release_date: string;
+	external_source: string;
+	external_id: string;
+};
+
 /** `created: false` — Plane answered 409: an object with this external_id already exists, and `id` is that object. */
 export type Upsert = { id: string; created: boolean };
 
@@ -29,6 +38,7 @@ export type LabelSummary = { id: string; name: string };
 /**
  * The Plane calls plane-hooks makes — spec «Контракт с API Plane», verified by
  * scripts/probe-plane.ts. Project-scoped calls take the project id explicitly.
+ * Releases are workspace-level: no project id.
  */
 export interface PlaneApi {
 	createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert>;
@@ -43,6 +53,12 @@ export interface PlaneApi {
 	listStates(projectId: string): Promise<StateSummary[]>;
 	listLabels(projectId: string): Promise<LabelSummary[]>;
 	createLabel(projectId: string, name: string): Promise<LabelSummary>;
+	/** Workspace-level. The list documents no external_id filter, so this scans every page. */
+	findReleaseByExternalId(source: string, externalId: string): Promise<{ id: string } | null>;
+	createRelease(release: NewRelease): Promise<Upsert>;
+	updateReleaseChangelog(releaseId: string, html: string): Promise<void>;
+	/** 0 ids — no request; more than RELEASE_ITEMS_MAX — RangeError before any request. */
+	addReleaseWorkItems(releaseId: string, workItemIds: readonly string[]): Promise<void>;
 }
 
 /** A non-2xx answer the call did not expect. Carries no response body: bodies can echo payload data into logs. */
@@ -76,6 +92,8 @@ export const PLANE_RATE_MAX = 50;
 export const PLANE_RATE_WINDOW_MS = 60_000;
 const MAX_PAGES = 50;
 const LABEL_COLOR = "#d9534f";
+/** Plane takes at most this many work item ids in one attach call. */
+export const RELEASE_ITEMS_MAX = 100;
 
 export class PlaneClient implements PlaneApi {
 	readonly #root: string;
@@ -151,6 +169,29 @@ export class PlaneClient implements PlaneApi {
 	async createLabel(projectId: string, name: string): Promise<LabelSummary> {
 		const res = await this.#request("POST", `/projects/${projectId}/labels/`, { name, color: LABEL_COLOR });
 		return { id: field(res.body, "id"), name: field(res.body, "name") };
+	}
+
+	async findReleaseByExternalId(source: string, externalId: string): Promise<{ id: string } | null> {
+		const found = (await this.#listAll("/releases/")).find(
+			(row) => row.external_source === source && row.external_id === externalId,
+		);
+		return found ? { id: field(found, "id") } : null;
+	}
+
+	createRelease(release: NewRelease): Promise<Upsert> {
+		return this.#upsert("/releases/", release);
+	}
+
+	async updateReleaseChangelog(releaseId: string, html: string): Promise<void> {
+		await this.#request("PATCH", `/releases/${releaseId}/changelog/`, { description_html: html });
+	}
+
+	async addReleaseWorkItems(releaseId: string, workItemIds: readonly string[]): Promise<void> {
+		if (workItemIds.length === 0) return;
+		if (workItemIds.length > RELEASE_ITEMS_MAX) {
+			throw new RangeError(`at most ${RELEASE_ITEMS_MAX} work items per attach call, got ${workItemIds.length}`);
+		}
+		await this.#request("POST", `/releases/${releaseId}/work-items/`, { work_item_ids: workItemIds });
 	}
 
 	async #upsert(path: string, body: unknown): Promise<Upsert> {

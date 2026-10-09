@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type NewWorkItem, PlaneApiError, PlaneClient } from "../src/plane.ts";
+import { type NewRelease, type NewWorkItem, PlaneApiError, PlaneClient, RELEASE_ITEMS_MAX } from "../src/plane.ts";
 
 type Reply = { status: number; body?: unknown; raw?: string };
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
@@ -255,5 +255,93 @@ describe("ограничитель темпа", () => {
 			},
 		});
 		await expect(client.listStates("p-ops")).resolves.toEqual([]);
+	});
+});
+
+const release: NewRelease = {
+	name: "2026-10-06 · 89abcde",
+	status: "released",
+	release_date: "2026-10-06",
+	external_source: "github-deploy",
+	external_id: "liqu-fi/monorepo@89abcdef0123456789abcdef0123456789abcdef",
+};
+
+describe("PlaneClient: релизы", () => {
+	test("поиск по external_id идёт по всем страницам списка релизов workspace", async () => {
+		const { calls, client } = stub([
+			{
+				status: 200,
+				body: {
+					results: [{ id: "r1", external_source: "github-deploy", external_id: "liqu-fi/monorepo@other" }],
+					next_page_results: true,
+					next_cursor: "100:1:0",
+				},
+			},
+			{
+				status: 200,
+				body: {
+					results: [
+						{ id: "r9", external_source: null, external_id: null },
+						{ id: "r2", external_source: "github-deploy", external_id: release.external_id },
+					],
+					next_page_results: false,
+				},
+			},
+		]);
+		expect(await client.findReleaseByExternalId("github-deploy", release.external_id)).toEqual({ id: "r2" });
+		expect(calls[0]?.url).toBe(`${ROOT}/releases/?per_page=100`);
+		expect(calls[1]?.url).toBe(`${ROOT}/releases/?per_page=100&cursor=100%3A1%3A0`);
+	});
+
+	test("поиск: совпадает только пара source + id", async () => {
+		const { client } = stub([
+			{ status: 200, body: [{ id: "r1", external_source: "manual", external_id: release.external_id }] },
+		]);
+		expect(await client.findReleaseByExternalId("github-deploy", release.external_id)).toBeNull();
+	});
+
+	test("создание: POST /releases/, 201 → created:true; 409 → id существующего", async () => {
+		const { calls, client } = stub([
+			{ status: 201, body: { id: "r1" } },
+			{ status: 409, body: { error: "exists", id: "r1" } },
+		]);
+		expect(await client.createRelease(release)).toEqual({ id: "r1", created: true });
+		expect(calls[0]).toMatchObject({ url: `${ROOT}/releases/`, method: "POST", body: release });
+		expect(await client.createRelease(release)).toEqual({ id: "r1", created: false });
+	});
+
+	test("changelog: PATCH /releases/{id}/changelog/ с description_html", async () => {
+		const { calls, client } = stub([{ status: 200, body: { id: "c1" } }]);
+		await client.updateReleaseChangelog("r1", "<p>x</p>");
+		expect(calls[0]).toMatchObject({
+			url: `${ROOT}/releases/r1/changelog/`,
+			method: "PATCH",
+			body: { description_html: "<p>x</p>" },
+		});
+	});
+
+	test("привязка задач: POST /releases/{id}/work-items/ с work_item_ids", async () => {
+		const { calls, client } = stub([{ status: 200, body: null }]);
+		await client.addReleaseWorkItems("r1", ["w1", "w2"]);
+		expect(calls[0]).toMatchObject({
+			url: `${ROOT}/releases/r1/work-items/`,
+			method: "POST",
+			body: { work_item_ids: ["w1", "w2"] },
+		});
+	});
+
+	test("привязка: пустой список — ни одного запроса; больше лимита — RangeError до запроса", async () => {
+		const { calls, client } = stub([]);
+		await client.addReleaseWorkItems("r1", []);
+		const many = Array.from({ length: RELEASE_ITEMS_MAX + 1 }, (_, i) => `w${i}`);
+		expect(await failure(client.addReleaseWorkItems("r1", many))).toBeInstanceOf(RangeError);
+		expect(calls).toEqual([]);
+	});
+
+	test("403 на релизы (токен — Guest) → PlaneApiError 403", async () => {
+		const { client } = stub([{ status: 403, body: { detail: "forbidden" } }]);
+		const err = await failure(client.createRelease(release));
+		expect(err).toBeInstanceOf(PlaneApiError);
+		expect((err as PlaneApiError).status).toBe(403);
 	});
 });

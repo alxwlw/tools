@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { DEPLOY_SIGNATURE_HEADER, isDeploySignatureShaped, parseDeployEvent, verifyDeploySignature } from "./deploy-event.ts";
-import type { DeployNote, DeployNoteResult, DeployOutcome } from "./deploy-note.ts";
+import type { DeployNote, DeployNoteResult, DeployOutcome, ReleaseDraft } from "./deploy-note.ts";
 import { parseGrafanaWebhook } from "./grafana.ts";
 import type { IncidentReporter, IncidentSignal, Source } from "./incident.ts";
 import { BadPayload } from "./payload.ts";
+import { type ReleaseItem, type ReleaseResult, releaseExternalId } from "./release.ts";
 import { isVercelSignatureShaped, parseVercelWebhook, verifyVercelSignature } from "./vercel.ts";
 
 export const MAX_BODY_BYTES = 1_048_576;
@@ -28,6 +29,9 @@ export type LogEntry = {
 	title?: string;
 	env?: string;
 	sha?: string;
+	/** `warn` — the event was served, but a non-essential part failed (the Plane release of a deploy). */
+	level?: "warn";
+	releaseId?: string;
 	error?: string;
 };
 
@@ -39,6 +43,7 @@ export type ServerDeps = {
 	deploySecret: string;
 	incidents: IncidentReporter;
 	deployNotes: (note: DeployNote) => Promise<DeployNoteResult[]>;
+	releases: (draft: ReleaseDraft, items: ReleaseItem[]) => Promise<ReleaseResult>;
 	log: (entry: LogEntry) => void;
 };
 
@@ -90,6 +95,31 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 		return failed === 0 ? text(200, "ok") : text(502, `plane: ${failed} of ${signals.length} alerts failed`);
 	}
 
+	/**
+	 * The Plane release of a production deploy, after its notes: the work item ids come from their results, with no
+	 * second lookup by key. A failure is a warn line, never a 502 — CI would resend the whole event for it.
+	 */
+	async function release(source: "vercel" | "github", draft: ReleaseDraft, notes: readonly DeployNoteResult[]): Promise<void> {
+		const started = performance.now();
+		const key = `release:${releaseExternalId(draft)}`;
+		const items = notes.flatMap((note) => (note.workItemId === null ? [] : [{ key: note.key, workItemId: note.workItemId }]));
+		try {
+			const result = await deps.releases(draft, items);
+			deps.log({ source, event: "release", key, action: result.action, workItemId: null, ms: since(started), releaseId: result.releaseId });
+		} catch (err) {
+			deps.log({
+				source,
+				event: "release",
+				key,
+				action: "error",
+				workItemId: null,
+				ms: since(started),
+				level: "warn",
+				error: describeError(err),
+			});
+		}
+	}
+
 	/** One deploy, from Vercel or from CI. Its incident line carries the deploy annotation whatever the action: every deploy is a mark. */
 	async function deploy(source: "vercel" | "github", outcome: DeployOutcome): Promise<Response> {
 		const { summary } = outcome;
@@ -99,9 +129,11 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 		}
 		if (!(await reportLogged(outcome.resolve, "deployment.succeeded", annotate))) return text(502, "plane failed");
 		const started = performance.now();
+		let results: DeployNoteResult[] = [];
 		try {
 			// deployNotes has finished every Plane call before this loop starts: each key's own duration comes with its result.
-			for (const result of await deps.deployNotes(outcome.note)) {
+			results = await deps.deployNotes(outcome.note);
+			for (const result of results) {
 				deps.log({
 					source,
 					event: "deployment.succeeded",
@@ -111,7 +143,6 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 					ms: result.ms,
 				});
 			}
-			return text(200, "ok");
 		} catch (err) {
 			deps.log({
 				source,
@@ -124,6 +155,8 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			});
 			return text(502, "plane failed");
 		}
+		if (outcome.release) await release(source, outcome.release, results);
+		return text(200, "ok");
 	}
 
 	async function vercel(body: unknown): Promise<Response> {

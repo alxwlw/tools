@@ -20,9 +20,25 @@ export type DeployNote = {
 /** What the Grafana annotation of one deploy shows. */
 export type DeploySummary = { title: string; env: string; sha?: string };
 
+/** A deployed commit: full sha (lower case) and message, as report-deploy.sh sends it (cut to 4 KiB). */
+export type DeployCommit = { sha: string; message: string };
+
+/** One successful production deploy, reduced to what its Plane release needs (spec «plane-hooks: Release в Plane»). */
+export type ReleaseDraft = {
+	/** `liqu-fi/monorepo` */
+	repository: string;
+	/** The deployed commit, 40 hex, lower case. */
+	sha: string;
+	/** When plane-hooks took the event (ISO): the release date is its UTC day. */
+	at: string;
+	runUrl: string;
+	/** Newest first, as report-deploy.sh sends them; commits[0] is the deployed commit when it carries any. */
+	commits: DeployCommit[];
+};
+
 export type DeployOutcome =
 	| { kind: "failed"; signal: IncidentSignal; summary: DeploySummary }
-	| { kind: "succeeded"; resolve: IncidentSignal; note: DeployNote; summary: DeploySummary };
+	| { kind: "succeeded"; resolve: IncidentSignal; note: DeployNote; summary: DeploySummary; release?: ReleaseDraft };
 
 export type DeployNoteAction = "commented" | "noop" | "skipped";
 /** `ms` — how long this key's Plane calls took. */

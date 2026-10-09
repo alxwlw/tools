@@ -4,6 +4,7 @@
  * docs/superpowers/specs/2026-10-06-plane-hooks-design.md, «Контракт с API Plane».
  *
  * Creates one throwaway work item (and one label) in PLANE_HOOKS_PROJECT_ID,
+ * one throwaway release in the workspace,
  * exercises every call, prints «вызов — ожидание — факт» and deletes what it
  * created. Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
  *
@@ -11,8 +12,20 @@
  * docs/runbooks/plane-integrations.md, «Первичная настройка», шаг 2.
  */
 
+import type { ReleaseDraft } from "../src/deploy-note.ts";
+import { changelogHtml } from "../src/release.ts";
+
 // A module, so top-level await type-checks.
 export {};
+
+// Changelog markup of the real shape (<h3>/<ul>/<li>/<a href>/<code>); the <script> must come out escaped.
+const probeDraft: ReleaseDraft = {
+	repository: "liqu-fi/monorepo",
+	sha: "0123456789abcdef0123456789abcdef01234567",
+	at: new Date().toISOString(),
+	runUrl: "https://github.com/liqu-fi/monorepo/actions/runs/1",
+	commits: [{ sha: "0123456789abcdef0123456789abcdef01234567", message: "probe <script>alert(1)</script>\n\nbody" }],
+};
 
 const REQUIRED = [
 	"PLANE_HOOKS_PLANE_URL",
@@ -75,6 +88,7 @@ function row(n: string, what: string, expected: string, actual: string, ok: bool
 
 let itemId: string | null = null;
 let labelId: string | null = null;
+let releaseId: string | null = null;
 
 try {
 	const projects = await call("GET", `${base}/projects/`);
@@ -198,9 +212,69 @@ try {
 	);
 	const byKeyMissing = await call("GET", `${base}/work-items/${identifier}-999999/`);
 	row("7", "GET /work-items/{KEY}-999999/", "404", `${byKeyMissing.status}`, byKeyMissing.status === 404);
+
+	const releaseTag = `${tag}-release`;
+	const newRelease = await call("POST", `${base}/releases/`, {
+		name: `plane-hooks probe ${tag}`,
+		status: "released",
+		release_date: new Date().toISOString().slice(0, 10),
+		external_source: SOURCE,
+		external_id: releaseTag,
+	});
+	releaseId = typeof newRelease.body?.id === "string" ? newRelease.body.id : null;
+	row("10", "POST /releases/ с external_id", "201 {id}", `${newRelease.status}`, newRelease.status === 201 && releaseId !== null);
+
+	// For the record only: plane-hooks looks a release up before creating it, whatever Plane answers here.
+	const duplicateRelease = await call("POST", `${base}/releases/`, {
+		name: "plane-hooks probe duplicate",
+		external_source: SOURCE,
+		external_id: releaseTag,
+	});
+	const duplicateId = typeof duplicateRelease.body?.id === "string" ? duplicateRelease.body.id : null;
+	row(
+		"10",
+		"POST /releases/ повтор (сведения)",
+		"409 — Plane держит уникальность; 201 — нет",
+		`${duplicateRelease.status}, id ${duplicateId === releaseId ? "совпал" : "другой"}`,
+		true,
+	);
+	if (duplicateId !== null && duplicateId !== releaseId) {
+		const del = await call("DELETE", `${base}/releases/${duplicateId}/`);
+		row("—", "DELETE /releases/{dup}/ (уборка)", "204", `${del.status}`, del.status === 204);
+	}
+
+	const releases = await call("GET", `${base}/releases/?per_page=100`);
+	const listedRelease = rowsOf(releases.body).find((r) => r?.id === releaseId);
+	row(
+		"11",
+		"GET /releases/",
+		"200, у релиза external_source и external_id",
+		`${releases.status}, ${shapeOf(releases.body)}, external_id: ${listedRelease?.external_id ?? "—"}`,
+		releases.status === 200 && listedRelease?.external_source === SOURCE && listedRelease?.external_id === releaseTag,
+	);
+
+	const changelog = await call("PATCH", `${base}/releases/${releaseId}/changelog/`, {
+		description_html: changelogHtml(probeDraft, [{ key: "OPS-1", workItemId: "probe" }]),
+	});
+	row("12", "PATCH /releases/{id}/changelog/", "200", `${changelog.status}`, changelog.status === 200);
+
+	const attach = await call("POST", `${base}/releases/${releaseId}/work-items/`, { work_item_ids: [itemId] });
+	row("13", "POST /releases/{id}/work-items/", "2xx", `${attach.status}`, attach.status >= 200 && attach.status < 300);
+	const attachAgain = await call("POST", `${base}/releases/${releaseId}/work-items/`, { work_item_ids: [itemId] });
+	row(
+		"13",
+		"POST /releases/{id}/work-items/ повтор",
+		"2xx (уже привязана — не ошибка)",
+		`${attachAgain.status}`,
+		attachAgain.status >= 200 && attachAgain.status < 300,
+	);
 } catch (err) {
 	row("—", "сеть / разбор", "ответ Plane", err instanceof Error ? `${err.name}: ${err.message}` : String(err), false);
 } finally {
+	if (releaseId) {
+		const del = await call("DELETE", `${base}/releases/${releaseId}/`).catch(() => ({ status: 0, body: null }));
+		row("—", "DELETE /releases/{id}/ (уборка)", "204", `${del.status}`, del.status === 204);
+	}
 	if (itemId) {
 		const del = await call("DELETE", `${project}/work-items/${itemId}/`).catch(() => ({ status: 0, body: null }));
 		row("—", "DELETE /work-items/{id}/ (уборка)", "204", `${del.status}`, del.status === 204);

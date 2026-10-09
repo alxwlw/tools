@@ -113,6 +113,17 @@ describe("успех", () => {
 				keyLimit: 50,
 			},
 			summary: { title: "monorepo → production · 89abcde", env: "production", sha: SHA },
+			release: {
+				repository: "liqu-fi/monorepo",
+				sha: SHA,
+				at: "2026-10-06T12:00:00.000Z",
+				runUrl: RUN_OK,
+				commits: [
+					{ sha: SHA, message: "Merge pull request #830 from liqu-fi/staging\n\nrelease" },
+					{ sha: "1".repeat(40), message: "feat(gateway): [OPS-12] faster fills (#829)\n\nbody" },
+					{ sha: "2".repeat(40), message: "fix(settler): [MONO-3] <script>x</script> (#828)" },
+				],
+			},
 		});
 	});
 
@@ -132,6 +143,21 @@ describe("успех", () => {
 		const ev = await parse("deploy-success.json", (b) => (b.commits = Array.from({ length: 200 }, () => ({ sha: SHA, message: "m" }))));
 		if (ev.kind !== "succeeded") throw new Error("expected succeeded");
 		expect(ev.note.texts).toHaveLength(200);
+	});
+
+	test("staging — без черновика релиза", async () => {
+		const ev = await parse("deploy-success.json", (b) => (b.environment = "staging"));
+		if (ev.kind !== "succeeded") throw new Error("expected succeeded");
+		expect(ev.release).toBeUndefined();
+		expect("release" in ev).toBe(false);
+	});
+
+	test("sha коммитов в черновике — в нижнем регистре, тексты заметок — те же сообщения", async () => {
+		const ev = await parse("deploy-success.json", (b) => (b.commits[1].sha = "A".repeat(40)));
+		if (ev.kind !== "succeeded") throw new Error("expected succeeded");
+		if (!ev.release) throw new Error("expected release");
+		expect(ev.release.commits[1]?.sha).toBe("a".repeat(40));
+		expect(ev.note.texts).toEqual(ev.release.commits.map((c) => c.message));
 	});
 });
 

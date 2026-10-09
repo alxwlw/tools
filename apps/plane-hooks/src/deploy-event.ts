@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { DeployOutcome } from "./deploy-note.ts";
+import type { DeployCommit, DeployOutcome } from "./deploy-note.ts";
 import { esc, link, p, truncate, utc } from "./html.ts";
 import { BadPayload, isRecord } from "./payload.ts";
 
@@ -31,7 +31,7 @@ export function verifyDeploySignature(raw: Uint8Array, header: string | null, se
 /**
  * A backend deploy reported by the monorepo's `report-deploy` CI job (spec «Событие из CI»).
  * failure opens or extends the incident of that environment; success resolves it and carries
- * the deploy notes for at most `keyLimit` (50) keys of the deployed commits, only keys with a known project prefix. Error messages never quote the body.
+ * the deploy notes for at most `keyLimit` (50) keys of the deployed commits, only keys with a known project prefix. A production success also carries the release draft. Error messages never quote the body.
  */
 export function parseDeployEvent(body: unknown, now: () => Date = () => new Date()): DeployOutcome {
 	if (!isRecord(body)) throw new BadPayload("deploy: body is not an object");
@@ -79,6 +79,7 @@ export function parseDeployEvent(body: unknown, now: () => Date = () => new Date
 	if (body.outcome !== "success") throw new BadPayload("deploy: outcome must be success or failure");
 	if (body.stage !== null && body.stage !== undefined) throw new BadPayload("deploy: success must have stage null");
 
+	const commits = commitList(body.commits);
 	return {
 		kind: "succeeded",
 		resolve: {
@@ -94,11 +95,13 @@ export function parseDeployEvent(body: unknown, now: () => Date = () => new Date
 			target: environment,
 			sha,
 			url: runUrl,
-			texts: commitMessages(body.commits),
+			texts: commits.map((commit) => commit.message),
 			source: "github",
 			keyLimit: KEY_LIMIT,
 		},
 		summary: { title: `${project} → ${environment} · ${sha7}`, env: environment, sha },
+		// A Plane release per production deploy (spec «plane-hooks: Release в Plane»); staging gets none.
+		...(environment === "production" ? { release: { repository, sha, at, runUrl, commits } } : {}),
 	};
 }
 
@@ -109,7 +112,7 @@ function shaped(body: Record<string, unknown>, name: string, shape: RegExp): str
 	return value;
 }
 
-function commitMessages(value: unknown): string[] {
+function commitList(value: unknown): DeployCommit[] {
 	if (!Array.isArray(value)) throw new BadPayload("deploy: commits must be an array");
 	if (value.length > MAX_COMMITS) throw new BadPayload(`deploy: more than ${MAX_COMMITS} commits`);
 	return value.map((commit, i) => {
@@ -117,6 +120,6 @@ function commitMessages(value: unknown): string[] {
 			throw new BadPayload(`deploy: commits[${i}] must be {sha: 40 hex, message: string}`);
 		}
 		if (commit.message.length > MAX_MESSAGE) throw new BadPayload(`deploy: commits[${i}].message is too long`);
-		return commit.message;
+		return { sha: commit.sha.toLowerCase(), message: commit.message };
 	});
 }
