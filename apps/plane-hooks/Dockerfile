@@ -5,6 +5,8 @@ FROM oven/bun:1.4.2-alpine
 WORKDIR /app
 COPY tsconfig.json ./
 COPY src ./src
+# scripts/ stays: runbooks run replay.ts and probe-plane.ts through docker exec.
+COPY scripts ./scripts
 
 USER bun
 EXPOSE 8080

@@ -263,6 +263,17 @@ describe('архивная задача (проверка дубля её вид
 		expect(unarchives()).toBe(1);
 	});
 
+	test('архивная закрытая задача с маркером этой доставки: unarchive один раз раньше проверки маркера, noop', async () => {
+		const id = await archivedIncident();
+		const before = plane.calls.length;
+		expect(await incidents.report(firing())).toEqual({ action: 'noop', workItemId: id });
+		const calls = plane.calls.slice(before);
+		expect(unarchives()).toBe(1);
+		expect(calls.indexOf('unarchiveWorkItem')).toBeGreaterThan(-1);
+		expect(calls.indexOf('unarchiveWorkItem')).toBeLessThan(calls.lastIndexOf('listComments'));
+		expect(plane.archived.has(id)).toBe(false);
+	});
+
 	test('ответ потерян после unarchive: повтор доставки доводит до reopened и одного маркера', async () => {
 		plane = new LostUnarchiveAckPlane();
 		incidents = createIncidentReporter({ plane, projectId: 'p-ops' });
