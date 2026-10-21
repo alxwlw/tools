@@ -1,2 +1,7 @@
 node_modules
 test
+scripts
+Dockerfile
+.dockerignore
+README.md
+moon.yml
