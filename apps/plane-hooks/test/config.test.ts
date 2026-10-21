@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { loadConfig } from '../src/config.ts';
+import { enabledInputs, loadConfig } from '../src/config.ts';
 
 const TOKEN = `ph_${'0a'.repeat(24)}`;
 const valid = {
@@ -11,6 +11,10 @@ const valid = {
 	PLANE_HOOKS_VERCEL_SECRET: 'vercel_secret_value',
 	PLANE_HOOKS_DEPLOY_SECRET: 'deploy_secret_value',
 };
+
+function omit(env: Record<string, string>, ...names: string[]): Record<string, string> {
+	return Object.fromEntries(Object.entries(env).filter(([name]) => !names.includes(name)));
+}
 
 function message(env: Record<string, string | undefined>): string {
 	try {
@@ -49,8 +53,8 @@ describe('loadConfig', () => {
 
 	test('нет переменных — все имена в одном сообщении', () => {
 		expect(
-			message({ ...valid, PLANE_HOOKS_PLANE_API_KEY: undefined, PLANE_HOOKS_VERCEL_SECRET: '  ' }),
-		).toBe('plane-hooks: missing env PLANE_HOOKS_PLANE_API_KEY, PLANE_HOOKS_VERCEL_SECRET');
+			message({ ...valid, PLANE_HOOKS_PLANE_API_KEY: undefined, PLANE_HOOKS_WORKSPACE: '  ' }),
+		).toBe('plane-hooks: missing env PLANE_HOOKS_WORKSPACE, PLANE_HOOKS_PLANE_API_KEY');
 	});
 
 	test('токен Grafana не формата ph_<48 hex> — ошибка без значения в тексте', () => {
@@ -88,6 +92,48 @@ describe('loadConfig', () => {
 	test('пустой PLANE_HOOKS_DEPLOY_SECRET — сервис не стартует, ошибка называет переменную', () => {
 		const text = message({ ...valid, PLANE_HOOKS_DEPLOY_SECRET: '  ' });
 		expect(text).toContain('PLANE_HOOKS_DEPLOY_SECRET');
+	});
+
+	test('без VERCEL и DEPLOY секретов — оба null, остальное как прежде', () => {
+		expect(
+			loadConfig(omit(valid, 'PLANE_HOOKS_VERCEL_SECRET', 'PLANE_HOOKS_DEPLOY_SECRET')),
+		).toEqual({
+			port: 8080,
+			planeUrl: 'https://plane.example.com',
+			workspace: 'example-ws',
+			projectId: '11111111-2222-3333-4444-555555555555',
+			planeApiKey: 'plane_api_secret_value',
+			grafanaToken: TOKEN,
+			vercelSecret: null,
+			deploySecret: null,
+		});
+	});
+
+	test('необязательный секрет из пробелов — ошибка с именем переменной', () => {
+		for (const name of ['PLANE_HOOKS_VERCEL_SECRET', 'PLANE_HOOKS_DEPLOY_SECRET']) {
+			const text = message({ ...valid, [name]: '  \n' });
+			expect(text).toContain(name);
+			expect(text).not.toContain('  ');
+		}
+	});
+
+	test('обязательные по-прежнему обязательны', () => {
+		const text = message(omit(valid, 'PLANE_HOOKS_GRAFANA_TOKEN'));
+		expect(text).toBe('plane-hooks: missing env PLANE_HOOKS_GRAFANA_TOKEN');
+		expect(text).not.toContain('PLANE_HOOKS_VERCEL_SECRET');
+	});
+
+	test('enabledInputs', () => {
+		expect(enabledInputs(loadConfig(valid))).toEqual(['grafana', 'vercel', 'deploy']);
+		expect(
+			enabledInputs(
+				loadConfig(omit(valid, 'PLANE_HOOKS_VERCEL_SECRET', 'PLANE_HOOKS_DEPLOY_SECRET')),
+			),
+		).toEqual(['grafana']);
+		expect(enabledInputs(loadConfig(omit(valid, 'PLANE_HOOKS_DEPLOY_SECRET')))).toEqual([
+			'grafana',
+			'vercel',
+		]);
 	});
 
 	test('URL Plane без схемы — ошибка', () => {

@@ -16,6 +16,9 @@ export type Options = {
 	report?: (signal: IncidentSignal) => Promise<IncidentResult>;
 	notes?: (note: DeployNote) => Promise<DeployNoteResult[]>;
 	releases?: (draft: ReleaseDraft, items: ReleaseItem[]) => Promise<ReleaseResult>;
+	/** `null` switches the input off, as an unset variable does. */
+	vercelSecret?: string | null;
+	deploySecret?: string | null;
 };
 
 export function harness(options: Options = {}) {
@@ -26,8 +29,8 @@ export function harness(options: Options = {}) {
 	const order: string[] = [];
 	const handler = createHandler({
 		grafanaToken: TOKEN,
-		vercelSecret: SECRET,
-		deploySecret: DEPLOY_SECRET,
+		vercelSecret: options.vercelSecret === undefined ? SECRET : options.vercelSecret,
+		deploySecret: options.deploySecret === undefined ? DEPLOY_SECRET : options.deploySecret,
 		incidents: {
 			report: async (signal) => {
 				signals.push(signal);

@@ -52,8 +52,9 @@ type Annotation = Pick<LogEntry, 'annotation' | 'title' | 'env' | 'sha'>;
 
 export type ServerDeps = {
 	grafanaToken: string;
-	vercelSecret: string;
-	deploySecret: string;
+	/** `null` — the input is off: its path is not routed at all (404). */
+	vercelSecret: string | null;
+	deploySecret: string | null;
 	incidents: IncidentReporter;
 	deployNotes: (note: DeployNote) => Promise<DeployNoteResult[]>;
 	releases: (draft: ReleaseDraft, items: ReleaseItem[]) => Promise<ReleaseResult>;
@@ -219,6 +220,9 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			return req.method === 'GET' ? text(200, 'ok') : text(405, 'method not allowed');
 		const source = ROUTES[pathname];
 		if (source === undefined) return text(404, 'not found');
+		// A disabled input is indistinguishable from an unknown path: before method, signature, body and log.
+		if (source === 'vercel' && deps.vercelSecret === null) return text(404, 'not found');
+		if (source === 'github' && deps.deploySecret === null) return text(404, 'not found');
 		if (req.method !== 'POST') return text(405, 'method not allowed');
 
 		if (
@@ -258,10 +262,16 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			return source === 'grafana'
 				? rejected(413, 'payload too large')
 				: text(413, 'payload too large');
-		if (source === 'vercel' && !verifyVercelSignature(raw, signature, deps.vercelSecret)) {
+		if (
+			source === 'vercel' &&
+			(deps.vercelSecret === null || !verifyVercelSignature(raw, signature, deps.vercelSecret))
+		) {
 			return text(401, 'unauthorized');
 		}
-		if (source === 'github' && !verifyDeploySignature(raw, signature, deps.deploySecret)) {
+		if (
+			source === 'github' &&
+			(deps.deploySecret === null || !verifyDeploySignature(raw, signature, deps.deploySecret))
+		) {
 			return text(401, 'unauthorized');
 		}
 

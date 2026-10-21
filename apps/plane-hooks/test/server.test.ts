@@ -5,7 +5,16 @@ import { describe, expect, test } from 'bun:test';
 import { PlaneApiError } from '../src/plane.ts';
 import { MAX_BODY_BYTES } from '../src/server.ts';
 import { fixtureBytes } from './fixtures.ts';
-import { BASE, bytes, grafana, harness, SHA, TOKEN, vercel } from './server-harness.ts';
+import {
+	BASE,
+	bytes,
+	deployRequest,
+	grafana,
+	harness,
+	SHA,
+	TOKEN,
+	vercel,
+} from './server-harness.ts';
 
 describe('маршруты', () => {
 	test('healthz, неизвестный путь, неверный метод', async () => {
@@ -16,6 +25,58 @@ describe('маршруты', () => {
 		expect((await handler(new Request(`${BASE}/healthz`, { method: 'POST' }))).status).toBe(405);
 		expect((await handler(new Request(`${BASE}/nope`))).status).toBe(404);
 		expect((await handler(new Request(`${BASE}/hooks/grafana`))).status).toBe(405);
+	});
+});
+
+describe('выключенные входы', () => {
+	test('выключенный Vercel: POST /hooks/vercel с подписью верной формы → 404, тело не читается, лога нет', async () => {
+		const { handler, logs, signals } = harness({ vercelSecret: null });
+		let touched = false;
+		const req = vercel(bytes({ type: 'deployment.succeeded' }));
+		for (const method of ['text', 'arrayBuffer', 'json', 'blob'] as const) {
+			Object.defineProperty(req, method, {
+				value: () => {
+					touched = true;
+					throw new Error('body read');
+				},
+			});
+		}
+		Object.defineProperty(req, 'body', {
+			get: () => {
+				touched = true;
+				throw new Error('body read');
+			},
+		});
+		const res = await handler(req);
+		expect(res.status).toBe(404);
+		expect(await res.text()).toBe('not found');
+		expect(touched).toBe(false);
+		expect(logs).toEqual([]);
+		expect(signals).toHaveLength(0);
+	});
+
+	test('выключенный deploy: POST /hooks/deploy → 404, лога нет', async () => {
+		const { handler, logs, notes } = harness({ deploySecret: null });
+		const res = await handler(deployRequest(bytes({ any: 1 })));
+		expect(res.status).toBe(404);
+		expect(await res.text()).toBe('not found');
+		expect(logs).toEqual([]);
+		expect(notes).toHaveLength(0);
+	});
+
+	test('выключенный вход и GET → 404, а не 405', async () => {
+		const { handler } = harness({ vercelSecret: null, deploySecret: null });
+		expect((await handler(new Request(`${BASE}/hooks/vercel`))).status).toBe(404);
+		expect((await handler(new Request(`${BASE}/hooks/deploy`))).status).toBe(404);
+		// control: an enabled input still answers 405 to GET
+		expect((await harness().handler(new Request(`${BASE}/hooks/vercel`))).status).toBe(405);
+	});
+
+	test('Grafana работает при выключенных Vercel и deploy', async () => {
+		const { handler, signals } = harness({ vercelSecret: null, deploySecret: null });
+		const res = await handler(grafana(await fixtureBytes('grafana-firing.json')));
+		expect(res.status).toBe(200);
+		expect(signals.map((s) => s.key)).toEqual(['a1b2c3d4e5f60718', '0f1e2d3c4b5a6978']);
 	});
 });
 

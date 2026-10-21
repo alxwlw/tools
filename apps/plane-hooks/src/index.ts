@@ -1,4 +1,4 @@
-import { loadConfig } from './config.ts';
+import { enabledInputs, loadConfig } from './config.ts';
 import { postDeployNotes } from './deploy-note.ts';
 import { createIncidentReporter } from './incident.ts';
 import { PlaneClient } from './plane.ts';
@@ -54,4 +54,4 @@ const server = Bun.serve({
 	}),
 });
 
-log({ event: 'listening', port: server.port });
+log({ event: 'listening', port: server.port, inputs: enabledInputs(config) });
