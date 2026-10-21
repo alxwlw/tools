@@ -55,10 +55,24 @@ function toSignal(alert: unknown, index: number): IncidentSignal {
 		title,
 		bodyHtml: describeAlert(alert, labels, annotations),
 		noteHtml: p(`Сработал ${utc(startsAt)} UTC`),
-		priority: env === 'staging' ? 'high' : 'urgent',
+		priority: alertPriority(labels.severity, env),
 		label: 'alert',
 		env,
 	};
+}
+
+/**
+ * Work-item priority of a firing alert, by severity × env (spec § «Приоритет по severity»).
+ * Severity is compared after trim + lowercase; `critical`, a missing or an unknown severity
+ * keep the pre-severity rule, `warning` is one step lower.
+ */
+export function alertPriority(
+	severity: string | undefined,
+	env: string,
+): 'urgent' | 'high' | 'medium' {
+	const level = (severity ?? '').trim().toLowerCase();
+	if (level === 'warning') return env === 'staging' ? 'medium' : 'high';
+	return env === 'staging' ? 'high' : 'urgent';
 }
 
 function describeAlert(

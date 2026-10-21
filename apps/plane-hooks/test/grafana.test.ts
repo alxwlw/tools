@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseGrafanaWebhook } from '../src/grafana.ts';
+import { alertPriority, parseGrafanaWebhook } from '../src/grafana.ts';
 import type { IncidentSignal } from '../src/incident.ts';
 import { BadPayload } from '../src/payload.ts';
 import { fixture } from './fixtures.ts';
@@ -128,6 +128,68 @@ describe('parseGrafanaWebhook: чужая форма → BadPayload', () => {
 	];
 	test.each(bad.map((body, index) => [index, body] as const))('случай %d', (_index, body) => {
 		expect(() => parseGrafanaWebhook(body)).toThrow(BadPayload);
+	});
+});
+
+describe('alertPriority: severity × env', () => {
+	test.each([
+		['critical', 'prod', 'urgent'],
+		['critical', 'staging', 'high'],
+		['warning', 'prod', 'high'],
+		['warning', 'staging', 'medium'],
+		[undefined, 'prod', 'urgent'],
+		[undefined, 'staging', 'high'],
+		['', 'prod', 'urgent'],
+		['', 'staging', 'high'],
+		['info', 'prod', 'urgent'],
+		['info', 'staging', 'high'],
+	] as const)('severity %p, env %p → %p', (severity, env, expected) => {
+		expect(alertPriority(severity, env)).toBe(expected);
+	});
+
+	test('severity в другом регистре и с пробелами', () => {
+		expect(alertPriority(' Warning ', 'prod')).toBe('high');
+		expect(alertPriority('CRITICAL', 'staging')).toBe('high');
+		expect(alertPriority('WARNING', 'staging')).toBe('medium');
+	});
+
+	test('пачка со смешанными severity и статусами', () => {
+		const signals = parseGrafanaWebhook({
+			alerts: [
+				{
+					status: 'firing',
+					fingerprint: 'fp-prod-critical',
+					startsAt: T,
+					labels: { alertname: 'DiskFull', severity: 'critical' },
+				},
+				{
+					status: 'firing',
+					fingerprint: 'fp-prod-warning',
+					startsAt: T,
+					labels: { alertname: 'CertExpiring', severity: 'warning' },
+				},
+				{
+					status: 'resolved',
+					fingerprint: 'fp-prod-resolved',
+					startsAt: T,
+					endsAt: '2026-10-06T10:05:00Z',
+					labels: { alertname: 'LagHigh', severity: 'warning' },
+				},
+			],
+		});
+		expect(signals).toHaveLength(3);
+		expect(signals[0]).toMatchObject({
+			status: 'firing',
+			key: 'fp-prod-critical',
+			priority: 'urgent',
+		});
+		expect(signals[1]).toMatchObject({
+			status: 'firing',
+			key: 'fp-prod-warning',
+			priority: 'high',
+		});
+		expect(signals[2]).toMatchObject({ status: 'resolved', key: 'fp-prod-resolved' });
+		expect(signals[2]).not.toHaveProperty('priority');
 	});
 });
 
