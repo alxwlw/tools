@@ -7,7 +7,8 @@
  * workspace, exercises every call, prints «вызов — ожидание — факт» and deletes
  * what it created. Three sections — work items, archive, releases — run
  * independently: a section that throws records one ✗ row and the next one still
- * runs. Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
+ * runs. A workspace whose plan has no releases (402) skips the release section.
+ * Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
  *
  * It needs a real API token, so the owner runs it.
  */
@@ -160,9 +161,9 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'POST /archive/ в группе backlog',
-		'4xx (архив только для completed/cancelled)',
+		'400 (архив только для completed/cancelled)',
 		`${openArchiveOpen.status}`,
-		openArchiveOpen.status >= 400 && openArchiveOpen.status < 500,
+		openArchiveOpen.status === 400,
 	);
 
 	const close = await call('PATCH', detailPath, { state: doneId });
@@ -172,26 +173,21 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'POST /work-items/{id}/archive/',
-		'2xx',
+		'200, archived_at — строка',
 		`${archived.status}, archived_at: ${archivedAtOf(archived.body)}`,
-		archived.status >= 200 && archived.status < 300,
+		archived.status === 200 && archivedAtOf(archived.body) === 'string',
 	);
 
+	// The rows below pin what test/fake-plane.ts does with an archived item.
 	const detail = await call('GET', detailPath);
-	row(
-		'14',
-		'архивная: GET деталь',
-		'сведения',
-		`${detail.status}, archived_at: ${archivedAtOf(detail.body)}`,
-		true,
-	);
+	row('14', 'архивная: GET деталь', '404', `${detail.status}`, detail.status === 404);
 
 	const archivedDetail = await call('GET', `${project}/archived-work-items/${id}/`);
 	row(
 		'14',
-		'архивная: GET /archived-work-items/{id}/',
-		'сведения',
-		`${archivedDetail.status}, archived_at: ${archivedAtOf(archivedDetail.body)}`,
+		'архивная: GET /archived-work-items/{id}/ (сведения)',
+		'404 — деталью архив не проверить',
+		`${archivedDetail.status}`,
 		true,
 	);
 
@@ -200,18 +196,20 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'архивная: GET /archived-work-items/',
-		'сведения',
-		`${archivedList.status}, ${shapeOf(archivedList.body)}, по id: ${inList ? 'есть' : 'нет'}, external_id: ${inList?.external_id === archTag ? 'совпал' : '—'}, archived_at: ${archivedAtOf(inList)}`,
-		true,
+		'200, страница, задача есть по id, archived_at — строка',
+		`${archivedList.status}, ${shapeOf(archivedList.body)}, по id: ${inList ? 'есть' : 'нет'}, archived_at: ${archivedAtOf(inList)}`,
+		archivedList.status === 200 &&
+			shapeOf(archivedList.body) === 'страница' &&
+			archivedAtOf(inList) === 'string',
 	);
 
 	const comments = await call('GET', `${detailPath}comments/`);
 	row(
 		'14',
 		'архивная: GET /comments/',
-		'сведения',
+		'200',
 		`${comments.status}, ${shapeOf(comments.body)}`,
-		true,
+		comments.status === 200,
 	);
 
 	const comment = await call('POST', `${detailPath}comments/`, {
@@ -222,9 +220,9 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'архивная: POST /comments/ с external_id',
-		'сведения',
-		`${comment.status}, id: ${typeof comment.body?.id}`,
-		true,
+		'201 {id}',
+		`${comment.status}`,
+		comment.status === 201 && typeof comment.body?.id === 'string',
 	);
 
 	const duplicate = await call('POST', `${project}/work-items/`, {
@@ -241,9 +239,9 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'архивная: POST /work-items/ повтор external_id',
-		'сведения',
-		`${duplicate.status}, id ${duplicate.body?.id === id ? 'совпал' : 'другой'}, archived_at: ${archivedAtOf(duplicate.body)}`,
-		true,
+		'409, id = id архивной',
+		`${duplicate.status}, id ${duplicate.body?.id === id ? 'совпал' : 'другой'}`,
+		duplicate.status === 409 && duplicate.body?.id === id,
 	);
 
 	const byExternal = await call(
@@ -253,47 +251,55 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	row(
 		'14',
 		'архивная: GET ?external_id=…',
-		'сведения',
+		'200, id = id архивной, archived_at — строка',
 		`${byExternal.status}, id ${byExternal.body?.id === id ? 'совпал' : '—'}, archived_at: ${archivedAtOf(byExternal.body)}`,
-		true,
+		byExternal.status === 200 &&
+			byExternal.body?.id === id &&
+			archivedAtOf(byExternal.body) === 'string',
 	);
 
-	// Unarchive: each variant on a freshly archived item, then the detail must be back with archived_at empty.
-	const variants: [string, string][] = [
-		['DELETE /work-items/{id}/unarchive/', `${detailPath}unarchive/`],
-		['DELETE /work-items/{id}/unarchive', `${detailPath}unarchive`],
+	// Unarchive: each path variant on a freshly archived item, then the detail must be back with archived_at empty.
+	const variants: [string, string, boolean][] = [
+		['DELETE /work-items/{id}/unarchive/', `${detailPath}unarchive/`, true],
+		['DELETE /work-items/{id}/unarchive', `${detailPath}unarchive`, true],
 		[
-			'DELETE /archived-work-items/{id}/unarchive/',
+			'DELETE /archived-work-items/{id}/unarchive/ (сведения)',
 			`${project}/archived-work-items/${id}/unarchive/`,
+			false,
 		],
 	];
-	for (const [what, url] of variants) {
+	for (const [what, url, required] of variants) {
 		const state = await call('GET', detailPath);
 		if (state.status === 200) {
 			const again = await archive(id);
-			if (again.status < 200 || again.status >= 300) {
-				row('14', `${what}: повторный архив`, '2xx', `${again.status}`, false);
+			if (again.status !== 200) {
+				row('14', `${what}: повторный архив`, '200', `${again.status}`, false);
 				continue;
 			}
 		}
 		const unarchived = await call('DELETE', url);
 		const back = await call('GET', detailPath);
+		const ok =
+			unarchived.status === 204 && back.status === 200 && archivedAtOf(back.body) === 'null';
 		row(
 			'14',
 			what,
-			'сведения; затем GET деталь',
+			required ? '204, затем деталь 200 с archived_at: null' : 'сведения',
 			`${unarchived.status}; деталь ${back.status}, archived_at: ${archivedAtOf(back.body)}`,
-			true,
+			required ? ok : true,
 		);
 	}
 
+	// The last variant may have left it archived: the path the client uses brings it back.
+	await call('DELETE', `${detailPath}unarchive/`);
+	const twice = await call('DELETE', `${detailPath}unarchive/`);
+	row('14', 'DELETE /unarchive/ неархивной (сведения)', 'сведения', `${twice.status}`, true);
 	const finalDetail = await call('GET', detailPath);
-	const notArchived = await call('GET', `${project}/archived-work-items/${id}/`);
 	row(
 		'14',
-		'после unarchive: GET деталь и /archived-work-items/{id}/',
-		'200 с archived_at: null; сведения',
-		`${finalDetail.status}, archived_at: ${archivedAtOf(finalDetail.body)}; ${notArchived.status}`,
+		'после unarchive: GET деталь',
+		'200, archived_at: null',
+		`${finalDetail.status}, archived_at: ${archivedAtOf(finalDetail.body)}`,
 		finalDetail.status === 200 && archivedAtOf(finalDetail.body) === 'null',
 	);
 }
@@ -474,6 +480,17 @@ try {
 			external_id: releaseTag,
 		});
 		releaseId = typeof newRelease.body?.id === 'string' ? newRelease.body.id : null;
+		// 402 Payment Required: the workspace plan has no releases (Free). A fact, not a contract break.
+		if (newRelease.status === 402) {
+			row(
+				'10',
+				'POST /releases/ с external_id',
+				'201 {id}; 402 — тариф без релизов',
+				'402, секция релизов пропущена',
+				true,
+			);
+			return;
+		}
 		row(
 			'10',
 			'POST /releases/ с external_id',
