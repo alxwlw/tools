@@ -5,7 +5,7 @@ Small standalone tools, one per directory under `apps/`. A pnpm + moon monorepo 
 
 ## Tools
 
-- [`apps/plane-hooks`](apps/plane-hooks) — a Bun webhook receiver that turns Grafana, Vercel and CI
+- [`apps/plane-hooks`](apps/plane-hooks/README.md) — a Bun webhook receiver that turns Grafana, Vercel and CI
   events into Plane work items and comments.
 
 ## Development
