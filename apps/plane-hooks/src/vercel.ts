@@ -27,7 +27,7 @@ export function verifyVercelSignature(
 export type VercelEvent = DeployOutcome | { kind: 'ignored'; type: string };
 
 /**
- * Vercel account webhook → what plane-hooks does about it (spec «Поток Vercel»).
+ * Vercel account webhook → what plane-hooks does about it.
  * deployment.error opens or extends an incident keyed by project + target +
  * branch; deployment.succeeded resolves that incident and carries the deploy
  * note. Other types are ignored. Throws BadPayload on a body Vercel would not send.

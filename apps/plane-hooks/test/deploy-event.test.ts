@@ -12,8 +12,8 @@ import { fixture, fixtureBytes } from './fixtures.ts';
 const SECRET = 'deploy-test-secret';
 const SHA = '89abcdef0123456789abcdef0123456789abcdef';
 const NOW = () => new Date('2026-10-06T12:00:00.000Z');
-const RUN_FAIL = 'https://github.com/liqu-fi/monorepo/actions/runs/37483709613';
-const RUN_OK = 'https://github.com/liqu-fi/monorepo/actions/runs/37483709612';
+const RUN_FAIL = 'https://github.com/example-org/app/actions/runs/37483709613';
+const RUN_OK = 'https://github.com/example-org/app/actions/runs/37483709612';
 const sign = (raw: Uint8Array, secret = SECRET) =>
 	createHmac('sha256', secret).update(raw).digest('hex');
 
@@ -59,20 +59,20 @@ describe('провал', () => {
 			signal: {
 				status: 'firing',
 				source: 'github',
-				key: 'deploy:monorepo:staging',
+				key: 'deploy:app:staging',
 				occurrence: '37483709613.2',
 				at: '2026-10-06T12:00:00.000Z',
-				title: 'Деплой упал: monorepo (staging) · bootstrap-smoke',
+				title: 'Деплой упал: app (staging) · bootstrap-smoke',
 				bodyHtml:
-					'<p>Репозиторий: <code>liqu-fi/monorepo</code>, окружение: <code>staging</code>, стадия: <code>bootstrap-smoke</code></p>' +
-					`<p>Коммит: <a href="https://github.com/liqu-fi/monorepo/commit/${SHA}">89abcde</a></p>` +
+					'<p>Репозиторий: <code>example-org/app</code>, окружение: <code>staging</code>, стадия: <code>bootstrap-smoke</code></p>' +
+					`<p>Коммит: <a href="https://github.com/example-org/app/commit/${SHA}">89abcde</a></p>` +
 					`<p><a href="${RUN_FAIL}">Прогон GitHub Actions</a></p>`,
 				noteHtml: `<p>Сработал 2026-10-06 12:00 UTC: стадия <code>bootstrap-smoke</code>, <a href="${RUN_FAIL}">прогон</a></p>`,
 				priority: 'high',
 				label: 'deploy-failed',
 			},
 			summary: {
-				title: '✗ monorepo → staging упал · 89abcde · bootstrap-smoke',
+				title: '✗ app → staging упал · 89abcde · bootstrap-smoke',
 				env: 'staging',
 				sha: SHA,
 			},
@@ -84,7 +84,7 @@ describe('провал', () => {
 		async (stage) => {
 			const ev = await parse('deploy-failure.json', (b) => (b.stage = stage));
 			if (ev.kind !== 'failed' || ev.signal.status !== 'firing') throw new Error('expected failed');
-			expect(ev.signal.title).toBe(`Деплой упал: monorepo (staging) · ${stage}`);
+			expect(ev.signal.title).toBe(`Деплой упал: app (staging) · ${stage}`);
 		},
 	);
 
@@ -92,7 +92,7 @@ describe('провал', () => {
 		const ev = await parse('deploy-failure.json', (b) => (b.environment = 'production'));
 		if (ev.kind !== 'failed' || ev.signal.status !== 'firing') throw new Error('expected failed');
 		expect(ev.signal.priority).toBe('urgent');
-		expect(ev.signal.key).toBe('deploy:monorepo:production');
+		expect(ev.signal.key).toBe('deploy:app:production');
 	});
 
 	test('мусор в commits при провале не мешает разбору', async () => {
@@ -109,32 +109,32 @@ describe('успех', () => {
 			resolve: {
 				status: 'resolved',
 				source: 'github',
-				key: 'deploy:monorepo:production',
+				key: 'deploy:app:production',
 				at: '2026-10-06T12:00:00.000Z',
 				noteHtml: '<p>Деплой снова проходит: <code>89abcde</code></p>',
 			},
 			note: {
 				deploymentId: `gh:production:${SHA}`,
-				project: 'monorepo',
+				project: 'app',
 				target: 'production',
 				sha: SHA,
 				url: RUN_OK,
 				texts: [
-					'Merge pull request #830 from liqu-fi/staging\n\nrelease',
+					'Merge pull request #830 from example-org/staging\n\nrelease',
 					'feat(gateway): [OPS-12] faster fills (#829)\n\nbody',
 					'fix(settler): [MONO-3] <script>x</script> (#828)',
 				],
 				source: 'github',
 				keyLimit: 50,
 			},
-			summary: { title: 'monorepo → production · 89abcde', env: 'production', sha: SHA },
+			summary: { title: 'app → production · 89abcde', env: 'production', sha: SHA },
 			release: {
-				repository: 'liqu-fi/monorepo',
+				repository: 'example-org/app',
 				sha: SHA,
 				at: '2026-10-06T12:00:00.000Z',
 				runUrl: RUN_OK,
 				commits: [
-					{ sha: SHA, message: 'Merge pull request #830 from liqu-fi/staging\n\nrelease' },
+					{ sha: SHA, message: 'Merge pull request #830 from example-org/staging\n\nrelease' },
 					{ sha: '1'.repeat(40), message: 'feat(gateway): [OPS-12] faster fills (#829)\n\nbody' },
 					{ sha: '2'.repeat(40), message: 'fix(settler): [MONO-3] <script>x</script> (#828)' },
 				],
@@ -208,7 +208,7 @@ describe('отказ в разборе', () => {
 			(b: any) => (b.commits = [{ sha: SHA, message: longMessage }]),
 			'too long',
 		],
-		['repository массивом', (b: any) => (b.repository = ['liqu-fi/monorepo']), 'repository'],
+		['repository массивом', (b: any) => (b.repository = ['example-org/app']), 'repository'],
 		['sha массивом', (b: any) => (b.sha = [SHA]), 'sha'],
 		['runId числом', (b: any) => (b.runId = 37483709612), 'runId'],
 		['commits: [null]', (b: any) => (b.commits = [null]), 'commits[0]'],

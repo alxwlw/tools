@@ -10,7 +10,7 @@ import {
 type Reply = { status: number; body?: unknown; raw?: string };
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
 
-const ROOT = 'https://plane.test/api/v1/workspaces/liq-egn';
+const ROOT = 'https://plane.test/api/v1/workspaces/example-ws';
 
 function stub(replies: Reply[]) {
 	const calls: Call[] = [];
@@ -28,7 +28,7 @@ function stub(replies: Reply[]) {
 	};
 	const client = new PlaneClient({
 		baseUrl: 'https://plane.test/',
-		workspace: 'liq-egn',
+		workspace: 'example-ws',
 		apiKey: 'key-1',
 		fetch,
 	});
@@ -250,7 +250,7 @@ describe('PlaneClient: ошибки', () => {
 			});
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
-			workspace: 'liq-egn',
+			workspace: 'example-ws',
 			apiKey: 'k',
 			timeoutMs: 20,
 			fetch: hang,
@@ -268,7 +268,7 @@ describe('ограничитель темпа', () => {
 		});
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
-			workspace: 'liq-egn',
+			workspace: 'example-ws',
 			apiKey: 'key-1',
 			limiter: {
 				acquire: async () => {
@@ -295,7 +295,7 @@ describe('ограничитель темпа', () => {
 	test('ожидание в очереди не съедает таймаут вызова', async () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
-			workspace: 'liq-egn',
+			workspace: 'example-ws',
 			apiKey: 'key-1',
 			timeoutMs: 20,
 			limiter: { acquire: () => Bun.sleep(60) },
@@ -315,7 +315,7 @@ const release: NewRelease = {
 	status: 'released',
 	release_date: '2026-10-06',
 	external_source: 'github-deploy',
-	external_id: 'liqu-fi/monorepo@89abcdef0123456789abcdef0123456789abcdef',
+	external_id: 'example-org/app@89abcdef0123456789abcdef0123456789abcdef',
 };
 
 describe('PlaneClient: релизы', () => {
@@ -325,7 +325,7 @@ describe('PlaneClient: релизы', () => {
 				status: 200,
 				body: {
 					results: [
-						{ id: 'r1', external_source: 'github-deploy', external_id: 'liqu-fi/monorepo@other' },
+						{ id: 'r1', external_source: 'github-deploy', external_id: 'example-org/app@other' },
 					],
 					next_page_results: true,
 					next_cursor: '100:1:0',

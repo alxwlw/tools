@@ -11,12 +11,12 @@ const TITLE = 'release: staging → main — деплой через ветки 
 
 function draft(overrides: Partial<ReleaseDraft> = {}): ReleaseDraft {
 	return {
-		repository: 'liqu-fi/monorepo',
+		repository: 'example-org/app',
 		sha: SHA,
 		at: '2026-10-06T23:30:00.000Z',
-		runUrl: 'https://github.com/liqu-fi/monorepo/actions/runs/37483709612',
+		runUrl: 'https://github.com/example-org/app/actions/runs/37483709612',
 		commits: [
-			{ sha: SHA, message: `Merge pull request #830 from liqu-fi/staging\n\n${TITLE}\n` },
+			{ sha: SHA, message: `Merge pull request #830 from example-org/staging\n\n${TITLE}\n` },
 			{ sha: ONE, message: 'feat(gateway): [OPS-12] faster fills (#829)\n\nbody' },
 			{ sha: TWO, message: 'fix(settler): [MONO-3] <script>x</script> (#828)' },
 		],
@@ -50,7 +50,7 @@ describe('releaseName', () => {
 			releaseName(
 				draft({
 					commits: [
-						{ sha: SHA, message: 'Merge pull request #831 from liqu-fi/feat-cld/x\n\nfeat: x' },
+						{ sha: SHA, message: 'Merge pull request #831 from example-org/feat-cld/x\n\nfeat: x' },
 					],
 				}),
 			),
@@ -59,7 +59,7 @@ describe('releaseName', () => {
 			releaseName(
 				draft({
 					commits: [
-						{ sha: ONE, message: `Merge pull request #830 from liqu-fi/staging\n\n${TITLE}` },
+						{ sha: ONE, message: `Merge pull request #830 from example-org/staging\n\n${TITLE}` },
 					],
 				}),
 			),
@@ -71,7 +71,9 @@ describe('releaseName', () => {
 		const long = 'я'.repeat(300);
 		const name = releaseName(
 			draft({
-				commits: [{ sha: SHA, message: `Merge pull request #1 from liqu-fi/staging\n\n${long}` }],
+				commits: [
+					{ sha: SHA, message: `Merge pull request #1 from example-org/staging\n\n${long}` },
+				],
 			}),
 		);
 		expect(Array.from(name)).toHaveLength(200);
@@ -82,10 +84,10 @@ describe('releaseName', () => {
 describe('changelogHtml', () => {
 	test('коммиты со ссылками и экранированием, затем задачи без повторов', () => {
 		const commit = (sha: string) =>
-			`<a href="https://github.com/liqu-fi/monorepo/commit/${sha}">${sha.slice(0, 7)}</a>`;
+			`<a href="https://github.com/example-org/app/commit/${sha}">${sha.slice(0, 7)}</a>`;
 		expect(changelogHtml(draft(), ITEMS)).toBe(
 			'<h3>Коммиты</h3><ul>' +
-				`<li>${commit(SHA)} Merge pull request #830 from liqu-fi/staging</li>` +
+				`<li>${commit(SHA)} Merge pull request #830 from example-org/staging</li>` +
 				`<li>${commit(ONE)} feat(gateway): [OPS-12] faster fills (#829)</li>` +
 				`<li>${commit(TWO)} fix(settler): [MONO-3] &lt;script&gt;x&lt;/script&gt; (#828)</li>` +
 				'</ul><h3>Задачи</h3><ul><li><code>OPS-12</code></li><li><code>MONO-3</code></li></ul>',
@@ -116,7 +118,7 @@ describe('publishRelease', () => {
 			status: 'released',
 			release_date: '2026-10-06',
 			external_source: 'github-deploy',
-			external_id: `liqu-fi/monorepo@${SHA}`,
+			external_id: `example-org/app@${SHA}`,
 			changelog: changelogHtml(draft(), ITEMS),
 			workItemIds: ['w12', 'w3'],
 		});

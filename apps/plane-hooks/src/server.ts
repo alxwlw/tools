@@ -37,7 +37,7 @@ export type LogEntry = {
 	action: LogAction;
 	workItemId: string | null;
 	ms: number;
-	/** Exactly one line per event carries it: the Grafana annotation layers query on it (spec «Отметки в Grafana»). */
+	/** Exactly one line per event carries it: the Grafana annotation layers query on it. */
 	annotation?: 'deploy' | 'incident';
 	title?: string;
 	env?: string;
@@ -61,7 +61,7 @@ export type ServerDeps = {
 };
 
 /**
- * HTTP surface of plane-hooks (spec «Ошибки и безопасность»): authenticate,
+ * HTTP surface of plane-hooks: authenticate,
  * cap the body, parse, hand off. Any Plane failure answers 502 so the sender
  * retries — everything downstream is idempotent, a retry cannot duplicate.
  */

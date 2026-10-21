@@ -6,7 +6,7 @@ const TITLE_MAX = 200;
 
 /**
  * Grafana webhook contact point payload → one signal per entry of `alerts[]`
- * (spec «Поток Grafana»): the alert fingerprint is the incident key, its
+ * the alert fingerprint is the incident key, its
  * startsAt the occurrence. Throws BadPayload on a body Grafana would not send.
  */
 export function parseGrafanaWebhook(body: unknown): IncidentSignal[] {

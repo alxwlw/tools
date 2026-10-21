@@ -87,18 +87,18 @@ describe('/hooks/deploy', () => {
 		expect(signals[0]).toMatchObject({
 			status: 'firing',
 			source: 'github',
-			key: 'deploy:monorepo:staging',
+			key: 'deploy:app:staging',
 		});
 		expect(logs).toEqual([
 			{
 				source: 'github',
 				event: 'deployment.error',
-				key: 'deploy:monorepo:staging',
+				key: 'deploy:app:staging',
 				action: 'created',
 				workItemId: 'w1',
 				ms: expect.any(Number),
 				annotation: 'deploy',
-				title: '✗ monorepo → staging упал · 89abcde · bootstrap-smoke',
+				title: '✗ app → staging упал · 89abcde · bootstrap-smoke',
 				env: 'staging',
 				sha: DEPLOY_SHA,
 			},
@@ -112,7 +112,7 @@ describe('/hooks/deploy', () => {
 		expect((await handler(deployRequest(await fixtureBytes('deploy-success.json')))).status).toBe(
 			200,
 		);
-		expect(signals[0]).toMatchObject({ status: 'resolved', key: 'deploy:monorepo:production' });
+		expect(signals[0]).toMatchObject({ status: 'resolved', key: 'deploy:app:production' });
 		expect(notes[0]).toMatchObject({
 			deploymentId: `gh:production:${DEPLOY_SHA}`,
 			source: 'github',
@@ -141,7 +141,7 @@ describe('/hooks/deploy', () => {
 		expect(logs[1]).toMatchObject({ event: 'release', action: 'created' });
 		expect(logs[0]).toMatchObject({
 			annotation: 'deploy',
-			title: 'monorepo → production · 89abcde',
+			title: 'app → production · 89abcde',
 		});
 	});
 
@@ -169,7 +169,7 @@ describe('/hooks/deploy', () => {
 		);
 		expect(order).toEqual(['notes', 'release']);
 		expect(releases).toHaveLength(1);
-		expect(releases[0]?.draft).toMatchObject({ repository: 'liqu-fi/monorepo', sha: DEPLOY_SHA });
+		expect(releases[0]?.draft).toMatchObject({ repository: 'example-org/app', sha: DEPLOY_SHA });
 		expect(releases[0]?.items).toEqual([
 			{ key: 'OPS-12', workItemId: 'w12' },
 			{ key: 'OPS-13', workItemId: 'w13' },
@@ -177,7 +177,7 @@ describe('/hooks/deploy', () => {
 		expect(logs.at(-1)).toEqual({
 			source: 'github',
 			event: 'release',
-			key: `release:liqu-fi/monorepo@${DEPLOY_SHA}`,
+			key: `release:example-org/app@${DEPLOY_SHA}`,
 			action: 'created',
 			workItemId: null,
 			ms: expect.any(Number),
@@ -205,7 +205,7 @@ describe('/hooks/deploy', () => {
 		expect(logs.at(-1)).toEqual({
 			source: 'github',
 			event: 'release',
-			key: `release:liqu-fi/monorepo@${DEPLOY_SHA}`,
+			key: `release:example-org/app@${DEPLOY_SHA}`,
 			action: 'error',
 			workItemId: null,
 			ms: expect.any(Number),

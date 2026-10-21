@@ -6,7 +6,7 @@ import { type PlaneApi, RELEASE_ITEMS_MAX } from './plane.ts';
 export const RELEASE_SOURCE = 'github-deploy';
 const NAME_MAX = 200;
 const HEADLINE_MAX = 200;
-/** GitHub's merge of the release PR: `Merge pull request #889 from liqu-fi/staging`, a blank line, the PR title. */
+/** GitHub's merge of the release PR: `Merge pull request #889 from example-org/staging`, a blank line, the PR title. */
 const RELEASE_MERGE = /^Merge pull request #\d+ from [^\s/]+\/staging\r?\n\r?\n([^\r\n]+)/;
 
 /** A work item a deploy note found: the key for the changelog, the id for the release link. */
@@ -55,7 +55,7 @@ export function changelogHtml(draft: ReleaseDraft, items: readonly ReleaseItem[]
 }
 
 /**
- * The Plane release of one production deploy (spec «plane-hooks: Release в Plane»). Looked up by external_id first, so a
+ * The Plane release of one production deploy. Looked up by external_id first, so a
  * replayed event makes no second release; then the changelog and the work items are written — both are idempotent,
  * and a replay completes a release a failed call left half-made. The changelog is rewritten only when the draft carries
  * commits or the release is new: a rerun with no commits must not erase the list written by the first run.

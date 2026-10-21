@@ -36,7 +36,7 @@ export type StateSummary = { id: string; group: string; default: boolean };
 export type LabelSummary = { id: string; name: string };
 
 /**
- * The Plane calls plane-hooks makes — spec «Контракт с API Plane», verified by
+ * The Plane calls plane-hooks makes, verified by
  * scripts/probe-plane.ts. Project-scoped calls take the project id explicitly.
  * Releases are workspace-level: no project id.
  */

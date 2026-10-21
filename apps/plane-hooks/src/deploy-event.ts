@@ -34,7 +34,7 @@ export function verifyDeploySignature(
 }
 
 /**
- * A backend deploy reported by the monorepo's `report-deploy` CI job (spec «Событие из CI»).
+ * A backend deploy reported by the monorepo's `report-deploy` CI job.
  * failure opens or extends the incident of that environment; success resolves it and carries
  * the deploy notes for at most `keyLimit` (50) keys of the deployed commits, only keys with a known project prefix. A production success also carries the release draft. Error messages never quote the body.
  */
@@ -115,7 +115,7 @@ export function parseDeployEvent(body: unknown, now: () => Date = () => new Date
 			keyLimit: KEY_LIMIT,
 		},
 		summary: { title: `${project} → ${environment} · ${sha7}`, env: environment, sha },
-		// A Plane release per production deploy (spec «plane-hooks: Release в Plane»); staging gets none.
+		// A Plane release per production deploy; staging gets none.
 		...(environment === 'production' ? { release: { repository, sha, at, runUrl, commits } } : {}),
 	};
 }

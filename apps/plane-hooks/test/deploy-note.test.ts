@@ -4,7 +4,7 @@ import { PlaneApiError } from '../src/plane.ts';
 import { FakePlane, type FakeWorkItem } from './fake-plane.ts';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
-const URL_ = 'https://terminal-abc123-liq.vercel.app';
+const URL_ = 'https://terminal-abc123-example.vercel.app';
 
 function note(texts: string[], overrides: Partial<DeployNote> = {}): DeployNote {
 	return {

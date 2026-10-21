@@ -3,8 +3,8 @@ import { loadConfig } from '../src/config.ts';
 
 const TOKEN = `ph_${'0a'.repeat(24)}`;
 const valid = {
-	PLANE_HOOKS_PLANE_URL: 'https://plane.liqu.si/',
-	PLANE_HOOKS_WORKSPACE: 'liq-egn',
+	PLANE_HOOKS_PLANE_URL: 'https://plane.example.com/',
+	PLANE_HOOKS_WORKSPACE: 'example-ws',
 	PLANE_HOOKS_PROJECT_ID: '11111111-2222-3333-4444-555555555555',
 	PLANE_HOOKS_PLANE_API_KEY: 'plane_api_secret_value',
 	PLANE_HOOKS_GRAFANA_TOKEN: TOKEN,
@@ -25,8 +25,8 @@ describe('loadConfig', () => {
 	test('полный набор: порт по умолчанию, URL без завершающего слэша', () => {
 		expect(loadConfig(valid)).toEqual({
 			port: 8080,
-			planeUrl: 'https://plane.liqu.si',
-			workspace: 'liq-egn',
+			planeUrl: 'https://plane.example.com',
+			workspace: 'example-ws',
 			projectId: '11111111-2222-3333-4444-555555555555',
 			planeApiKey: 'plane_api_secret_value',
 			grafanaToken: TOKEN,
@@ -36,8 +36,8 @@ describe('loadConfig', () => {
 	});
 
 	test('пробелы по краям обрезаются', () => {
-		expect(loadConfig({ ...valid, PLANE_HOOKS_WORKSPACE: ' liq-egn \n' }).workspace).toBe(
-			'liq-egn',
+		expect(loadConfig({ ...valid, PLANE_HOOKS_WORKSPACE: ' example-ws \n' }).workspace).toBe(
+			'example-ws',
 		);
 	});
 
@@ -67,7 +67,8 @@ describe('loadConfig', () => {
 	});
 
 	test('ID проекта не UUID (вставлен URL проекта) — ошибка с именем переменной, без значения', () => {
-		const url = 'plane.liqu.si/liq-egn/projects/11111111-2222-3333-4444-555555555555/issues/';
+		const url =
+			'plane.example.com/example-ws/projects/11111111-2222-3333-4444-555555555555/issues/';
 		for (const bad of [url, `https://${url}`, 'OPS', '11111111-2222-3333-4444-55555555555']) {
 			const text = message({ ...valid, PLANE_HOOKS_PROJECT_ID: bad });
 			expect(text).toBe(
@@ -90,7 +91,7 @@ describe('loadConfig', () => {
 	});
 
 	test('URL Plane без схемы — ошибка', () => {
-		expect(message({ ...valid, PLANE_HOOKS_PLANE_URL: 'plane.liqu.si' })).toContain(
+		expect(message({ ...valid, PLANE_HOOKS_PLANE_URL: 'plane.example.com' })).toContain(
 			'PLANE_HOOKS_PLANE_URL',
 		);
 	});

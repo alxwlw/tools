@@ -21,7 +21,7 @@ export type IncidentSignal =
 			noteHtml: string;
 			priority: Extract<Priority, 'urgent' | 'high' | 'medium'>;
 			label: IncidentLabel;
-			/** Environment of an alert, for the Grafana annotation (spec «Отметки в Grafana»). */
+			/** Environment of an alert, for the Grafana annotation. */
 			env?: string;
 	  }
 	| {
@@ -51,7 +51,7 @@ const RESOLVED = ':resolved';
 
 /**
  * One Plane work item per incident key plus marker comments per occurrence
- * (spec «Идемпотентность»). Every write carries an external_id, so a repeated
+ * Every write carries an external_id, so a repeated
  * delivery is a no-op. For firing: work item creation is first, reopen check is
  * second, marker is last (commit point). Signals with the same key run strictly
  * one after another: Plane's duplicate check is read-then-insert, and two

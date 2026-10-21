@@ -1,15 +1,13 @@
 #!/usr/bin/env bun
 /**
- * Contract probe for the Plane API calls plane-hooks relies on — spec
- * docs/superpowers/specs/2026-10-06-plane-hooks-design.md, «Контракт с API Plane».
+ * Contract probe for the Plane API calls plane-hooks relies on.
  *
  * Creates one throwaway work item (and one label) in PLANE_HOOKS_PROJECT_ID,
  * one throwaway release in the workspace,
  * exercises every call, prints «вызов — ожидание — факт» and deletes what it
  * created. Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
  *
- * It needs a real API token, so the owner runs it — see
- * docs/runbooks/plane-integrations.md, «Первичная настройка», шаг 2.
+ * It needs a real API token, so the owner runs it.
  */
 
 import type { ReleaseDraft } from '../src/deploy-note.ts';
@@ -20,10 +18,10 @@ export {};
 
 // Changelog markup of the real shape (<h3>/<ul>/<li>/<a href>/<code>); the <script> must come out escaped.
 const probeDraft: ReleaseDraft = {
-	repository: 'liqu-fi/monorepo',
+	repository: 'example-org/app',
 	sha: '0123456789abcdef0123456789abcdef01234567',
 	at: new Date().toISOString(),
-	runUrl: 'https://github.com/liqu-fi/monorepo/actions/runs/1',
+	runUrl: 'https://github.com/example-org/app/actions/runs/1',
 	commits: [
 		{
 			sha: '0123456789abcdef0123456789abcdef01234567',

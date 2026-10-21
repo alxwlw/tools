@@ -69,12 +69,12 @@ describe('deployment.error', () => {
 			priority: 'high',
 			label: 'deploy-failed',
 			noteHtml:
-				'<p>Деплой упал: <a href="https://vercel.com/liq/terminal/dpl_err1">dpl_err1</a> · <code>0123456</code></p>',
+				'<p>Деплой упал: <a href="https://vercel.com/example-team/terminal/dpl_err1">dpl_err1</a> · <code>0123456</code></p>',
 		});
 		expect(signal.bodyHtml).toContain(`<code>${SHA}</code>`);
 		expect(signal.bodyHtml).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
 		expect(signal.bodyHtml).not.toContain('<script>');
-		expect(signal.bodyHtml).toContain('<a href="https://terminal-abc123-liq.vercel.app">');
+		expect(signal.bodyHtml).toContain('<a href="https://terminal-abc123-example.vercel.app">');
 	});
 
 	test('target null → preview, приоритет medium; staging → medium', async () => {
@@ -97,7 +97,7 @@ describe('deployment.error', () => {
 		expect(signal.key).toBe('deploy:prj_terminal:production:unknown');
 		expect(signal.title).toBe('Деплой упал: terminal (production) · unknown');
 		expect(signal.noteHtml).toBe(
-			'<p>Деплой упал: <a href="https://vercel.com/liq/terminal/dpl_err1">dpl_err1</a></p>',
+			'<p>Деплой упал: <a href="https://vercel.com/example-team/terminal/dpl_err1">dpl_err1</a></p>',
 		);
 	});
 
@@ -186,7 +186,7 @@ describe('deployment.error: границы и экранирование', () =>
 		expect(plain.bodyHtml).not.toContain('Инспектор');
 		const withLinks = failed(await event('vercel-deployment-error.json'));
 		expect(withLinks.bodyHtml).toContain(
-			'<a href="https://vercel.com/liq/terminal/dpl_err1">Инспектор Vercel</a>',
+			'<a href="https://vercel.com/example-team/terminal/dpl_err1">Инспектор Vercel</a>',
 		);
 	});
 
@@ -241,7 +241,7 @@ describe('deployment.succeeded', () => {
 			project: 'terminal',
 			target: 'production',
 			sha: SHA,
-			url: 'https://terminal-def456-liq.vercel.app',
+			url: 'https://terminal-def456-example.vercel.app',
 			texts: [BRANCH, 'feat: ship [OPS-12]'],
 			source: 'vercel',
 			keyLimit: 10,

@@ -1,16 +1,16 @@
 {
-	"repository": "liqu-fi/monorepo",
+	"repository": "example-org/app",
 	"environment": "production",
 	"outcome": "success",
 	"stage": null,
 	"sha": "89abcdef0123456789abcdef0123456789abcdef",
 	"runId": "37483709612",
 	"runAttempt": "1",
-	"runUrl": "https://github.com/liqu-fi/monorepo/actions/runs/37483709612",
+	"runUrl": "https://github.com/example-org/app/actions/runs/37483709612",
 	"commits": [
 		{
 			"sha": "89abcdef0123456789abcdef0123456789abcdef",
-			"message": "Merge pull request #830 from liqu-fi/staging\n\nrelease"
+			"message": "Merge pull request #830 from example-org/staging\n\nrelease"
 		},
 		{
 			"sha": "1111111111111111111111111111111111111111",

@@ -23,9 +23,9 @@ export type DeploySummary = { title: string; env: string; sha?: string };
 /** A deployed commit: full sha (lower case) and message, as report-deploy.sh sends it (cut to 4 KiB). */
 export type DeployCommit = { sha: string; message: string };
 
-/** One successful production deploy, reduced to what its Plane release needs (spec «plane-hooks: Release в Plane»). */
+/** One successful production deploy, reduced to what its Plane release needs. */
 export type ReleaseDraft = {
-	/** `liqu-fi/monorepo` */
+	/** `example-org/app` */
 	repository: string;
 	/** The deployed commit, 40 hex, lower case. */
 	sha: string;
@@ -57,7 +57,7 @@ export type DeployNoteResult = {
 
 /**
  * «Выкачено» comment on every work item whose key (`OPS-12`) the branch or the
- * commit message mentions (spec «Поток Vercel»). Keyed by deployment and work
+ * commit message mentions. Keyed by deployment and work
  * item, so a redelivered event adds nothing. Keys go one by one: at most `note.keyLimit`.
  */
 export async function postDeployNotes(
