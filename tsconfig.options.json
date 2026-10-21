@@ -1,0 +1,5 @@
+// Repo-local tsconfig options — YOURS to edit (seeded once by `stack sync`, never overwritten).
+// Other presets: base.json, library.json, react.json, refs.json, nest.json, bun.json.
+{
+	"extends": "@alxwlw/tsconfig/node.json"
+}

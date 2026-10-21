@@ -1,0 +1,23 @@
+{
+	// Canon style — sync-managed verbatim; never edit in a repo. Repo-local
+	// ignore paths go in .prettierignore (create-if-absent, repo-owned):
+	// oxfmt 0.68.0 reads .prettierignore natively, no --ignore-path flag needed.
+	"useTabs": true,
+	"tabWidth": 2,
+	"singleQuote": true,
+	"semi": true,
+	"trailingComma": "all",
+	"printWidth": 100,
+	"arrowParens": "always",
+	"endOfLine": "lf",
+
+	// Default is `true`, and a repo's first sync would silently re-key every package.json in the
+	// tree (the first live acceptance run re-keyed 17 of them in one consumer, whose own pre-canon
+	// config had this explicitly off for exactly that reason). A canon adoption should not carry a
+	// hidden mass-reorder of product manifests — a repo that wants sorted package.json can opt in.
+	"sortPackageJson": false,
+
+	// TOML belongs to gitleaks and uv, not this formatter: gitleaks-canon.toml's rules are
+	// regex literals inside '''...''' blocks, and a formatter has no business rewriting them.
+	"ignorePatterns": ["**/*.toml"],
+}

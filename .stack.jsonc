@@ -1,0 +1,6 @@
+{
+	"$schema": "./node_modules/@alxwlw/stack/schema.json",
+	"profile": "node",
+	"with": ["moon-tasks"],
+	"exceptions": [],
+}

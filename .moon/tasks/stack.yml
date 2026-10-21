@@ -1,0 +1,15 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Canon template (seeded once via --with=moon-tasks; repo-owned afterwards).
+# `stack check` reads .stack.jsonc; no git hook is imposed — wire this task
+# into your own pre-commit/CI as you see fit.
+
+tasks:
+  stack-check:
+    command: 'stack check'
+    inputs:
+      - '.stack.jsonc'
+      - '.prototools'
+      - 'pnpm-workspace.yaml'
+    options:
+      cache: false

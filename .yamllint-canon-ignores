@@ -1,0 +1,14 @@
+# Org-canon yamllint ignore patterns (sync-managed verbatim — do not edit;
+# repo-local additions belong in .yamllint-ignores). gitignore-style.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.tsbuild/
+**/.tsbuild/
+coverage/
+**/coverage/
+.next/
+**/.next/
+.moon/cache/
+**/.moon/cache/

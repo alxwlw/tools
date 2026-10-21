@@ -1,0 +1,25 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Canon file — sync-managed (group moon-tasks): edits happen in alxwlw/stack, not here.
+# oxfmt reads .prettierignore natively — no --ignore-path flag needed.
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+  tests:
+    - 'tests/**/*'
+  configs:
+    - '*.{json,yml,yaml,mjs,cjs,ts}'
+
+tasks:
+  format:
+    command: 'bun'
+    args: ['run', '--bun', 'oxfmt', '--check', '.']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(configs)'
+      - '/.oxfmtrc.jsonc'
+      - '/.prettierignore'
+    options:
+      runFromWorkspaceRoot: false

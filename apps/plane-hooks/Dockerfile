@@ -1,12 +1,11 @@
 # plane-hooks — Grafana/Vercel/backend-deploy CI → Plane webhook receiver.
-# Spec: docs/superpowers/specs/2026-10-06-plane-hooks-design.md
+# Build context: apps/plane-hooks. The service has no runtime dependencies, so nothing is installed.
 FROM oven/bun:1.4.2-alpine
 
 WORKDIR /app
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
 COPY tsconfig.json ./
 COPY src ./src
+# scripts/ stays: runbooks run replay.ts and probe-plane.ts through docker exec.
 COPY scripts ./scripts
 
 USER bun

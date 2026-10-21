@@ -1,0 +1,6 @@
+// Repo-local oxlint config — YOURS to edit (seeded once by `stack sync`, never overwritten).
+// Other presets: base.jsonc, nest.jsonc, react.jsonc, next.jsonc.
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"extends": ["./node_modules/@alxwlw/oxlint-config/node.jsonc"]
+}

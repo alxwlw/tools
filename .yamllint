@@ -1,0 +1,66 @@
+# yamllint config — stack canon (sync-managed verbatim; never edit in a repo).
+#
+# Focus: catch semantic bugs (duplicate keys, truthy gotchas, broken
+# structure) that a formatter can't catch. oxfmt still handles indentation,
+# line length, and trailing spaces — we disable those here to avoid fighting
+# between the two tools.
+#
+# Scope: all *.yml / *.yaml files in the repo except build artifacts and
+# vendored content (see ignore list below).
+
+extends: default
+
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+
+# Canon-wide ignores live in the sync-managed .yamllint-canon-ignores;
+# repo-local additions go in .yamllint-ignores (seeded by `stack sync`,
+# repo-owned).
+ignore-from-file: ['.yamllint-canon-ignores', '.yamllint-ignores']
+
+rules:
+  # Formatting handled by oxfmt — don't duplicate
+  indentation: disable
+  line-length: disable
+  trailing-spaces: disable
+  new-line-at-end-of-file: disable
+  empty-lines: disable
+  commas: disable
+  hyphens: disable
+  brackets: disable
+  braces: disable
+  colons: disable
+
+  # Semantic checks — the real value
+  key-duplicates: enable
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: false
+  # empty-values: disabled — too strict for Docker Compose volumes:
+  # (auto-create volumes with `name:` and no body) and GitHub Actions
+  # workflow_dispatch: (valid trigger with no options).
+  empty-values: disable
+
+  # Truthy: allow only strict true/false in values. Allow top-level
+  # `on:` key for GitHub Actions workflows (very common pattern).
+  truthy:
+    allowed-values: ['true', 'false']
+    check-keys: false
+
+  # Comments: accept both `# comment` and `#comment` styles used
+  # throughout the repo; only require one space from content
+  comments:
+    require-starting-space: false
+    min-spaces-from-content: 1
+  comments-indentation: disable
+
+  # Document start/end markers are optional — repo doesn't use them
+  document-start: disable
+  document-end: disable
+
+  # Anchors/aliases: catch duplicates and unused
+  anchors:
+    forbid-undeclared-aliases: true
+    forbid-duplicated-anchors: true
+    forbid-unused-anchors: false

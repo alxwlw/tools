@@ -1,16 +1,15 @@
 {
-	"name": "@liqu-fi-infra/plane-hooks",
+	"name": "@alxwlw/plane-hooks",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
 	"scripts": {
 		"start": "bun src/index.ts",
-		"test": "bun test",
-		"typecheck": "tsc --noEmit",
 		"probe": "bun scripts/probe-plane.ts"
 	},
 	"devDependencies": {
-		"@types/bun": "^1.3.0",
-		"typescript": "^5.9.0"
+		"@alxwlw/tsconfig": "catalog:dev",
+		"@types/bun": "catalog:dev",
+		"typescript": "catalog:dev"
 	}
 }

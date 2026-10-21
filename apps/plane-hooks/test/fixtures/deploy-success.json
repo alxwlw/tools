@@ -1,15 +1,24 @@
 {
-  "repository": "liqu-fi/monorepo",
-  "environment": "production",
-  "outcome": "success",
-  "stage": null,
-  "sha": "89abcdef0123456789abcdef0123456789abcdef",
-  "runId": "37483709612",
-  "runAttempt": "1",
-  "runUrl": "https://github.com/liqu-fi/monorepo/actions/runs/37483709612",
-  "commits": [
-    { "sha": "89abcdef0123456789abcdef0123456789abcdef", "message": "Merge pull request #830 from liqu-fi/staging\n\nrelease" },
-    { "sha": "1111111111111111111111111111111111111111", "message": "feat(gateway): [OPS-12] faster fills (#829)\n\nbody" },
-    { "sha": "2222222222222222222222222222222222222222", "message": "fix(settler): [MONO-3] <script>x</script> (#828)" }
-  ]
+	"repository": "example-org/app",
+	"environment": "production",
+	"outcome": "success",
+	"stage": null,
+	"sha": "89abcdef0123456789abcdef0123456789abcdef",
+	"runId": "37483709612",
+	"runAttempt": "1",
+	"runUrl": "https://github.com/example-org/app/actions/runs/37483709612",
+	"commits": [
+		{
+			"sha": "89abcdef0123456789abcdef0123456789abcdef",
+			"message": "Merge pull request #830 from example-org/staging\n\nrelease"
+		},
+		{
+			"sha": "1111111111111111111111111111111111111111",
+			"message": "feat(gateway): [OPS-12] faster fills (#829)\n\nbody"
+		},
+		{
+			"sha": "2222222222222222222222222222222222222222",
+			"message": "fix(settler): [MONO-3] <script>x</script> (#828)"
+		}
+	]
 }

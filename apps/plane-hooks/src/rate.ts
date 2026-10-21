@@ -11,7 +11,12 @@ export class SlidingWindow {
 	readonly #stamps: number[] = [];
 	#tail: Promise<void> = Promise.resolve();
 
-	constructor(options: { max: number; windowMs: number; now?: () => number; sleep?: (ms: number) => Promise<void> }) {
+	constructor(options: {
+		max: number;
+		windowMs: number;
+		now?: () => number;
+		sleep?: (ms: number) => Promise<void>;
+	}) {
 		this.#max = options.max;
 		this.#windowMs = options.windowMs;
 		this.#now = options.now ?? (() => performance.now());
@@ -28,7 +33,8 @@ export class SlidingWindow {
 	async #wait(): Promise<void> {
 		for (;;) {
 			const now = this.#now();
-			while (this.#stamps.length > 0 && (this.#stamps[0] as number) <= now - this.#windowMs) this.#stamps.shift();
+			while (this.#stamps.length > 0 && (this.#stamps[0] as number) <= now - this.#windowMs)
+				this.#stamps.shift();
 			if (this.#stamps.length < this.#max) {
 				this.#stamps.push(now);
 				return;

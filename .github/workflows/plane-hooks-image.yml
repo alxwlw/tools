@@ -1,0 +1,71 @@
+name: plane-hooks image
+on:
+  pull_request:
+    paths:
+      - 'apps/plane-hooks/**'
+      - '.github/workflows/plane-hooks-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/plane-hooks/**'
+      - '.github/workflows/plane-hooks-image.yml'
+permissions:
+  contents: read
+  packages: write
+env:
+  IMAGE: ghcr.io/alxwlw/plane-hooks
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: apps/plane-hooks
+          platforms: linux/amd64
+          load: true
+          tags: plane-hooks:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke
+        run: |
+          set -euo pipefail
+          token="ph_$(printf '0a%.0s' $(seq 24))"
+          docker run --rm -d --name ph -p 18080:8080 \
+            -e PLANE_HOOKS_PLANE_URL=https://plane.example.com \
+            -e PLANE_HOOKS_WORKSPACE=example-ws \
+            -e PLANE_HOOKS_PROJECT_ID=11111111-2222-3333-4444-555555555555 \
+            -e PLANE_HOOKS_PLANE_API_KEY=x \
+            -e PLANE_HOOKS_GRAFANA_TOKEN="$token" plane-hooks:smoke
+          for _ in $(seq 20); do curl -fs localhost:18080/healthz && break; sleep 0.5; done
+          curl -fs localhost:18080/healthz | grep -qx ok
+          docker exec ph wget -q --spider http://localhost:8080/healthz
+          docker logs ph | grep -F '"event":"listening"' | grep -F '"inputs":["grafana"]'
+          docker rm -f ph
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: apps/plane-hooks
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          labels: org.opencontainers.image.source=https://github.com/alxwlw/tools
+          cache-from: type=gha
+      - name: Digest
+        if: github.event_name == 'push'
+        run: echo "${IMAGE}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}

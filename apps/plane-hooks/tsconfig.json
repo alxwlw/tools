@@ -1,16 +1,4 @@
 {
-	"compilerOptions": {
-		"target": "ES2023",
-		"module": "Preserve",
-		"moduleResolution": "bundler",
-		"lib": ["ES2023"],
-		"types": ["bun"],
-		"strict": true,
-		"noUncheckedIndexedAccess": true,
-		"noEmit": true,
-		"skipLibCheck": true,
-		"allowImportingTsExtensions": true,
-		"verbatimModuleSyntax": true
-	},
+	"extends": "@alxwlw/tsconfig/bun.json",
 	"include": ["src", "test", "scripts"]
 }

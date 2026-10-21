@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"base": "main",
+	"push": "required",
+	"projects": "moon",
+	"workspace": ["pnpm exec stack check"],
+	"project": {
+		"lint": "pnpm exec moon run {project}:lint",
+		"format": "pnpm exec moon run {project}:format",
+		"typecheck": "pnpm exec moon run {project}:typecheck",
+		"test": "pnpm exec moon run {project}:test"
+	}
+}

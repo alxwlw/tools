@@ -1,0 +1,19 @@
+# Canon file — sync-managed: edits happen in alxwlw/stack, not here.
+# Needs the RENOVATE_TOKEN secret (contents, pull requests, issues, workflows: write).
+name: renovate
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      log-level:
+        type: choice
+        options: [info, debug]
+        default: info
+jobs:
+  renovate:
+    uses: alxwlw/stack/.github/workflows/renovate.yml@v1
+    with:
+      log-level: ${{ inputs.log-level || 'info' }}
+    secrets:
+      token: ${{ secrets.RENOVATE_TOKEN }}
