@@ -1,0 +1,18 @@
+# Canon pins. This file is sync-managed: edits happen in alxwlw/stack, not here.
+proto = "0.63.1"
+node = "26.11.1"
+pnpm = "11.28.5"
+bun = "1.4.2"
+moon = "2.6.1"
+uv = "0.12.24"
+
+# Guardrail binaries: versions pinned for reproducibility.
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+gitleaks = "8.30.1"
+
+[plugins]
+# Vendored: upstream github.com/Phault/proto-toml-plugins was removed 2026-09-13, its URL now returns 404.
+actionlint = "file://./.moon/proto-plugins/actionlint.toml"
+shellcheck = "file://./.moon/proto-plugins/shellcheck.toml"
+gitleaks = "file://./.moon/proto-plugins/gitleaks.toml"

@@ -1,0 +1,8 @@
+name: stack
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    uses: alxwlw/stack/.github/workflows/check.yml@v1

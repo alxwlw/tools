@@ -1,0 +1,29 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Canon file — sync-managed (group moon-tasks): edits happen in alxwlw/stack, not here.
+# Bun is the runtime; pnpm only manages dependencies. A project overriding a task's args
+# sets options.mergeArgs: 'replace' — moon 2.x APPENDS inherited args otherwise.
+# typecheck runs `tsc --noEmit`: projects with `references` (the @alxwlw/tsconfig refs/nest presets)
+# need their references built first — override args with `tsc --build` (mergeArgs: 'replace') or
+# hand-roll the task.
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+  tests:
+    - 'tests/**/*'
+
+tasks:
+  typecheck:
+    command: 'bun'
+    # Explicit root compiler: a project-local `typescript` bin (an alias to an older TS, say)
+    # would shadow TS 7 in that project's node_modules/.bin.
+    args: ['run', '--bun', '$workspaceRoot/node_modules/typescript/bin/tsc', '--noEmit']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - 'tsconfig.json'
+      - '/tsconfig.options.json'
+      - '/pnpm-lock.yaml'
+    options:
+      runFromWorkspaceRoot: false

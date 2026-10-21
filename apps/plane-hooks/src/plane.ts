@@ -1,7 +1,7 @@
-import { isRecord } from "./payload.ts";
-import { SlidingWindow } from "./rate.ts";
+import { isRecord } from './payload.ts';
+import { SlidingWindow } from './rate.ts';
 
-export type Priority = "urgent" | "high" | "medium" | "low" | "none";
+export type Priority = 'urgent' | 'high' | 'medium' | 'low' | 'none';
 
 export type NewWorkItem = {
 	name: string;
@@ -20,7 +20,7 @@ export type NewComment = {
 
 export type NewRelease = {
 	name: string;
-	status: "released";
+	status: 'released';
 	/** YYYY-MM-DD — what the Plane UI labels "Target date". */
 	release_date: string;
 	external_source: string;
@@ -42,7 +42,11 @@ export type LabelSummary = { id: string; name: string };
  */
 export interface PlaneApi {
 	createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert>;
-	findWorkItemByExternalId(projectId: string, source: string, externalId: string): Promise<{ id: string } | null>;
+	findWorkItemByExternalId(
+		projectId: string,
+		source: string,
+		externalId: string,
+	): Promise<{ id: string } | null>;
 	getWorkItem(projectId: string, workItemId: string): Promise<WorkItemRef>;
 	setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void>;
 	createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert>;
@@ -63,7 +67,7 @@ export interface PlaneApi {
 
 /** A non-2xx answer the call did not expect. Carries no response body: bodies can echo payload data into logs. */
 export class PlaneApiError extends Error {
-	override name = "PlaneApiError";
+	override name = 'PlaneApiError';
 
 	constructor(
 		readonly status: number,
@@ -86,12 +90,12 @@ export type PlaneClientOptions = {
 	limiter?: { acquire(): Promise<void> };
 };
 
-const PAGE_SIZE = "100";
+const PAGE_SIZE = '100';
 /** Plane's default API_KEY_RATE_LIMIT is 60/minute per key; 50 leaves room for whatever else uses the token. */
 export const PLANE_RATE_MAX = 50;
 export const PLANE_RATE_WINDOW_MS = 60_000;
 const MAX_PAGES = 50;
-const LABEL_COLOR = "#d9534f";
+const LABEL_COLOR = '#d9534f';
 /** Plane takes at most this many work item ids in one attach call. */
 export const RELEASE_ITEMS_MAX = 100;
 
@@ -103,30 +107,42 @@ export class PlaneClient implements PlaneApi {
 	readonly #limiter: { acquire(): Promise<void> };
 
 	constructor(options: PlaneClientOptions) {
-		this.#root = `${options.baseUrl.replace(/\/+$/, "")}/api/v1/workspaces/${encodeURIComponent(options.workspace)}`;
+		this.#root = `${options.baseUrl.replace(/\/+$/, '')}/api/v1/workspaces/${encodeURIComponent(options.workspace)}`;
 		this.#apiKey = options.apiKey;
 		this.#timeoutMs = options.timeoutMs ?? 10_000;
 		this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
-		this.#limiter = options.limiter ?? new SlidingWindow({ max: PLANE_RATE_MAX, windowMs: PLANE_RATE_WINDOW_MS });
+		this.#limiter =
+			options.limiter ?? new SlidingWindow({ max: PLANE_RATE_MAX, windowMs: PLANE_RATE_WINDOW_MS });
 	}
 
 	createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert> {
 		return this.#upsert(`/projects/${projectId}/work-items/`, item);
 	}
 
-	async findWorkItemByExternalId(projectId: string, source: string, externalId: string): Promise<{ id: string } | null> {
+	async findWorkItemByExternalId(
+		projectId: string,
+		source: string,
+		externalId: string,
+	): Promise<{ id: string } | null> {
 		const query = new URLSearchParams({ external_id: externalId, external_source: source });
-		const res = await this.#request("GET", `/projects/${projectId}/work-items/?${query}`, undefined, [404]);
-		return res.status === 404 ? null : { id: field(res.body, "id") };
+		const res = await this.#request(
+			'GET',
+			`/projects/${projectId}/work-items/?${query.toString()}`,
+			undefined,
+			[404],
+		);
+		return res.status === 404 ? null : { id: field(res.body, 'id') };
 	}
 
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItemRef> {
-		const res = await this.#request("GET", `/projects/${projectId}/work-items/${workItemId}/`);
+		const res = await this.#request('GET', `/projects/${projectId}/work-items/${workItemId}/`);
 		return workItemRef(res.body);
 	}
 
 	async setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void> {
-		await this.#request("PATCH", `/projects/${projectId}/work-items/${workItemId}/`, { state: stateId });
+		await this.#request('PATCH', `/projects/${projectId}/work-items/${workItemId}/`, {
+			state: stateId,
+		});
 	}
 
 	createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert> {
@@ -136,67 +152,83 @@ export class PlaneClient implements PlaneApi {
 	async listComments(projectId: string, workItemId: string): Promise<CommentSummary[]> {
 		const rows = await this.#listAll(`/projects/${projectId}/work-items/${workItemId}/comments/`);
 		return rows.map((row) => ({
-			id: field(row, "id"),
-			external_id: typeof row.external_id === "string" && row.external_id !== "" ? row.external_id : null,
-			created_at: field(row, "created_at"),
+			id: field(row, 'id'),
+			external_id:
+				typeof row.external_id === 'string' && row.external_id !== '' ? row.external_id : null,
+			created_at: field(row, 'created_at'),
 		}));
 	}
 
 	async getWorkItemByKey(key: string): Promise<WorkItemRef | null> {
-		const res = await this.#request("GET", `/work-items/${encodeURIComponent(key)}/`, undefined, [404]);
+		const res = await this.#request(
+			'GET',
+			`/work-items/${encodeURIComponent(key)}/`,
+			undefined,
+			[404],
+		);
 		return res.status === 404 ? null : workItemRef(res.body);
 	}
 
 	async listProjectIdentifiers(): Promise<string[]> {
-		return (await this.#listAll("/projects/")).map((row) => field(row, "identifier"));
+		return (await this.#listAll('/projects/')).map((row) => field(row, 'identifier'));
 	}
 
 	async listStates(projectId: string): Promise<StateSummary[]> {
 		return (await this.#listAll(`/projects/${projectId}/states/`)).map((row) => ({
-			id: field(row, "id"),
-			group: field(row, "group"),
+			id: field(row, 'id'),
+			group: field(row, 'group'),
 			default: row.default === true,
 		}));
 	}
 
 	async listLabels(projectId: string): Promise<LabelSummary[]> {
 		return (await this.#listAll(`/projects/${projectId}/labels/`)).map((row) => ({
-			id: field(row, "id"),
-			name: field(row, "name"),
+			id: field(row, 'id'),
+			name: field(row, 'name'),
 		}));
 	}
 
 	async createLabel(projectId: string, name: string): Promise<LabelSummary> {
-		const res = await this.#request("POST", `/projects/${projectId}/labels/`, { name, color: LABEL_COLOR });
-		return { id: field(res.body, "id"), name: field(res.body, "name") };
+		const res = await this.#request('POST', `/projects/${projectId}/labels/`, {
+			name,
+			color: LABEL_COLOR,
+		});
+		return { id: field(res.body, 'id'), name: field(res.body, 'name') };
 	}
 
-	async findReleaseByExternalId(source: string, externalId: string): Promise<{ id: string } | null> {
-		const found = (await this.#listAll("/releases/")).find(
+	async findReleaseByExternalId(
+		source: string,
+		externalId: string,
+	): Promise<{ id: string } | null> {
+		const found = (await this.#listAll('/releases/')).find(
 			(row) => row.external_source === source && row.external_id === externalId,
 		);
-		return found ? { id: field(found, "id") } : null;
+		return found ? { id: field(found, 'id') } : null;
 	}
 
 	createRelease(release: NewRelease): Promise<Upsert> {
-		return this.#upsert("/releases/", release);
+		return this.#upsert('/releases/', release);
 	}
 
 	async updateReleaseChangelog(releaseId: string, html: string): Promise<void> {
-		await this.#request("PATCH", `/releases/${releaseId}/changelog/`, { description_html: html });
+		await this.#request('PATCH', `/releases/${releaseId}/changelog/`, { description_html: html });
 	}
 
 	async addReleaseWorkItems(releaseId: string, workItemIds: readonly string[]): Promise<void> {
 		if (workItemIds.length === 0) return;
 		if (workItemIds.length > RELEASE_ITEMS_MAX) {
-			throw new RangeError(`at most ${RELEASE_ITEMS_MAX} work items per attach call, got ${workItemIds.length}`);
+			throw new RangeError(
+				`at most ${RELEASE_ITEMS_MAX} work items per attach call, got ${workItemIds.length}`,
+			);
 		}
-		await this.#request("POST", `/releases/${releaseId}/work-items/`, { work_item_ids: workItemIds });
+		await this.#request('POST', `/releases/${releaseId}/work-items/`, {
+			work_item_ids: workItemIds,
+		});
 	}
 
 	async #upsert(path: string, body: unknown): Promise<Upsert> {
-		const res = await this.#request("POST", path, body, [409]);
-		return { id: field(res.body, "id"), created: res.status !== 409 };
+		const res = await this.#request('POST', path, body, [409]);
+		return { id: field(res.body, 'id'), created: res.status !== 409 };
 	}
 
 	/** Follows Plane's cursor pages (`next_page_results` / `next_cursor`); a bare array is the whole list. */
@@ -205,14 +237,15 @@ export class PlaneClient implements PlaneApi {
 		let cursor: string | null = null;
 		for (let page = 0; page < MAX_PAGES; page++) {
 			const query = new URLSearchParams({ per_page: PAGE_SIZE });
-			if (cursor !== null) query.set("cursor", cursor);
-			const res = await this.#request("GET", `${path}?${query}`);
+			if (cursor !== null) query.set('cursor', cursor);
+			const res = await this.#request('GET', `${path}?${query.toString()}`);
 			if (Array.isArray(res.body)) return [...out, ...res.body.filter(isRecord)];
 			if (!isRecord(res.body) || !Array.isArray(res.body.results)) {
 				throw new Error(`Plane GET ${path}: unexpected list shape`);
 			}
 			out.push(...res.body.results.filter(isRecord));
-			if (res.body.next_page_results !== true || typeof res.body.next_cursor !== "string") return out;
+			if (res.body.next_page_results !== true || typeof res.body.next_cursor !== 'string')
+				return out;
 			cursor = res.body.next_cursor;
 		}
 		throw new Error(`Plane GET ${path}: more than ${MAX_PAGES} pages`);
@@ -228,15 +261,20 @@ export class PlaneClient implements PlaneApi {
 		await this.#limiter.acquire();
 		const res = await this.#fetch(`${this.#root}${path}`, {
 			method,
-			headers: { "X-API-Key": this.#apiKey, "Content-Type": "application/json", Accept: "application/json" },
+			headers: {
+				'X-API-Key': this.#apiKey,
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+			},
 			body: body === undefined ? undefined : JSON.stringify(body),
 			signal: AbortSignal.timeout(this.#timeoutMs),
 		});
 		const text = await res.text();
-		const cleanPath = path.split("?")[0] as string;
-		if (!res.ok && !allowed.includes(res.status)) throw new PlaneApiError(res.status, method, cleanPath);
+		const cleanPath = path.split('?')[0] as string;
+		if (!res.ok && !allowed.includes(res.status))
+			throw new PlaneApiError(res.status, method, cleanPath);
 		let parsed: unknown = null;
-		if (text !== "") {
+		if (text !== '') {
 			try {
 				parsed = JSON.parse(text);
 			} catch {
@@ -250,10 +288,11 @@ export class PlaneClient implements PlaneApi {
 
 function field(value: unknown, key: string): string {
 	const found = isRecord(value) ? value[key] : undefined;
-	if (typeof found !== "string" || found === "") throw new Error(`Plane response: no string field "${key}"`);
+	if (typeof found !== 'string' || found === '')
+		throw new Error(`Plane response: no string field "${key}"`);
 	return found;
 }
 
 function workItemRef(value: unknown): WorkItemRef {
-	return { id: field(value, "id"), project: field(value, "project"), state: field(value, "state") };
+	return { id: field(value, 'id'), project: field(value, 'project'), state: field(value, 'state') };
 }

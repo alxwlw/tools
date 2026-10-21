@@ -1,11 +1,15 @@
-import { describe, expect, test } from "bun:test";
-import { ttl } from "../src/ttl.ts";
+import { describe, expect, test } from 'bun:test';
+import { ttl } from '../src/ttl.ts';
 
-describe("ttl", () => {
-	test("в пределах TTL загрузчик вызывается один раз, после — снова", async () => {
+describe('ttl', () => {
+	test('в пределах TTL загрузчик вызывается один раз, после — снова', async () => {
 		let clock = 0;
 		let loads = 0;
-		const get = ttl(async () => ++loads, 1000, () => clock);
+		const get = ttl(
+			async () => ++loads,
+			1000,
+			() => clock,
+		);
 		expect(await get()).toBe(1);
 		clock = 999;
 		expect(await get()).toBe(1);
@@ -13,19 +17,19 @@ describe("ttl", () => {
 		expect(await get()).toBe(2);
 	});
 
-	test("ошибка загрузки не кэшируется", async () => {
+	test('ошибка загрузки не кэшируется', async () => {
 		let loads = 0;
 		const get = ttl(async () => {
 			loads++;
-			if (loads === 1) throw new Error("plane down");
-			return "ok";
+			if (loads === 1) throw new Error('plane down');
+			return 'ok';
 		}, 60_000);
 		await get().catch(() => undefined);
-		expect(await get()).toBe("ok");
+		expect(await get()).toBe('ok');
 		expect(loads).toBe(2);
 	});
 
-	test("одновременные вызовы делят одну загрузку", async () => {
+	test('одновременные вызовы делят одну загрузку', async () => {
 		let loads = 0;
 		let release: (value: string) => void = () => undefined;
 		const get = ttl(() => {
@@ -35,8 +39,8 @@ describe("ttl", () => {
 			});
 		}, 60_000);
 		const both = Promise.all([get(), get()]);
-		release("v");
-		expect(await both).toEqual(["v", "v"]);
+		release('v');
+		expect(await both).toEqual(['v', 'v']);
 		expect(loads).toBe(1);
 	});
 });

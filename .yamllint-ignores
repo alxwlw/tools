@@ -1,0 +1,5 @@
+# Repo-local yamllint ignores — YOURS to edit (seeded once by
+# `stack sync`, never overwritten). gitignore-style patterns.
+# The rule set + canon-wide ignores live in the sync-managed .yamllint /
+# .yamllint-canon-ignores — never edit those; add repo-specific paths HERE
+# (vendored fixtures, generated YAML, state dirs, …).

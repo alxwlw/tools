@@ -3,7 +3,11 @@
  * load; a rejected load is dropped, so the next call retries instead of
  * replaying the failure for the rest of the TTL.
  */
-export function ttl<T>(load: () => Promise<T>, ttlMs: number, now: () => number = Date.now): () => Promise<T> {
+export function ttl<T>(
+	load: () => Promise<T>,
+	ttlMs: number,
+	now: () => number = Date.now,
+): () => Promise<T> {
 	let entry: { value: Promise<T>; expires: number } | null = null;
 	return () => {
 		const at = now();

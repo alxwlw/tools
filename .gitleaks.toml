@@ -1,0 +1,18 @@
+# Repo-local gitleaks config — YOURS to edit (seeded once by `stack sync`,
+# never overwritten). The canon ruleset lives in .gitleaks.canon.toml, which IS
+# sync-managed verbatim — never edit that file; put repo-specific allowlists
+# and extra rules HERE instead. gitleaks chains configs via [extend]:
+# default ruleset → .gitleaks.canon.toml → this file.
+[extend]
+path = ".gitleaks.canon.toml"
+
+# Fake incident key used as a literal in two test files (not a credential).
+# Both conditions must hold, so the generic-api-key rule stays on everywhere else.
+[[allowlists]]
+description = "fake test incident key in plane-hooks tests"
+condition = "AND"
+paths = [
+  '''apps/plane-hooks/test/grafana\.test\.ts''',
+  '''apps/plane-hooks/test/server\.test\.ts''',
+]
+regexes = ['''a1b2c3d4e5f60718''']

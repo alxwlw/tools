@@ -1,0 +1,129 @@
+// markdownlint-cli2 config — stack canon (sync-managed verbatim; never edit
+// in a repo). Repo-specific ignore paths go in .markdownlintignore (gitignore
+// syntax; seeded once by `stack sync`, repo-owned afterwards): markdownlint-cli2
+// has no ignore file by default, so the `gitignore` option below points it there.
+//
+// Scope: **semantic** markdown linting only. Formatting (line wrap,
+// list marker style, trailing whitespace, etc.) is oxfmt's job — the
+// `format` task of the `moon-tasks` group (`.moon/tasks/oxfmt.yml`) or your
+// own oxfmt run. Rules that overlap with the formatter are disabled here to
+// avoid fighting between the two tools.
+//
+// Enabled checks target bugs that a formatter can't catch:
+//   - broken heading hierarchy
+//   - missing blank lines around structural elements
+//   - fenced code blocks without language specifier
+//   - dead in-file anchors (#section references that don't exist)
+//   - broken reference links
+//
+// Full rule reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+{
+	"config": {
+		// ── Heading structure ────────────────────────────────────
+		"MD001": true, // heading-increment: no skipping levels (H1→H3)
+		"MD003": { "style": "atx" }, // heading-style: force # over ===
+		"MD018": true, // no-missing-space-atx: `#Title` → `# Title`
+		"MD019": true, // no-multiple-space-atx
+		"MD020": true, // no-missing-space-closed-atx
+		"MD021": true, // no-multiple-space-closed-atx
+		"MD023": true, // heading-start-left (no indented headings)
+		"MD025": false, // single-h1: sometimes we use multiple H1s (rare, fine)
+		"MD036": true, // no-emphasis-as-heading
+		"MD041": false, // first-line-h1: partial files may not start with H1
+		"MD042": true, // no-empty-links
+		"MD043": false, // required-headings: project-specific, too strict
+
+		// ── Blank lines around structural elements ───────────────
+		"MD022": true, // blanks-around-headings
+		"MD031": true, // blanks-around-fences
+		"MD032": true, // blanks-around-lists
+
+		// ── Code blocks ──────────────────────────────────────────
+		"MD040": true, // fenced-code-language: require lang on ```
+		"MD046": { "style": "fenced" }, // code-block-style: always fenced
+		"MD048": { "style": "backtick" }, // code-fence-style: ``` not ~~~
+		"MD014": false, // commands-show-output: allow $ prefix on shell snippets
+
+		// ── Emphasis ─────────────────────────────────────────────
+		"MD037": true, // no-space-in-emphasis
+		"MD038": true, // no-space-in-code
+		"MD039": true, // no-space-in-links
+		"MD049": { "style": "underscore" }, // emphasis-style: use _italic_
+		"MD050": { "style": "asterisk" }, // strong-style: use **bold**
+
+		// ── Links and references ─────────────────────────────────
+		"MD051": true, // link-fragments: validates #anchor targets
+		"MD052": true, // reference-links-images: defined references
+		"MD053": true, // link-image-reference-definitions: no unused refs
+		"MD054": false, // link-image-style: inline+reference mixed is fine
+		"MD059": true, // descriptive-link-text: avoid "click here"
+
+		// ── Tables ───────────────────────────────────────────────
+		// MD055/MD060 disabled: table pipe/column style is opinionated
+		// formatting that the formatter handles. MD056 stays enabled because
+		// it catches REAL bugs (missing cells = broken tables).
+		"MD055": false, // table-pipe-style
+		"MD056": true, // table-column-count: all rows have same number of cells
+		"MD058": false, // blanks-around-tables (formatter handles)
+		"MD060": false, // table-column-style (formatter handles)
+
+		// ── Handled by the formatter — explicitly disabled ────────
+		"MD004": false, // ul-style
+		"MD005": false, // list-indent
+		"MD007": false, // ul-indent
+		"MD009": false, // no-trailing-spaces
+		"MD010": false, // no-hard-tabs
+		"MD012": false, // no-multiple-blanks
+		"MD013": false, // line-length
+		"MD027": false, // no-multiple-space-blockquote
+		"MD028": false, // no-blanks-blockquote
+		"MD029": false, // ol-prefix
+		"MD030": false, // list-marker-space
+		"MD047": false, // single-trailing-newline
+
+		// ── Too noisy / not worth the signal ─────────────────────
+		"MD024": false, // no-duplicate-heading: sometimes intentional
+		"MD026": false, // no-trailing-punctuation: "Why not X?" is fine
+		"MD033": false, // no-inline-html: HTML comment markers + <details> are common
+		"MD034": false, // no-bare-urls: some examples intentionally bare
+		"MD035": false, // hr-style
+		"MD044": false, // proper-names: requires project-specific dictionary
+		"MD045": false, // no-alt-text: too many screenshots lack alt
+	},
+	"globs": ["**/*.md", "**/*.mdx"],
+	// Makes cli2 read the repo-owned ignore file (gitignore syntax).
+	"gitignore": ".markdownlintignore",
+	"ignores": [
+		// Build artifacts
+		"**/node_modules/**",
+		"**/dist/**",
+		"**/.tsbuild/**",
+		"**/coverage/**",
+		"**/.next/**",
+		"**/.moon/cache/**",
+		// Vendored / third-party
+		"**/CHANGELOG.md",
+		"**/LICENSE.md",
+		// Historical records — intentionally frozen in time, not
+		// kept current. Specs capture intent at write-time; plans
+		// capture execution at write-time. Re-linting them churns
+		// their commit history for no benefit.
+		"docs/specs/**",
+		"docs/plans/**",
+		// The same records under the superpowers plugin's default layout.
+		"docs/superpowers/specs/**",
+		"docs/superpowers/plans/**",
+		".superpowers/**",
+		// Brainstorming docs — idea exploration, not operational
+		"docs/ideas/**",
+		// Claude skill files (frozen instruction sets) — SKILL.md content is
+		// prose + example snippets that don't fit doc lint rules.
+		".claude/**",
+		// Agent working directory — scratch space, not operational docs
+		".agent/**",
+		// Archived docs — historical, kept for reference
+		"docs/archive/**",
+		// ADRs — accepted architectural decisions, frozen once shipped
+		"docs/adr/**",
+	],
+}

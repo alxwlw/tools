@@ -1,0 +1,76 @@
+# gitleaks config — canon ruleset. Run it in CI (the stack-check reusable workflow with `gitleaks: true`, or a `gitleaks git` job) or locally.
+# Reference: https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+# Inherit the default ruleset (catches AWS keys, JWTs, GH tokens,
+# Slack tokens, private-key PEM blocks, generic API keys, etc.)
+[extend]
+useDefault = true
+
+# Canon extensions.
+[[rules]]
+id = 'eth-private-key-no-prefix'
+description = 'Ethereum private key (32 bytes hex, with or without 0x prefix)'
+regex = '''(?i)(?:eth_?priv|private_?key)\s*[:=]\s*["']?(?:0x)?[a-f0-9]{64}["']?'''
+tags = ['secret', 'ethereum']
+keywords = ['privkey', 'private_key', 'privatekey', 'eth_priv', 'ethpriv']
+
+[allowlist]
+description = 'Global false-positive filters.'
+
+# Commits allowlisted because the "secret" is a confirmed false positive.
+# Add fingerprint + explanation when suppressing a specific finding, e.g.:
+# commits = ['<sha>']  # path/to/file.ts line N: <why this isn't a secret>
+commits = []
+
+# Generated / vendored / cache paths.
+paths = [
+  '''(.*/)?node_modules(/|$)''',
+  '''(.*/)?dist(/|$)''',
+  '''(.*/)?\.tsbuild(/|$)''',
+  '''(.*/)?coverage(/|$)''',
+  '''(.*/)?\.next(/|$)''',
+  '''(.*/)?\.source(/|$)''',
+  '''(.*/)?\.moon/cache(/|$)''',
+  '''pnpm-lock\.yaml$''',
+  '''(.*/)?CHANGELOG\.md$''',
+  '''(.*/)?prisma/migrations/''',
+  '''(.*/)?\.claude(/|$)''',
+  '''(.*/)?\.agent(/|$)''',
+  # Test fixtures and well-known Anvil/Hardhat deterministic accounts
+  # (these are published in every dev env and are NOT real secrets).
+  '''(.*/)?__tests__(/|$)''',
+  '''(.*/)?__mocks__(/|$)''',
+  '''(.*/)?fixtures?(/|$)''',
+  # Historical planning docs — false-positive regex matches in prose
+  # and curl examples. Skip the spec/plan/archive trees.
+  '''docs/(specs|plans|archive)/''',
+  '''docs/superpowers/(specs|plans|archive)/''',
+  '''\.superpowers/''',
+  '''docs/ideas/''',
+  '''docs/draft/''',
+]
+
+# Well-known public test keys / addresses. Add here as they come up.
+regexTarget = 'match'
+regexes = [
+  # Hardhat / Anvil default accounts (10× published deterministic keys).
+  '''0xf39[fF]d6e51aad88[fF]6[fF]4ce6a[bB]8827279c[fF]{3}b92266''',
+  '''0x70997970[cC]51812dc3[aA]010[cC]7d01[bB]50e0d17dc79c8''',
+  '''0x3[cC]44[cC]dddb6[aA]900fa2[bB]585dd299e03d12fa4293[bB][cC]''',
+  # Anvil test account #0 private key — documented everywhere, not a
+  # real secret. Published in https://hardhat.org/hardhat-network/docs/reference.
+  '''(?i)ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80''',
+  # Test placeholders we put in fixtures on purpose.
+  '''dead[bB]eef''',
+  '''[fF]akeTokenDoNotUseInProd''',
+]
+
+# Use stopwords to suppress obvious noise. Gitleaks uses Hashicorp's
+# set by default; extend here if needed.
+stopwords = [
+  'placeholder',
+  'example',
+  'dummy',
+  'fixture',
+  'fake',
+]

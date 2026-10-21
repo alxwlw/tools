@@ -1,20 +1,25 @@
-import { loadConfig } from "./config.ts";
-import { postDeployNotes } from "./deploy-note.ts";
-import { createIncidentReporter } from "./incident.ts";
-import { PlaneClient } from "./plane.ts";
-import { publishRelease } from "./release.ts";
-import { MAX_BODY_BYTES, createHandler, describeError, text } from "./server.ts";
-import { ttl } from "./ttl.ts";
+import { loadConfig } from './config.ts';
+import { postDeployNotes } from './deploy-note.ts';
+import { createIncidentReporter } from './incident.ts';
+import { PlaneClient } from './plane.ts';
+import { publishRelease } from './release.ts';
+import { createHandler, describeError, MAX_BODY_BYTES, text } from './server.ts';
+import { ttl } from './ttl.ts';
 
 const PROJECT_IDENTIFIERS_TTL_MS = 10 * 60_000;
 
 const config = loadConfig(process.env);
-const plane = new PlaneClient({ baseUrl: config.planeUrl, workspace: config.workspace, apiKey: config.planeApiKey });
+const plane = new PlaneClient({
+	baseUrl: config.planeUrl,
+	workspace: config.workspace,
+	apiKey: config.planeApiKey,
+});
 const projectIdentifiers = ttl(
 	async (): Promise<ReadonlySet<string>> => new Set(await plane.listProjectIdentifiers()),
 	PROJECT_IDENTIFIERS_TTL_MS,
 );
-const log = (entry: object) => console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
+const log = (entry: object) =>
+	console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
 
 const server = Bun.serve({
 	port: config.port,
@@ -27,8 +32,16 @@ const server = Bun.serve({
 	// 240 (max 255) guards against that cut reaching POSTs.
 	idleTimeout: 240,
 	error(err) {
-		log({ source: "-", event: "unhandled", key: "-", action: "error", workItemId: null, ms: 0, error: describeError(err) });
-		return text(500, "internal error");
+		log({
+			source: '-',
+			event: 'unhandled',
+			key: '-',
+			action: 'error',
+			workItemId: null,
+			ms: 0,
+			error: describeError(err),
+		});
+		return text(500, 'internal error');
 	},
 	fetch: createHandler({
 		grafanaToken: config.grafanaToken,
@@ -41,4 +54,4 @@ const server = Bun.serve({
 	}),
 });
 
-log({ event: "listening", port: server.port });
+log({ event: 'listening', port: server.port });

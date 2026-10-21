@@ -9,7 +9,7 @@ import {
 	type StateSummary,
 	type Upsert,
 	type WorkItemRef,
-} from "../src/plane.ts";
+} from '../src/plane.ts';
 
 /**
  * In-memory Plane. scripts/probe-plane.ts checks part of its semantics on the
@@ -32,16 +32,26 @@ import {
  * Releases: whether Plane answers 409 to a duplicate release external_id is not probed, so createRelease always
  * creates — a caller that skips findReleaseByExternalId gets a second release here, as it might in prod.
  */
-export type FakeWorkItem = NewWorkItem & { id: string; project: string; sequence: number; state: string };
-export type FakeComment = NewComment & { id: string; project: string; workItemId: string; created_at: string };
+export type FakeWorkItem = NewWorkItem & {
+	id: string;
+	project: string;
+	sequence: number;
+	state: string;
+};
+export type FakeComment = NewComment & {
+	id: string;
+	project: string;
+	workItemId: string;
+	created_at: string;
+};
 
 export type FakeRelease = NewRelease & { id: string; changelog: string; workItemIds: string[] };
 
 export const STATES: StateSummary[] = [
-	{ id: "st-backlog", group: "backlog", default: true },
-	{ id: "st-started", group: "started", default: false },
-	{ id: "st-done", group: "completed", default: false },
-	{ id: "st-cancelled", group: "cancelled", default: false },
+	{ id: 'st-backlog', group: 'backlog', default: true },
+	{ id: 'st-started', group: 'started', default: false },
+	{ id: 'st-done', group: 'completed', default: false },
+	{ id: 'st-cancelled', group: 'cancelled', default: false },
 ];
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -58,15 +68,15 @@ export class FakePlane implements PlaneApi {
 	readonly #projects: Map<string, string>;
 	readonly #failures = new Map<keyof PlaneApi, Error>();
 	#sequence = 0;
-	#clock = Date.parse("2026-10-06T00:00:00Z");
+	#clock = Date.parse('2026-10-06T00:00:00Z');
 
 	/** `projects`: identifier → project id. */
-	constructor(projects: Record<string, string> = { OPS: "p-ops" }) {
+	constructor(projects: Record<string, string> = { OPS: 'p-ops' }) {
 		this.#projects = new Map(Object.entries(projects));
 	}
 
 	/** The next call of `method` rejects with `error`. */
-	failNext(method: keyof PlaneApi, error: Error = new PlaneApiError(500, "FAKE", method)): void {
+	failNext(method: keyof PlaneApi, error: Error = new PlaneApiError(500, 'FAKE', method)): void {
 		this.#failures.set(method, error);
 	}
 
@@ -76,13 +86,13 @@ export class FakePlane implements PlaneApi {
 			id: `w${sequence}`,
 			project,
 			sequence,
-			state: "st-backlog",
+			state: 'st-backlog',
 			name: `seeded ${sequence}`,
-			description_html: "",
-			priority: "none",
+			description_html: '',
+			priority: 'none',
 			labels: [],
 			external_id: `seed-${sequence}`,
-			external_source: "seed",
+			external_source: 'seed',
 			...fields,
 		};
 		this.workItems.push(item);
@@ -96,9 +106,9 @@ export class FakePlane implements PlaneApi {
 			id: `c${++this.#sequence}`,
 			project: item.project,
 			workItemId,
-			comment_html: "<p>seeded</p>",
-			external_id: externalId ?? "",
-			external_source: externalId === null ? "" : "seed",
+			comment_html: '<p>seeded</p>',
+			external_id: externalId ?? '',
+			external_source: externalId === null ? '' : 'seed',
 			created_at: createdAt,
 		};
 		this.comments.push(comment);
@@ -110,38 +120,47 @@ export class FakePlane implements PlaneApi {
 	}
 
 	async createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert> {
-		this.#enter("createWorkItem", projectId);
+		this.#enter('createWorkItem', projectId);
 		const existing = this.workItems.find(
-			(w) => w.project === projectId && w.external_id === item.external_id && w.external_source === item.external_source,
+			(w) =>
+				w.project === projectId &&
+				w.external_id === item.external_id &&
+				w.external_source === item.external_source,
 		);
 		await tick();
 		if (existing) return { id: existing.id, created: false };
-		const created = this.seedWorkItem(projectId, { ...item, state: "st-backlog" });
+		const created = this.seedWorkItem(projectId, { ...item, state: 'st-backlog' });
 		return { id: created.id, created: true };
 	}
 
-	async findWorkItemByExternalId(projectId: string, source: string, externalId: string): Promise<{ id: string } | null> {
-		this.#enter("findWorkItemByExternalId", projectId);
+	async findWorkItemByExternalId(
+		projectId: string,
+		source: string,
+		externalId: string,
+	): Promise<{ id: string } | null> {
+		this.#enter('findWorkItemByExternalId', projectId);
 		const found = this.workItems.find(
-			(w) => w.project === projectId && w.external_id === externalId && w.external_source === source,
+			(w) =>
+				w.project === projectId && w.external_id === externalId && w.external_source === source,
 		);
 		return found ? { id: found.id } : null;
 	}
 
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItemRef> {
-		this.#enter("getWorkItem", projectId);
+		this.#enter('getWorkItem', projectId);
 		const item = this.#item(projectId, workItemId);
-		if (this.archived.has(item.id)) throw new PlaneApiError(404, "GET", `/work-items/${workItemId}/`);
+		if (this.archived.has(item.id))
+			throw new PlaneApiError(404, 'GET', `/work-items/${workItemId}/`);
 		return { id: item.id, project: item.project, state: item.state };
 	}
 
 	async setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void> {
-		this.#enter("setWorkItemState", projectId);
+		this.#enter('setWorkItemState', projectId);
 		this.#item(projectId, workItemId).state = stateId;
 	}
 
 	async createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert> {
-		this.#enter("createComment", projectId);
+		this.#enter('createComment', projectId);
 		this.#item(projectId, workItemId);
 		const existing = this.comments.find(
 			(c) =>
@@ -164,68 +183,86 @@ export class FakePlane implements PlaneApi {
 	}
 
 	async listComments(projectId: string, workItemId: string): Promise<CommentSummary[]> {
-		this.#enter("listComments", projectId);
+		this.#enter('listComments', projectId);
 		this.#item(projectId, workItemId);
 		return this.commentsOf(workItemId)
-			.map((c) => ({ id: c.id, external_id: c.external_id === "" ? null : c.external_id, created_at: c.created_at }))
+			.map((c) => ({
+				id: c.id,
+				external_id: c.external_id === '' ? null : c.external_id,
+				created_at: c.created_at,
+			}))
 			.reverse();
 	}
 
 	async getWorkItemByKey(key: string): Promise<WorkItemRef | null> {
-		this.#enter("getWorkItemByKey");
+		this.#enter('getWorkItemByKey');
 		const match = /^([A-Z0-9]+)-(\d+)$/.exec(key);
 		const project = match ? this.#projects.get(match[1] as string) : undefined;
 		if (!match || project === undefined) return null;
-		if (this.forbiddenProjects.has(project)) throw new PlaneApiError(403, "GET", `/work-items/${key}/`);
-		const item = this.workItems.find((w) => w.project === project && w.sequence === Number(match[2]));
+		if (this.forbiddenProjects.has(project))
+			throw new PlaneApiError(403, 'GET', `/work-items/${key}/`);
+		const item = this.workItems.find(
+			(w) => w.project === project && w.sequence === Number(match[2]),
+		);
 		return item ? { id: item.id, project: item.project, state: item.state } : null;
 	}
 
 	async listProjectIdentifiers(): Promise<string[]> {
-		this.#enter("listProjectIdentifiers");
+		this.#enter('listProjectIdentifiers');
 		return [...this.#projects.keys()];
 	}
 
 	async listStates(projectId: string): Promise<StateSummary[]> {
-		this.#enter("listStates", projectId);
+		this.#enter('listStates', projectId);
 		return STATES.map((s) => ({ ...s }));
 	}
 
 	async listLabels(projectId: string): Promise<LabelSummary[]> {
-		this.#enter("listLabels", projectId);
+		this.#enter('listLabels', projectId);
 		return [...(this.labels.get(projectId) ?? [])];
 	}
 
 	async createLabel(projectId: string, name: string): Promise<LabelSummary> {
-		this.#enter("createLabel", projectId);
+		this.#enter('createLabel', projectId);
 		const label = { id: `l${++this.#sequence}`, name };
 		this.labels.set(projectId, [...(this.labels.get(projectId) ?? []), label]);
 		return label;
 	}
 
-	async findReleaseByExternalId(source: string, externalId: string): Promise<{ id: string } | null> {
-		this.#enter("findReleaseByExternalId");
-		const found = this.releases.find((r) => r.external_source === source && r.external_id === externalId);
+	async findReleaseByExternalId(
+		source: string,
+		externalId: string,
+	): Promise<{ id: string } | null> {
+		this.#enter('findReleaseByExternalId');
+		const found = this.releases.find(
+			(r) => r.external_source === source && r.external_id === externalId,
+		);
 		return found ? { id: found.id } : null;
 	}
 
 	async createRelease(release: NewRelease): Promise<Upsert> {
-		this.#enter("createRelease");
+		this.#enter('createRelease');
 		await tick();
-		const created: FakeRelease = { ...release, id: `r${++this.#sequence}`, changelog: "", workItemIds: [] };
+		const created: FakeRelease = {
+			...release,
+			id: `r${++this.#sequence}`,
+			changelog: '',
+			workItemIds: [],
+		};
 		this.releases.push(created);
 		return { id: created.id, created: true };
 	}
 
 	async updateReleaseChangelog(releaseId: string, html: string): Promise<void> {
-		this.#enter("updateReleaseChangelog");
+		this.#enter('updateReleaseChangelog');
 		this.#release(releaseId).changelog = html;
 	}
 
 	async addReleaseWorkItems(releaseId: string, workItemIds: readonly string[]): Promise<void> {
-		this.#enter("addReleaseWorkItems");
+		this.#enter('addReleaseWorkItems');
 		const release = this.#release(releaseId);
-		for (const id of workItemIds) if (!release.workItemIds.includes(id)) release.workItemIds.push(id);
+		for (const id of workItemIds)
+			if (!release.workItemIds.includes(id)) release.workItemIds.push(id);
 	}
 
 	#enter(method: keyof PlaneApi, projectId?: string): void {
@@ -236,19 +273,19 @@ export class FakePlane implements PlaneApi {
 			throw failure;
 		}
 		if (projectId !== undefined && this.forbiddenProjects.has(projectId)) {
-			throw new PlaneApiError(403, "FAKE", method);
+			throw new PlaneApiError(403, 'FAKE', method);
 		}
 	}
 
 	#release(releaseId: string): FakeRelease {
 		const release = this.releases.find((r) => r.id === releaseId);
-		if (!release) throw new PlaneApiError(404, "FAKE", `/releases/${releaseId}/`);
+		if (!release) throw new PlaneApiError(404, 'FAKE', `/releases/${releaseId}/`);
 		return release;
 	}
 
 	#item(projectId: string, workItemId: string): FakeWorkItem {
 		const item = this.workItems.find((w) => w.id === workItemId && w.project === projectId);
-		if (!item) throw new PlaneApiError(404, "FAKE", `/work-items/${workItemId}/`);
+		if (!item) throw new PlaneApiError(404, 'FAKE', `/work-items/${workItemId}/`);
 		return item;
 	}
 }

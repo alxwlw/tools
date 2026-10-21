@@ -1,8 +1,8 @@
-import { type PlaneApi, PlaneApiError, type Priority, type WorkItemRef } from "./plane.ts";
-import { ttl } from "./ttl.ts";
+import { type PlaneApi, PlaneApiError, type Priority, type WorkItemRef } from './plane.ts';
+import { ttl } from './ttl.ts';
 
-export type Source = "grafana" | "vercel" | "github";
-export type IncidentLabel = "alert" | "deploy-failed";
+export type Source = 'grafana' | 'vercel' | 'github';
+export type IncidentLabel = 'alert' | 'deploy-failed';
 
 /**
  * One event about one incident, whatever its origin. `key` names the incident
@@ -10,7 +10,7 @@ export type IncidentLabel = "alert" | "deploy-failed";
  */
 export type IncidentSignal =
 	| {
-			status: "firing";
+			status: 'firing';
 			source: Source;
 			key: string;
 			occurrence: string;
@@ -19,13 +19,13 @@ export type IncidentSignal =
 			bodyHtml: string;
 			/** Text of the firing marker comment. */
 			noteHtml: string;
-			priority: Extract<Priority, "urgent" | "high" | "medium">;
+			priority: Extract<Priority, 'urgent' | 'high' | 'medium'>;
 			label: IncidentLabel;
 			/** Environment of an alert, for the Grafana annotation (spec «Отметки в Grafana»). */
 			env?: string;
 	  }
 	| {
-			status: "resolved";
+			status: 'resolved';
 			source: Source;
 			key: string;
 			/** Absent for Vercel: derived from the work item's marker comments. */
@@ -37,17 +37,17 @@ export type IncidentSignal =
 			env?: string;
 	  };
 
-export type IncidentAction = "created" | "commented" | "reopened" | "noop";
+export type IncidentAction = 'created' | 'commented' | 'reopened' | 'noop';
 export type IncidentResult = { action: IncidentAction; workItemId: string | null };
 
 export interface IncidentReporter {
 	report(signal: IncidentSignal): Promise<IncidentResult>;
 }
 
-const CLOSED_GROUPS = new Set(["completed", "cancelled"]);
+const CLOSED_GROUPS = new Set(['completed', 'cancelled']);
 const META_TTL_MS = 10 * 60_000;
-const FIRING = ":firing";
-const RESOLVED = ":resolved";
+const FIRING = ':firing';
+const RESOLVED = ':resolved';
 
 /**
  * One Plane work item per incident key plus marker comments per occurrence
@@ -57,12 +57,15 @@ const RESOLVED = ":resolved";
  * one after another: Plane's duplicate check is read-then-insert, and two
  * concurrent creates could both pass it. Never closes a work item.
  */
-export function createIncidentReporter(deps: { plane: PlaneApi; projectId: string }): IncidentReporter {
+export function createIncidentReporter(deps: {
+	plane: PlaneApi;
+	projectId: string;
+}): IncidentReporter {
 	const { plane, projectId } = deps;
 	const states = ttl(() => plane.listStates(projectId), META_TTL_MS);
 	const labelIds: Record<IncidentLabel, () => Promise<string>> = {
-		alert: ttl(() => ensureLabel("alert"), META_TTL_MS),
-		"deploy-failed": ttl(() => ensureLabel("deploy-failed"), META_TTL_MS),
+		alert: ttl(() => ensureLabel('alert'), META_TTL_MS),
+		'deploy-failed': ttl(() => ensureLabel('deploy-failed'), META_TTL_MS),
 	};
 	const queues = new Map<string, Promise<unknown>>();
 
@@ -82,7 +85,9 @@ export function createIncidentReporter(deps: { plane: PlaneApi; projectId: strin
 		return result;
 	}
 
-	async function firing(signal: Extract<IncidentSignal, { status: "firing" }>): Promise<IncidentResult> {
+	async function firing(
+		signal: Extract<IncidentSignal, { status: 'firing' }>,
+	): Promise<IncidentResult> {
 		const item = await plane.createWorkItem(projectId, {
 			name: signal.title,
 			description_html: signal.bodyHtml,
@@ -98,17 +103,17 @@ export function createIncidentReporter(deps: { plane: PlaneApi; projectId: strin
 		};
 		if (item.created) {
 			await plane.createComment(projectId, item.id, marker);
-			return { action: "created", workItemId: item.id };
+			return { action: 'created', workItemId: item.id };
 		}
 		// The marker is the commit point and goes last: a delivery that failed before it redoes the
 		// reopen check, one that failed after it (lost response) finds the marker and is a replay.
 		const comments = await plane.listComments(projectId, item.id);
 		if (comments.some((comment) => comment.external_id === marker.external_id)) {
-			return { action: "noop", workItemId: item.id };
+			return { action: 'noop', workItemId: item.id };
 		}
 		const reopened = await reopenIfClosed(item.id);
 		await plane.createComment(projectId, item.id, marker);
-		return { action: reopened ? "reopened" : "commented", workItemId: item.id };
+		return { action: reopened ? 'reopened' : 'commented', workItemId: item.id };
 	}
 
 	/** Moves a completed/cancelled work item back to the project's default state. An archived item is not reopenable. */
@@ -131,17 +136,19 @@ export function createIncidentReporter(deps: { plane: PlaneApi; projectId: strin
 		return true;
 	}
 
-	async function resolved(signal: Extract<IncidentSignal, { status: "resolved" }>): Promise<IncidentResult> {
+	async function resolved(
+		signal: Extract<IncidentSignal, { status: 'resolved' }>,
+	): Promise<IncidentResult> {
 		const item = await plane.findWorkItemByExternalId(projectId, signal.source, signal.key);
-		if (item === null) return { action: "noop", workItemId: null };
+		if (item === null) return { action: 'noop', workItemId: null };
 		const occurrence = signal.occurrence ?? (await openOccurrence(item.id, signal.key));
-		if (occurrence === null) return { action: "noop", workItemId: item.id };
+		if (occurrence === null) return { action: 'noop', workItemId: item.id };
 		const marker = await plane.createComment(projectId, item.id, {
 			comment_html: signal.noteHtml,
 			external_id: `${signal.key}:${occurrence}${RESOLVED}`,
 			external_source: signal.source,
 		});
-		return { action: marker.created ? "commented" : "noop", workItemId: item.id };
+		return { action: marker.created ? 'commented' : 'noop', workItemId: item.id };
 	}
 
 	/** The latest (by created_at) firing occurrence of `key` with no resolved marker yet; null if none. */
@@ -158,13 +165,15 @@ export function createIncidentReporter(deps: { plane: PlaneApi; projectId: strin
 			.at(-1);
 		if (!latestFiring) return null;
 		const occurrence = latestFiring.externalId.slice(prefix.length, -FIRING.length);
-		return markers.some((marker) => marker.externalId === `${prefix}${occurrence}${RESOLVED}`) ? null : occurrence;
+		return markers.some((marker) => marker.externalId === `${prefix}${occurrence}${RESOLVED}`)
+			? null
+			: occurrence;
 	}
 
 	return {
 		report(signal) {
 			return serialized(`${signal.source}\u0000${signal.key}`, () =>
-				signal.status === "firing" ? firing(signal) : resolved(signal),
+				signal.status === 'firing' ? firing(signal) : resolved(signal),
 			);
 		},
 	};

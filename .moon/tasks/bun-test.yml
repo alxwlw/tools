@@ -1,0 +1,20 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Canon file — sync-managed (group moon-tasks): edits happen in alxwlw/stack, not here.
+# A project without tests overrides `args` with mergeArgs: 'replace' (e.g. bun test --pass-with-no-tests).
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+  tests:
+    - 'tests/**/*'
+
+tasks:
+  test:
+    command: 'bun'
+    args: ['test']
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    options:
+      runFromWorkspaceRoot: false

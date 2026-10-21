@@ -1,345 +1,404 @@
-import { describe, expect, test } from "bun:test";
-import { type NewRelease, type NewWorkItem, PlaneApiError, PlaneClient, RELEASE_ITEMS_MAX } from "../src/plane.ts";
+import { describe, expect, test } from 'bun:test';
+import {
+	type NewRelease,
+	type NewWorkItem,
+	PlaneApiError,
+	PlaneClient,
+	RELEASE_ITEMS_MAX,
+} from '../src/plane.ts';
 
 type Reply = { status: number; body?: unknown; raw?: string };
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
 
-const ROOT = "https://plane.test/api/v1/workspaces/liq-egn";
+const ROOT = 'https://plane.test/api/v1/workspaces/liq-egn';
 
 function stub(replies: Reply[]) {
 	const calls: Call[] = [];
 	const fetch = async (url: string, init: RequestInit): Promise<Response> => {
 		calls.push({
 			url,
-			method: init.method ?? "GET",
+			method: init.method ?? 'GET',
 			headers: init.headers as Record<string, string>,
-			body: typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+			body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
 		});
 		const reply = replies.shift();
 		if (!reply) throw new Error(`unexpected request ${init.method} ${url}`);
-		const text = reply.raw ?? (reply.body === undefined ? "" : JSON.stringify(reply.body));
+		const text = reply.raw ?? (reply.body === undefined ? '' : JSON.stringify(reply.body));
 		return new Response(text, { status: reply.status });
 	};
-	const client = new PlaneClient({ baseUrl: "https://plane.test/", workspace: "liq-egn", apiKey: "key-1", fetch });
+	const client = new PlaneClient({
+		baseUrl: 'https://plane.test/',
+		workspace: 'liq-egn',
+		apiKey: 'key-1',
+		fetch,
+	});
 	return { calls, client };
 }
 
 async function failure(promise: Promise<unknown>): Promise<unknown> {
 	return promise.then(
 		() => {
-			throw new Error("expected a rejection");
+			throw new Error('expected a rejection');
 		},
 		(err: unknown) => err,
 	);
 }
 
 const item: NewWorkItem = {
-	name: "[prod] ServiceDown",
-	description_html: "<p>d</p>",
-	priority: "urgent",
-	labels: ["label-1"],
-	external_id: "fp1",
-	external_source: "grafana",
+	name: '[prod] ServiceDown',
+	description_html: '<p>d</p>',
+	priority: 'urgent',
+	labels: ['label-1'],
+	external_id: 'fp1',
+	external_source: 'grafana',
 };
 
-describe("PlaneClient: создание с 409", () => {
-	test("201 → created:true; URL, метод, ключ и тело запроса", async () => {
-		const { calls, client } = stub([{ status: 201, body: { id: "w1" } }]);
-		expect(await client.createWorkItem("p1", item)).toEqual({ id: "w1", created: true });
+describe('PlaneClient: создание с 409', () => {
+	test('201 → created:true; URL, метод, ключ и тело запроса', async () => {
+		const { calls, client } = stub([{ status: 201, body: { id: 'w1' } }]);
+		expect(await client.createWorkItem('p1', item)).toEqual({ id: 'w1', created: true });
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/`);
-		expect(calls[0]?.method).toBe("POST");
-		expect(calls[0]?.headers["X-API-Key"]).toBe("key-1");
+		expect(calls[0]?.method).toBe('POST');
+		expect(calls[0]?.headers['X-API-Key']).toBe('key-1');
 		expect(calls[0]?.body).toEqual(item);
 	});
 
-	test("409 → created:false и id существующей задачи", async () => {
-		const { client } = stub([{ status: 409, body: { error: "exists", id: "w0" } }]);
-		expect(await client.createWorkItem("p1", item)).toEqual({ id: "w0", created: false });
+	test('409 → created:false и id существующей задачи', async () => {
+		const { client } = stub([{ status: 409, body: { error: 'exists', id: 'w0' } }]);
+		expect(await client.createWorkItem('p1', item)).toEqual({ id: 'w0', created: false });
 	});
 
-	test("комментарий: 201 и 409", async () => {
-		const comment = { comment_html: "<p>c</p>", external_id: "fp1:t:firing", external_source: "grafana" };
+	test('комментарий: 201 и 409', async () => {
+		const comment = {
+			comment_html: '<p>c</p>',
+			external_id: 'fp1:t:firing',
+			external_source: 'grafana',
+		};
 		const { calls, client } = stub([
-			{ status: 201, body: { id: "c1" } },
-			{ status: 409, body: { error: "exists", id: "c1" } },
+			{ status: 201, body: { id: 'c1' } },
+			{ status: 409, body: { error: 'exists', id: 'c1' } },
 		]);
-		expect(await client.createComment("p1", "w1", comment)).toEqual({ id: "c1", created: true });
-		expect(await client.createComment("p1", "w1", comment)).toEqual({ id: "c1", created: false });
+		expect(await client.createComment('p1', 'w1', comment)).toEqual({ id: 'c1', created: true });
+		expect(await client.createComment('p1', 'w1', comment)).toEqual({ id: 'c1', created: false });
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/`);
 		expect(calls[0]?.body).toEqual(comment);
 	});
 });
 
-describe("PlaneClient: поиск", () => {
-	test("по external_id: 404 → null, 200 → id, параметры закодированы", async () => {
-		const { calls, client } = stub([{ status: 404, body: { error: "nope" } }, { status: 200, body: { id: "w1" } }]);
-		expect(await client.findWorkItemByExternalId("p1", "vercel", "deploy:prj:production:main")).toBeNull();
-		expect(await client.findWorkItemByExternalId("p1", "vercel", "deploy:prj:production:main")).toEqual({ id: "w1" });
+describe('PlaneClient: поиск', () => {
+	test('по external_id: 404 → null, 200 → id, параметры закодированы', async () => {
+		const { calls, client } = stub([
+			{ status: 404, body: { error: 'nope' } },
+			{ status: 200, body: { id: 'w1' } },
+		]);
+		expect(
+			await client.findWorkItemByExternalId('p1', 'vercel', 'deploy:prj:production:main'),
+		).toBeNull();
+		expect(
+			await client.findWorkItemByExternalId('p1', 'vercel', 'deploy:prj:production:main'),
+		).toEqual({ id: 'w1' });
 		expect(calls[0]?.url).toBe(
 			`${ROOT}/projects/p1/work-items/?external_id=deploy%3Aprj%3Aproduction%3Amain&external_source=vercel`,
 		);
 	});
 
-	test("по ключу: 404 → null, 200 → ref", async () => {
+	test('по ключу: 404 → null, 200 → ref', async () => {
 		const { calls, client } = stub([
-			{ status: 404, raw: "<html>not found</html>" },
-			{ status: 200, body: { id: "w12", project: "p-ops", state: "s1", name: "x" } },
+			{ status: 404, raw: '<html>not found</html>' },
+			{ status: 200, body: { id: 'w12', project: 'p-ops', state: 's1', name: 'x' } },
 		]);
-		expect(await client.getWorkItemByKey("OPS-99")).toBeNull();
-		expect(await client.getWorkItemByKey("OPS-12")).toEqual({ id: "w12", project: "p-ops", state: "s1" });
+		expect(await client.getWorkItemByKey('OPS-99')).toBeNull();
+		expect(await client.getWorkItemByKey('OPS-12')).toEqual({
+			id: 'w12',
+			project: 'p-ops',
+			state: 's1',
+		});
 		expect(calls[1]?.url).toBe(`${ROOT}/work-items/OPS-12/`);
 	});
 
-	test("getWorkItem и смена состояния", async () => {
+	test('getWorkItem и смена состояния', async () => {
 		const { calls, client } = stub([
-			{ status: 200, body: { id: "w1", project: "p1", state: "s-done" } },
-			{ status: 200, body: { id: "w1", project: "p1", state: "s-backlog" } },
+			{ status: 200, body: { id: 'w1', project: 'p1', state: 's-done' } },
+			{ status: 200, body: { id: 'w1', project: 'p1', state: 's-backlog' } },
 		]);
-		expect(await client.getWorkItem("p1", "w1")).toEqual({ id: "w1", project: "p1", state: "s-done" });
-		await client.setWorkItemState("p1", "w1", "s-backlog");
-		expect(calls[1]?.method).toBe("PATCH");
+		expect(await client.getWorkItem('p1', 'w1')).toEqual({
+			id: 'w1',
+			project: 'p1',
+			state: 's-done',
+		});
+		await client.setWorkItemState('p1', 'w1', 's-backlog');
+		expect(calls[1]?.method).toBe('PATCH');
 		expect(calls[1]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/`);
-		expect(calls[1]?.body).toEqual({ state: "s-backlog" });
+		expect(calls[1]?.body).toEqual({ state: 's-backlog' });
 	});
 });
 
-describe("PlaneClient: списки", () => {
-	test("комментарии: идёт по курсору через все страницы", async () => {
+describe('PlaneClient: списки', () => {
+	test('комментарии: идёт по курсору через все страницы', async () => {
 		const { calls, client } = stub([
 			{
 				status: 200,
 				body: {
-					results: [{ id: "c1", external_id: "k:a:firing", created_at: "2026-10-06T10:00:00Z" }],
+					results: [{ id: 'c1', external_id: 'k:a:firing', created_at: '2026-10-06T10:00:00Z' }],
 					next_page_results: true,
-					next_cursor: "100:1:0",
+					next_cursor: '100:1:0',
 				},
 			},
 			{
 				status: 200,
 				body: {
-					results: [{ id: "c2", external_id: null, created_at: "2026-10-06T10:05:00Z" }],
+					results: [{ id: 'c2', external_id: null, created_at: '2026-10-06T10:05:00Z' }],
 					next_page_results: false,
-					next_cursor: "100:2:0",
+					next_cursor: '100:2:0',
 				},
 			},
 		]);
-		expect(await client.listComments("p1", "w1")).toEqual([
-			{ id: "c1", external_id: "k:a:firing", created_at: "2026-10-06T10:00:00Z" },
-			{ id: "c2", external_id: null, created_at: "2026-10-06T10:05:00Z" },
+		expect(await client.listComments('p1', 'w1')).toEqual([
+			{ id: 'c1', external_id: 'k:a:firing', created_at: '2026-10-06T10:00:00Z' },
+			{ id: 'c2', external_id: null, created_at: '2026-10-06T10:05:00Z' },
 		]);
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/?per_page=100`);
-		expect(calls[1]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/?per_page=100&cursor=100%3A1%3A0`);
+		expect(calls[1]?.url).toBe(
+			`${ROOT}/projects/p1/work-items/w1/comments/?per_page=100&cursor=100%3A1%3A0`,
+		);
 	});
 
-	test("состояния: голый массив", async () => {
+	test('состояния: голый массив', async () => {
 		const { client } = stub([
 			{
 				status: 200,
 				body: [
-					{ id: "s1", group: "backlog", default: true, name: "Backlog" },
-					{ id: "s2", group: "completed", default: false, name: "Done" },
+					{ id: 's1', group: 'backlog', default: true, name: 'Backlog' },
+					{ id: 's2', group: 'completed', default: false, name: 'Done' },
 				],
 			},
 		]);
-		expect(await client.listStates("p1")).toEqual([
-			{ id: "s1", group: "backlog", default: true },
-			{ id: "s2", group: "completed", default: false },
+		expect(await client.listStates('p1')).toEqual([
+			{ id: 's1', group: 'backlog', default: true },
+			{ id: 's2', group: 'completed', default: false },
 		]);
 	});
 
-	test("идентификаторы проектов, метки, создание метки", async () => {
+	test('идентификаторы проектов, метки, создание метки', async () => {
 		const { calls, client } = stub([
-			{ status: 200, body: { results: [{ id: "p1", identifier: "OPS" }], next_page_results: false } },
-			{ status: 200, body: { results: [{ id: "l1", name: "alert" }], next_page_results: false } },
-			{ status: 201, body: { id: "l2", name: "deploy-failed" } },
+			{
+				status: 200,
+				body: { results: [{ id: 'p1', identifier: 'OPS' }], next_page_results: false },
+			},
+			{ status: 200, body: { results: [{ id: 'l1', name: 'alert' }], next_page_results: false } },
+			{ status: 201, body: { id: 'l2', name: 'deploy-failed' } },
 		]);
-		expect(await client.listProjectIdentifiers()).toEqual(["OPS"]);
-		expect(await client.listLabels("p1")).toEqual([{ id: "l1", name: "alert" }]);
-		expect(await client.createLabel("p1", "deploy-failed")).toEqual({ id: "l2", name: "deploy-failed" });
-		expect(calls[2]?.body).toEqual({ name: "deploy-failed", color: "#d9534f" });
+		expect(await client.listProjectIdentifiers()).toEqual(['OPS']);
+		expect(await client.listLabels('p1')).toEqual([{ id: 'l1', name: 'alert' }]);
+		expect(await client.createLabel('p1', 'deploy-failed')).toEqual({
+			id: 'l2',
+			name: 'deploy-failed',
+		});
+		expect(calls[2]?.body).toEqual({ name: 'deploy-failed', color: '#d9534f' });
 	});
 
-	test("неожиданная форма списка → ошибка", async () => {
+	test('неожиданная форма списка → ошибка', async () => {
 		const { client } = stub([{ status: 200, body: { foo: 1 } }]);
-		expect(await failure(client.listStates("p1"))).toBeInstanceOf(Error);
+		expect(await failure(client.listStates('p1'))).toBeInstanceOf(Error);
 	});
 });
 
-describe("PlaneClient: ошибки", () => {
-	test("429 и 500 → PlaneApiError со статусом, без тела ответа в сообщении", async () => {
+describe('PlaneClient: ошибки', () => {
+	test('429 и 500 → PlaneApiError со статусом, без тела ответа в сообщении', async () => {
 		const { client } = stub([
-			{ status: 429, body: { detail: "secret-ish body" } },
-			{ status: 500, body: { detail: "boom" } },
+			{ status: 429, body: { detail: 'secret-ish body' } },
+			{ status: 500, body: { detail: 'boom' } },
 		]);
-		const rateLimited = await failure(client.createWorkItem("p1", item));
+		const rateLimited = await failure(client.createWorkItem('p1', item));
 		expect(rateLimited).toBeInstanceOf(PlaneApiError);
 		expect((rateLimited as PlaneApiError).status).toBe(429);
-		expect((rateLimited as PlaneApiError).message).not.toContain("secret-ish");
-		const broken = await failure(client.createWorkItem("p1", item));
+		expect((rateLimited as PlaneApiError).message).not.toContain('secret-ish');
+		const broken = await failure(client.createWorkItem('p1', item));
 		expect((broken as PlaneApiError).status).toBe(500);
 	});
 
-	test("404 там, где его не ждут, — ошибка, а не null", async () => {
-		const { client } = stub([{ status: 404, body: { error: "nope" } }]);
-		const err = await failure(client.getWorkItem("p1", "w404"));
+	test('404 там, где его не ждут, — ошибка, а не null', async () => {
+		const { client } = stub([{ status: 404, body: { error: 'nope' } }]);
+		const err = await failure(client.getWorkItem('p1', 'w404'));
 		expect((err as PlaneApiError).status).toBe(404);
 	});
 
-	test("200 не-JSON → ошибка именно о не-JSON", async () => {
-		const { client } = stub([{ status: 200, raw: "<html>proxy page</html>" }]);
-		const err = await failure(client.getWorkItem("p1", "w1"));
+	test('200 не-JSON → ошибка именно о не-JSON', async () => {
+		const { client } = stub([{ status: 200, raw: '<html>proxy page</html>' }]);
+		const err = await failure(client.getWorkItem('p1', 'w1'));
 		expect(err).toBeInstanceOf(Error);
-		expect((err as Error).message).toBe("Plane GET /projects/p1/work-items/w1/: response is not JSON");
+		expect((err as Error).message).toBe(
+			'Plane GET /projects/p1/work-items/w1/: response is not JSON',
+		);
 	});
 
-	test("ошибка запроса с параметрами: в сообщении путь без query (external_id в лог не попадает)", async () => {
-		const { client } = stub([{ status: 429, body: { detail: "throttled" } }]);
-		const err = await failure(client.findWorkItemByExternalId("p1", "vercel", "deploy:prj_x:production:secret-branch"));
+	test('ошибка запроса с параметрами: в сообщении путь без query (external_id в лог не попадает)', async () => {
+		const { client } = stub([{ status: 429, body: { detail: 'throttled' } }]);
+		const err = await failure(
+			client.findWorkItemByExternalId('p1', 'vercel', 'deploy:prj_x:production:secret-branch'),
+		);
 		expect((err as PlaneApiError).status).toBe(429);
-		expect((err as PlaneApiError).message).toBe("Plane GET /projects/p1/work-items/ → 429");
-		expect((err as PlaneApiError).message).not.toContain("?");
-		expect((err as PlaneApiError).path).toBe("/projects/p1/work-items/");
+		expect((err as PlaneApiError).message).toBe('Plane GET /projects/p1/work-items/ → 429');
+		expect((err as PlaneApiError).message).not.toContain('?');
+		expect((err as PlaneApiError).path).toBe('/projects/p1/work-items/');
 	});
 
-	test("таймаут прерывает запрос", async () => {
+	test('таймаут прерывает запрос', async () => {
 		const hang = (_url: string, init: RequestInit) =>
 			new Promise<Response>((_resolve, reject) => {
-				init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+				init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
 			});
-		const client = new PlaneClient({ baseUrl: "https://plane.test", workspace: "liq-egn", apiKey: "k", timeoutMs: 20, fetch: hang });
-		expect(await failure(client.listStates("p1"))).toBeDefined();
+		const client = new PlaneClient({
+			baseUrl: 'https://plane.test',
+			workspace: 'liq-egn',
+			apiKey: 'k',
+			timeoutMs: 20,
+			fetch: hang,
+		});
+		expect(await failure(client.listStates('p1'))).toBeDefined();
 	});
 });
 
-describe("ограничитель темпа", () => {
-	test("каждый запрос сначала получает место у ограничителя, и только потом уходит в fetch", async () => {
+describe('ограничитель темпа', () => {
+	test('каждый запрос сначала получает место у ограничителя, и только потом уходит в fetch', async () => {
 		const events: string[] = [];
 		let release!: () => void;
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
 		});
 		const client = new PlaneClient({
-			baseUrl: "https://plane.test",
-			workspace: "liq-egn",
-			apiKey: "key-1",
+			baseUrl: 'https://plane.test',
+			workspace: 'liq-egn',
+			apiKey: 'key-1',
 			limiter: {
 				acquire: async () => {
-					events.push("acquire");
+					events.push('acquire');
 					await gate;
 				},
 			},
 			fetch: async () => {
-				events.push("fetch");
-				return new Response(JSON.stringify({ results: [], next_page_results: false }), { status: 200 });
+				events.push('fetch');
+				return new Response(JSON.stringify({ results: [], next_page_results: false }), {
+					status: 200,
+				});
 			},
 		});
-		const pending = client.listStates("p-ops");
+		const pending = client.listStates('p-ops');
 		await Bun.sleep(5);
-		expect(events).toEqual(["acquire"]);
+		expect(events).toEqual(['acquire']);
 		release();
 		await pending;
-		expect(events).toEqual(["acquire", "fetch"]);
+		expect(events).toEqual(['acquire', 'fetch']);
 	});
 
 	// Negative guard: passes without a limiter; it catches a timeout signal created before acquire(), which would already have expired by the time the call runs.
-	test("ожидание в очереди не съедает таймаут вызова", async () => {
+	test('ожидание в очереди не съедает таймаут вызова', async () => {
 		const client = new PlaneClient({
-			baseUrl: "https://plane.test",
-			workspace: "liq-egn",
-			apiKey: "key-1",
+			baseUrl: 'https://plane.test',
+			workspace: 'liq-egn',
+			apiKey: 'key-1',
 			timeoutMs: 20,
 			limiter: { acquire: () => Bun.sleep(60) },
 			fetch: async (_url, init) => {
-				if (init.signal?.aborted) throw new Error("aborted before the request was sent");
-				return new Response(JSON.stringify({ results: [], next_page_results: false }), { status: 200 });
+				if (init.signal?.aborted) throw new Error('aborted before the request was sent');
+				return new Response(JSON.stringify({ results: [], next_page_results: false }), {
+					status: 200,
+				});
 			},
 		});
-		await expect(client.listStates("p-ops")).resolves.toEqual([]);
+		await expect(client.listStates('p-ops')).resolves.toEqual([]);
 	});
 });
 
 const release: NewRelease = {
-	name: "2026-10-06 · 89abcde",
-	status: "released",
-	release_date: "2026-10-06",
-	external_source: "github-deploy",
-	external_id: "liqu-fi/monorepo@89abcdef0123456789abcdef0123456789abcdef",
+	name: '2026-10-06 · 89abcde',
+	status: 'released',
+	release_date: '2026-10-06',
+	external_source: 'github-deploy',
+	external_id: 'liqu-fi/monorepo@89abcdef0123456789abcdef0123456789abcdef',
 };
 
-describe("PlaneClient: релизы", () => {
-	test("поиск по external_id идёт по всем страницам списка релизов workspace", async () => {
+describe('PlaneClient: релизы', () => {
+	test('поиск по external_id идёт по всем страницам списка релизов workspace', async () => {
 		const { calls, client } = stub([
 			{
 				status: 200,
 				body: {
-					results: [{ id: "r1", external_source: "github-deploy", external_id: "liqu-fi/monorepo@other" }],
+					results: [
+						{ id: 'r1', external_source: 'github-deploy', external_id: 'liqu-fi/monorepo@other' },
+					],
 					next_page_results: true,
-					next_cursor: "100:1:0",
+					next_cursor: '100:1:0',
 				},
 			},
 			{
 				status: 200,
 				body: {
 					results: [
-						{ id: "r9", external_source: null, external_id: null },
-						{ id: "r2", external_source: "github-deploy", external_id: release.external_id },
+						{ id: 'r9', external_source: null, external_id: null },
+						{ id: 'r2', external_source: 'github-deploy', external_id: release.external_id },
 					],
 					next_page_results: false,
 				},
 			},
 		]);
-		expect(await client.findReleaseByExternalId("github-deploy", release.external_id)).toEqual({ id: "r2" });
+		expect(await client.findReleaseByExternalId('github-deploy', release.external_id)).toEqual({
+			id: 'r2',
+		});
 		expect(calls[0]?.url).toBe(`${ROOT}/releases/?per_page=100`);
 		expect(calls[1]?.url).toBe(`${ROOT}/releases/?per_page=100&cursor=100%3A1%3A0`);
 	});
 
-	test("поиск: совпадает только пара source + id", async () => {
+	test('поиск: совпадает только пара source + id', async () => {
 		const { client } = stub([
-			{ status: 200, body: [{ id: "r1", external_source: "manual", external_id: release.external_id }] },
+			{
+				status: 200,
+				body: [{ id: 'r1', external_source: 'manual', external_id: release.external_id }],
+			},
 		]);
-		expect(await client.findReleaseByExternalId("github-deploy", release.external_id)).toBeNull();
+		expect(await client.findReleaseByExternalId('github-deploy', release.external_id)).toBeNull();
 	});
 
-	test("создание: POST /releases/, 201 → created:true; 409 → id существующего", async () => {
+	test('создание: POST /releases/, 201 → created:true; 409 → id существующего', async () => {
 		const { calls, client } = stub([
-			{ status: 201, body: { id: "r1" } },
-			{ status: 409, body: { error: "exists", id: "r1" } },
+			{ status: 201, body: { id: 'r1' } },
+			{ status: 409, body: { error: 'exists', id: 'r1' } },
 		]);
-		expect(await client.createRelease(release)).toEqual({ id: "r1", created: true });
-		expect(calls[0]).toMatchObject({ url: `${ROOT}/releases/`, method: "POST", body: release });
-		expect(await client.createRelease(release)).toEqual({ id: "r1", created: false });
+		expect(await client.createRelease(release)).toEqual({ id: 'r1', created: true });
+		expect(calls[0]).toMatchObject({ url: `${ROOT}/releases/`, method: 'POST', body: release });
+		expect(await client.createRelease(release)).toEqual({ id: 'r1', created: false });
 	});
 
-	test("changelog: PATCH /releases/{id}/changelog/ с description_html", async () => {
-		const { calls, client } = stub([{ status: 200, body: { id: "c1" } }]);
-		await client.updateReleaseChangelog("r1", "<p>x</p>");
+	test('changelog: PATCH /releases/{id}/changelog/ с description_html', async () => {
+		const { calls, client } = stub([{ status: 200, body: { id: 'c1' } }]);
+		await client.updateReleaseChangelog('r1', '<p>x</p>');
 		expect(calls[0]).toMatchObject({
 			url: `${ROOT}/releases/r1/changelog/`,
-			method: "PATCH",
-			body: { description_html: "<p>x</p>" },
+			method: 'PATCH',
+			body: { description_html: '<p>x</p>' },
 		});
 	});
 
-	test("привязка задач: POST /releases/{id}/work-items/ с work_item_ids", async () => {
+	test('привязка задач: POST /releases/{id}/work-items/ с work_item_ids', async () => {
 		const { calls, client } = stub([{ status: 200, body: null }]);
-		await client.addReleaseWorkItems("r1", ["w1", "w2"]);
+		await client.addReleaseWorkItems('r1', ['w1', 'w2']);
 		expect(calls[0]).toMatchObject({
 			url: `${ROOT}/releases/r1/work-items/`,
-			method: "POST",
-			body: { work_item_ids: ["w1", "w2"] },
+			method: 'POST',
+			body: { work_item_ids: ['w1', 'w2'] },
 		});
 	});
 
-	test("привязка: пустой список — ни одного запроса; больше лимита — RangeError до запроса", async () => {
+	test('привязка: пустой список — ни одного запроса; больше лимита — RangeError до запроса', async () => {
 		const { calls, client } = stub([]);
-		await client.addReleaseWorkItems("r1", []);
+		await client.addReleaseWorkItems('r1', []);
 		const many = Array.from({ length: RELEASE_ITEMS_MAX + 1 }, (_, i) => `w${i}`);
-		expect(await failure(client.addReleaseWorkItems("r1", many))).toBeInstanceOf(RangeError);
+		expect(await failure(client.addReleaseWorkItems('r1', many))).toBeInstanceOf(RangeError);
 		expect(calls).toEqual([]);
 	});
 
-	test("403 на релизы (токен — Guest) → PlaneApiError 403", async () => {
-		const { client } = stub([{ status: 403, body: { detail: "forbidden" } }]);
+	test('403 на релизы (токен — Guest) → PlaneApiError 403', async () => {
+		const { client } = stub([{ status: 403, body: { detail: 'forbidden' } }]);
 		const err = await failure(client.createRelease(release));
 		expect(err).toBeInstanceOf(PlaneApiError);
 		expect((err as PlaneApiError).status).toBe(403);

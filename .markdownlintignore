@@ -1,0 +1,6 @@
+# Repo-local markdownlint ignores — YOURS to edit (seeded once by
+# `stack sync`, never overwritten). gitignore syntax: `vendor` or `vendor/`
+# ignores that directory (a bare name matches at any depth); `docs/x/**` is
+# anchored to the repo root. markdownlint-cli2 reads this file because the
+# sync-managed .markdownlint-cli2.jsonc points its `gitignore` option here —
+# never edit that file; add repo-specific ignore paths HERE.

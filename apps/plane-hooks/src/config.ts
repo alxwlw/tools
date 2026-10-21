@@ -10,13 +10,13 @@ export type Config = {
 };
 
 const REQUIRED = {
-	planeUrl: "PLANE_HOOKS_PLANE_URL",
-	workspace: "PLANE_HOOKS_WORKSPACE",
-	projectId: "PLANE_HOOKS_PROJECT_ID",
-	planeApiKey: "PLANE_HOOKS_PLANE_API_KEY",
-	grafanaToken: "PLANE_HOOKS_GRAFANA_TOKEN",
-	vercelSecret: "PLANE_HOOKS_VERCEL_SECRET",
-	deploySecret: "PLANE_HOOKS_DEPLOY_SECRET",
+	planeUrl: 'PLANE_HOOKS_PLANE_URL',
+	workspace: 'PLANE_HOOKS_WORKSPACE',
+	projectId: 'PLANE_HOOKS_PROJECT_ID',
+	planeApiKey: 'PLANE_HOOKS_PLANE_API_KEY',
+	grafanaToken: 'PLANE_HOOKS_GRAFANA_TOKEN',
+	vercelSecret: 'PLANE_HOOKS_VERCEL_SECRET',
+	deploySecret: 'PLANE_HOOKS_DEPLOY_SECRET',
 } as const;
 
 // Grafana re-parses env-substituted provisioning values through YAML type
@@ -29,11 +29,12 @@ const PROJECT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 /** Reads the service config. Errors name the variables, never their values. */
 export function loadConfig(env: Record<string, string | undefined>): Config {
 	const missing = Object.values(REQUIRED).filter((name) => !env[name]?.trim());
-	if (missing.length > 0) throw new Error(`plane-hooks: missing env ${missing.join(", ")}`);
+	if (missing.length > 0) throw new Error(`plane-hooks: missing env ${missing.join(', ')}`);
 	const read = (name: string) => (env[name] as string).trim();
 
-	const planeUrl = read(REQUIRED.planeUrl).replace(/\/+$/, "");
-	if (!/^https?:\/\//.test(planeUrl)) throw new Error(`plane-hooks: ${REQUIRED.planeUrl} must start with http(s)://`);
+	const planeUrl = read(REQUIRED.planeUrl).replace(/\/+$/, '');
+	if (!/^https?:\/\//.test(planeUrl))
+		throw new Error(`plane-hooks: ${REQUIRED.planeUrl} must start with http(s)://`);
 	const grafanaToken = read(REQUIRED.grafanaToken);
 	if (!GRAFANA_TOKEN.test(grafanaToken)) {
 		throw new Error(`plane-hooks: ${REQUIRED.grafanaToken} must look like ph_<48 lowercase hex>`);
@@ -45,7 +46,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
 		);
 	}
 	const port = env.PORT?.trim() ? Number(env.PORT) : 8080;
-	if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("plane-hooks: PORT must be an integer 1..65535");
+	if (!Number.isInteger(port) || port < 1 || port > 65_535)
+		throw new Error('plane-hooks: PORT must be an integer 1..65535');
 
 	return {
 		port,

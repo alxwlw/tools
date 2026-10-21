@@ -1,9 +1,9 @@
 const ESCAPES: Record<string, string> = {
-	"&": "&amp;",
-	"<": "&lt;",
-	">": "&gt;",
-	'"': "&quot;",
-	"'": "&#39;",
+	'&': '&amp;',
+	'<': '&lt;',
+	'>': '&gt;',
+	'"': '&quot;',
+	"'": '&#39;',
 };
 
 /** Escapes text for HTML element content and attribute values. */
@@ -26,7 +26,7 @@ export function p(html: string): string {
 export function utc(iso: string): string {
 	const date = new Date(iso);
 	if (Number.isNaN(date.getTime())) throw new RangeError(`not a timestamp: ${iso}`);
-	return date.toISOString().slice(0, 16).replace("T", " ");
+	return date.toISOString().slice(0, 16).replace('T', ' ');
 }
 
 /**
@@ -35,5 +35,5 @@ export function utc(iso: string): string {
  */
 export function truncate(text: string, max: number): string {
 	const chars = Array.from(text);
-	return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
+	return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
 }

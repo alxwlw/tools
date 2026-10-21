@@ -1,0 +1,6 @@
+// Repo-local Renovate config — YOURS to edit (seeded once by `stack sync`, never overwritten).
+// Keep the canon preset in `extends`: it turns Renovate off for what `stack sync` moves.
+{
+	$schema: 'https://docs.renovatebot.com/renovate-schema.json',
+	extends: ['config:recommended', 'github>alxwlw/stack//renovate/canon.json5#v1'],
+}

@@ -1,0 +1,17 @@
+name: stack sync
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+jobs:
+  sync:
+    uses: alxwlw/stack/.github/workflows/sync.yml@v1
+    with:
+      version: ${{ inputs.version }}
+      install: ${{ vars.STACK_SYNC_INSTALL != 'false' }}
+      base: ${{ vars.STACK_SYNC_BASE || '' }}
+    secrets:
+      app-id: ${{ secrets.STACK_BOT_APP_ID }}
+      app-private-key: ${{ secrets.STACK_BOT_PRIVATE_KEY }}

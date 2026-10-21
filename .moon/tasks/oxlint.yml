@@ -1,0 +1,32 @@
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+# Canon file — sync-managed (group moon-tasks): edits happen in alxwlw/stack, not here.
+# Pair with @alxwlw/oxlint-config presets in the repo root .oxlintrc.json.
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+
+tasks:
+  lint:
+    command: 'bun'
+    # --type-aware is LOAD-BEARING: without it every typescript/* type-aware rule is
+    # silently skipped (no error, no warning).
+    args:
+      [
+        'run',
+        '--bun',
+        'oxlint',
+        '--type-aware',
+        '--deny-warnings',
+        '--report-unused-disable-directives',
+        'src',
+      ]
+    inputs:
+      - '@group(sources)'
+      - 'tsconfig.json'
+      - '/tsconfig.options.json'
+      - '/pnpm-lock.yaml'
+      - '/.oxlintrc.json'
+    options:
+      runFromWorkspaceRoot: false
