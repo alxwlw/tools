@@ -133,6 +133,81 @@ describe('PlaneClient: поиск', () => {
 	});
 });
 
+describe('PlaneClient: архив', () => {
+	test('archiveWorkItem: POST /work-items/{id}/archive/ без тела, ключ в заголовке', async () => {
+		const { calls, client } = stub([{ status: 200, body: { archived_at: '2026-10-21' } }]);
+		await client.archiveWorkItem('p1', 'w1');
+		expect(calls[0]?.method).toBe('POST');
+		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/archive/`);
+		expect(calls[0]?.headers['X-API-Key']).toBe('key-1');
+		expect(calls[0]?.body).toBeUndefined();
+	});
+
+	test('archiveWorkItem: 400 (задача не закрыта) → PlaneApiError 400', async () => {
+		const { client } = stub([{ status: 400, body: { error: 'not closed' } }]);
+		const err = await failure(client.archiveWorkItem('p1', 'w1'));
+		expect(err).toBeInstanceOf(PlaneApiError);
+		expect((err as PlaneApiError).status).toBe(400);
+	});
+
+	test('unarchiveWorkItem: DELETE /work-items/{id}/unarchive/, 204 с пустым телом', async () => {
+		const { calls, client } = stub([{ status: 204 }]);
+		await client.unarchiveWorkItem('p1', 'w1');
+		expect(calls[0]?.method).toBe('DELETE');
+		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/unarchive/`);
+		expect(calls[0]?.headers['X-API-Key']).toBe('key-1');
+	});
+
+	test('unarchiveWorkItem: 404 (не в архиве) → PlaneApiError 404, путь в сообщении', async () => {
+		const { client } = stub([{ status: 404, body: { error: 'not found' } }]);
+		const err = await failure(client.unarchiveWorkItem('p1', 'w1'));
+		expect(err).toBeInstanceOf(PlaneApiError);
+		expect((err as PlaneApiError).status).toBe(404);
+		expect((err as Error).message).toBe('Plane DELETE /projects/p1/work-items/w1/unarchive/ → 404');
+	});
+
+	test('isWorkItemArchived: деталь 200 → false, архивный список не читается', async () => {
+		const { calls, client } = stub([
+			{ status: 200, body: { id: 'w1', project: 'p1', state: 's1', archived_at: null } },
+		]);
+		expect(await client.isWorkItemArchived('p1', 'w1')).toBe(false);
+		expect(calls.map((c) => [c.method, c.url])).toEqual([
+			['GET', `${ROOT}/projects/p1/work-items/w1/`],
+		]);
+	});
+
+	test('isWorkItemArchived: деталь 404 → ищет id по страницам /archived-work-items/', async () => {
+		const { calls, client } = stub([
+			{ status: 404, body: { error: 'not found' } },
+			{
+				status: 200,
+				body: { results: [{ id: 'w0' }], next_page_results: true, next_cursor: '100:1:0' },
+			},
+			{ status: 200, body: { results: [{ id: 'w1', archived_at: '2026-10-21' }] } },
+		]);
+		expect(await client.isWorkItemArchived('p1', 'w1')).toBe(true);
+		expect(calls[1]?.url).toBe(`${ROOT}/projects/p1/archived-work-items/?per_page=100`);
+		expect(calls[2]?.url).toBe(
+			`${ROOT}/projects/p1/archived-work-items/?per_page=100&cursor=100%3A1%3A0`,
+		);
+	});
+
+	test('isWorkItemArchived: деталь 404 и в архиве нет → false', async () => {
+		const { client } = stub([
+			{ status: 404, raw: '<html>not found</html>' },
+			{ status: 200, body: { results: [{ id: 'w0' }] } },
+		]);
+		expect(await client.isWorkItemArchived('p1', 'w1')).toBe(false);
+	});
+
+	test('isWorkItemArchived: 429 на детали → PlaneApiError 429, список не читается', async () => {
+		const { calls, client } = stub([{ status: 429, body: { error: 'slow down' } }]);
+		const err = await failure(client.isWorkItemArchived('p1', 'w1'));
+		expect((err as PlaneApiError).status).toBe(429);
+		expect(calls).toHaveLength(1);
+	});
+});
+
 describe('PlaneClient: списки', () => {
 	test('комментарии: идёт по курсору через все страницы', async () => {
 		const { calls, client } = stub([

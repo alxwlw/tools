@@ -17,13 +17,17 @@ import {
  * work item in its project; a comment repeated on the same work item), and a
  * lookup by external_id or by key answers 404 → null when nothing matches.
  *
+ * Archive (probe rows 14, same on a Business and a Free workspace): archiving
+ * answers 400 unless the item's state group is completed/cancelled; an archived
+ * item answers 404 to its detail GET, yet the duplicate check (409, its id), the
+ * external_id lookup and the comment list/create (201) still see it, and it is
+ * listed under /archived-work-items/. Unarchive answers 204 and the detail is
+ * back, still in its completed/cancelled state; unarchive of an item that is not
+ * archived answers 404.
+ *
  * Not checked by the probe, taken from Plane's source (`apps/api/plane/api/views/issue.py`):
- * the comment duplicate check spans the whole project, a project the bot is not
- * a member of answers 403, and an `archived` item stays visible to the duplicate
- * check, the external_id lookup and PATCH (`Issue.objects`) and keeps taking and
- * listing comments (the comment endpoints never load the item), while its detail
- * GET answers 404 (`issue_objects`). Archiving is not reachable through the
- * external API, so no probe row can create an archived item.
+ * the comment duplicate check spans the whole project, and a project the bot is
+ * not a member of answers 403.
  *
  * Duplicate checks are read-then-insert with a yield in between — like Plane's
  * own view code — so concurrent calls race here exactly as they would in prod.
@@ -63,7 +67,7 @@ export class FakePlane implements PlaneApi {
 	readonly labels = new Map<string, LabelSummary[]>();
 	readonly calls: string[] = [];
 	readonly forbiddenProjects = new Set<string>();
-	/** Work item ids archived in the UI: only `getWorkItem` stops seeing them. */
+	/** Archived work item ids: only `getWorkItem` stops seeing them (404). */
 	readonly archived = new Set<string>();
 	readonly #projects: Map<string, string>;
 	readonly #failures = new Map<keyof PlaneApi, Error>();
@@ -152,6 +156,29 @@ export class FakePlane implements PlaneApi {
 		if (this.archived.has(item.id))
 			throw new PlaneApiError(404, 'GET', `/work-items/${workItemId}/`);
 		return { id: item.id, project: item.project, state: item.state };
+	}
+
+	async archiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		this.#enter('archiveWorkItem', projectId);
+		const item = this.#item(projectId, workItemId);
+		const group = STATES.find((s) => s.id === item.state)?.group;
+		if (group !== 'completed' && group !== 'cancelled')
+			throw new PlaneApiError(400, 'POST', `/work-items/${workItemId}/archive/`);
+		this.archived.add(item.id);
+	}
+
+	async unarchiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		this.#enter('unarchiveWorkItem', projectId);
+		const item = this.#item(projectId, workItemId);
+		if (!this.archived.delete(item.id))
+			throw new PlaneApiError(404, 'DELETE', `/work-items/${workItemId}/unarchive/`);
+	}
+
+	async isWorkItemArchived(projectId: string, workItemId: string): Promise<boolean> {
+		this.#enter('isWorkItemArchived', projectId);
+		// Like the client: an id Plane does not know is not archived.
+		const item = this.workItems.find((w) => w.id === workItemId && w.project === projectId);
+		return item !== undefined && this.archived.has(item.id);
 	}
 
 	async setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void> {

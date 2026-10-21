@@ -47,7 +47,14 @@ export interface PlaneApi {
 		source: string,
 		externalId: string,
 	): Promise<{ id: string } | null>;
+	/** Plane hides an archived item from this read: 404. */
 	getWorkItem(projectId: string, workItemId: string): Promise<WorkItemRef>;
+	/** Plane answers 400 unless the item's state group is completed/cancelled. plane-hooks itself never archives. */
+	archiveWorkItem(projectId: string, workItemId: string): Promise<void>;
+	/** Plane answers 404 when the item is not archived. */
+	unarchiveWorkItem(projectId: string, workItemId: string): Promise<void>;
+	/** False for an id Plane does not know at all. */
+	isWorkItemArchived(projectId: string, workItemId: string): Promise<boolean>;
 	setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void>;
 	createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert>;
 	listComments(projectId: string, workItemId: string): Promise<CommentSummary[]>;
@@ -137,6 +144,31 @@ export class PlaneClient implements PlaneApi {
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItemRef> {
 		const res = await this.#request('GET', `/projects/${projectId}/work-items/${workItemId}/`);
 		return workItemRef(res.body);
+	}
+
+	async archiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		await this.#request('POST', `/projects/${projectId}/work-items/${workItemId}/archive/`);
+	}
+
+	async unarchiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		await this.#request('DELETE', `/projects/${projectId}/work-items/${workItemId}/unarchive/`);
+	}
+
+	/**
+	 * The detail read answers 404 for an archived item, and /archived-work-items/{id}/ answers 404
+	 * even for one: only the archived list names it. So the list is scanned on a 404 only, and a
+	 * project with more than MAX_PAGES pages of archived items throws here.
+	 */
+	async isWorkItemArchived(projectId: string, workItemId: string): Promise<boolean> {
+		const res = await this.#request(
+			'GET',
+			`/projects/${projectId}/work-items/${workItemId}/`,
+			undefined,
+			[404],
+		);
+		if (res.status !== 404) return false;
+		const archived = await this.#listAll(`/projects/${projectId}/archived-work-items/`);
+		return archived.some((row) => row.id === workItemId);
 	}
 
 	async setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void> {

@@ -52,10 +52,12 @@ const RESOLVED = ':resolved';
 /**
  * One Plane work item per incident key plus marker comments per occurrence
  * Every write carries an external_id, so a repeated
- * delivery is a no-op. For firing: work item creation is first, reopen check is
- * second, marker is last (commit point). Signals with the same key run strictly
- * one after another: Plane's duplicate check is read-then-insert, and two
- * concurrent creates could both pass it. Never closes a work item.
+ * delivery is a no-op. For firing: work item creation is first, unarchive of an
+ * archived item and the reopen check are next, marker is last (commit point).
+ * Resolved never unarchives: an archived item takes the marker as it is.
+ * Signals with the same key run strictly one after another: Plane's duplicate
+ * check is read-then-insert, and two concurrent creates could both pass it.
+ * Never closes or archives a work item.
  */
 export function createIncidentReporter(deps: {
 	plane: PlaneApi;
@@ -105,6 +107,11 @@ export function createIncidentReporter(deps: {
 			await plane.createComment(projectId, item.id, marker);
 			return { action: 'created', workItemId: item.id };
 		}
+		// An archived item is hidden from the detail read, so it is brought back before the reopen check.
+		// A lost unarchive response is harmless: the next delivery sees the item no longer archived.
+		if (await plane.isWorkItemArchived(projectId, item.id)) {
+			await plane.unarchiveWorkItem(projectId, item.id);
+		}
 		// The marker is the commit point and goes last: a delivery that failed before it redoes the
 		// reopen check, one that failed after it (lost response) finds the marker and is a replay.
 		const comments = await plane.listComments(projectId, item.id);
@@ -116,13 +123,14 @@ export function createIncidentReporter(deps: {
 		return { action: reopened ? 'reopened' : 'commented', workItemId: item.id };
 	}
 
-	/** Moves a completed/cancelled work item back to the project's default state. An archived item is not reopenable. */
+	/** Moves a completed/cancelled work item back to the project's default state. */
 	async function reopenIfClosed(workItemId: string): Promise<boolean> {
 		let current: WorkItemRef;
 		try {
 			current = await plane.getWorkItem(projectId, workItemId);
 		} catch (err) {
-			// Plane's duplicate check (Issue.objects) still sees an archived item; its detail read (issue_objects) does not.
+			// Safety net: firing unarchives first, but an item archived (or hidden) between that check and this
+			// read answers 404 here — the marker is still written, the item is left as it is.
 			if (err instanceof PlaneApiError && err.status === 404) return false;
 			throw err;
 		}

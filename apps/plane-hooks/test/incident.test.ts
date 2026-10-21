@@ -64,6 +64,17 @@ class LostAckPlane extends FakePlane {
 	}
 }
 
+class LostUnarchiveAckPlane extends FakePlane {
+	loseNextAck = false;
+	override async unarchiveWorkItem(...args: Parameters<FakePlane['unarchiveWorkItem']>) {
+		await super.unarchiveWorkItem(...args);
+		if (this.loseNextAck) {
+			this.loseNextAck = false;
+			throw new PlaneApiError(504, 'DELETE', '/unarchive/');
+		}
+	}
+}
+
 class NoDefaultStatePlane extends FakePlane {
 	override async listStates(...args: Parameters<FakePlane['listStates']>) {
 		return (await super.listStates(...args)).map((state) => ({ ...state, default: false }));
@@ -219,31 +230,78 @@ describe('восстановление', () => {
 });
 
 describe('архивная задача (проверка дубля её видит, чтение по id — 404)', () => {
-	test('новое срабатывание: маркер в архивную задачу, без переоткрытия и без ошибки', async () => {
-		const first = await incidents.report(firing());
-		const id = first.workItemId as string;
+	const unarchives = () => plane.calls.filter((call) => call === 'unarchiveWorkItem').length;
+
+	async function archivedIncident(): Promise<string> {
+		const { workItemId } = await incidents.report(firing());
+		const id = workItemId as string;
 		(plane.workItems[0] as { state: string }).state = 'st-done';
-		plane.archived.add(id);
+		await plane.archiveWorkItem('p-ops', id);
+		return id;
+	}
+
+	test('срабатывание по архивной закрытой задаче: разархивирована, в состоянии по умолчанию, маркер, reopened', async () => {
+		const id = await archivedIncident();
 		const next = await incidents.report(firing({ occurrence: T1, at: T1 }));
-		expect(next).toEqual({ action: 'commented', workItemId: id });
+		expect(next).toEqual({ action: 'reopened', workItemId: id });
+		expect(plane.archived.has(id)).toBe(false);
 		expect(plane.workItems).toHaveLength(1);
+		expect(plane.workItems[0]?.state).toBe('st-backlog');
 		expect(plane.commentsOf(id).map((c) => c.external_id)).toEqual([
 			'fp1:2026-10-06T10:00:00Z:firing',
 			'fp1:2026-10-06T11:00:00Z:firing',
 		]);
-		expect(plane.calls).not.toContain('setWorkItemState');
-		expect(plane.workItems[0]?.state).toBe('st-done');
+		expect(unarchives()).toBe(1);
 	});
 
-	test('восстановление: маркер «Погас» в архивную задачу', async () => {
-		const first = await incidents.report(firing());
-		const id = first.workItemId as string;
-		plane.archived.add(id);
+	test('повторная доставка того же срабатывания после разархивации — noop, без второго маркера', async () => {
+		const id = await archivedIncident();
+		await incidents.report(firing({ occurrence: T1, at: T1 }));
+		const again = await incidents.report(firing({ occurrence: T1, at: T1 }));
+		expect(again).toEqual({ action: 'noop', workItemId: id });
+		expect(plane.comments).toHaveLength(2);
+		expect(unarchives()).toBe(1);
+	});
+
+	test('ответ потерян после unarchive: повтор доставки доводит до reopened и одного маркера', async () => {
+		plane = new LostUnarchiveAckPlane();
+		incidents = createIncidentReporter({ plane, projectId: 'p-ops' });
+		const id = await archivedIncident();
+		(plane as LostUnarchiveAckPlane).loseNextAck = true;
+		await expect(incidents.report(firing({ occurrence: T1, at: T1 }))).rejects.toBeInstanceOf(
+			PlaneApiError,
+		);
+		expect(plane.archived.has(id)).toBe(false);
+		expect(plane.comments).toHaveLength(1);
+		const retry = await incidents.report(firing({ occurrence: T1, at: T1 }));
+		expect(retry).toEqual({ action: 'reopened', workItemId: id });
+		expect(plane.workItems[0]?.state).toBe('st-backlog');
+		expect(plane.commentsOf(id).map((c) => c.external_id)).toEqual([
+			'fp1:2026-10-06T10:00:00Z:firing',
+			'fp1:2026-10-06T11:00:00Z:firing',
+		]);
+		expect(unarchives()).toBe(1);
+	});
+
+	test('погасание по архивной задаче: не разархивирует; маркер «Погас» или noop, не исключение', async () => {
+		// Probe: an archived item takes comments (201), so the marker is written and the item stays archived.
+		const id = await archivedIncident();
 		expect(await incidents.report(resolved())).toEqual({ action: 'commented', workItemId: id });
+		expect(plane.archived.has(id)).toBe(true);
+		expect(plane.workItems[0]?.state).toBe('st-done');
+		expect(unarchives()).toBe(0);
 		expect(plane.commentsOf(id).map((c) => c.external_id)).toEqual([
 			'fp1:2026-10-06T10:00:00Z:firing',
 			'fp1:2026-10-06T10:00:00Z:resolved',
 		]);
+	});
+
+	test('открытая неархивная задача: unarchive не вызывается', async () => {
+		const { workItemId } = await incidents.report(firing());
+		const next = await incidents.report(firing({ occurrence: T1, at: T1 }));
+		expect(next).toEqual({ action: 'commented', workItemId });
+		expect(plane.calls.filter((call) => call === 'isWorkItemArchived')).toHaveLength(1);
+		expect(unarchives()).toBe(0);
 	});
 });
 
