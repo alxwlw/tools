@@ -2,7 +2,12 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createCaptureHandler, describeRequest, MAX_BODY_BYTES } from '../scripts/capture.ts';
+import {
+	createCaptureHandler,
+	describeRequest,
+	MAX_BODY_BYTES,
+	parseLimit,
+} from '../scripts/capture.ts';
 
 test('GET с query: путь и параметры, тела нет', async () => {
 	const line = await describeRequest(
@@ -99,6 +104,17 @@ test('после лимита по байтам файлы не появляют
 	expect(listing(dir)).toEqual(before);
 });
 
+test('лимит по байтам копится между запросами: пишутся первые два, остальные нет', async () => {
+	// Guard: bytes + 2 * body + 1024 <= maxBytes. With 300-byte bodies the first request
+	// needs 1624 bytes, so maxBytes 2500 admits two requests (~530 bytes each), not a third.
+	const dir = tmpDir();
+	const handle = createCaptureHandler(dir, { maxFiles: 100, maxBytes: 2500 });
+	for (let i = 0; i < 5; i += 1) {
+		await handle(new Request('http://x/p', { method: 'POST', body: 'x'.repeat(300) }));
+	}
+	expect(listing(dir).map((f) => f.slice(0, 2))).toEqual(['1-', '1-', '2-', '2-']);
+});
+
 test('перезапуск продолжает нумерацию и не перезаписывает', async () => {
 	const dir = tmpDir();
 	const limits = { maxFiles: 100, maxBytes: 1e9 };
@@ -117,6 +133,16 @@ test('перезапуск продолжает нумерацию и не пе�
 	expect(second).toHaveLength(4);
 	expect(second.filter((f) => f.startsWith('2-'))).toHaveLength(2);
 	expect(readFileSync(join(dir, firstBin), 'utf8')).toBe(content);
+});
+
+test('разбор лимита из окружения: пусто, нечисло, ≤0 и дробное дают дефолт; целое берётся как есть', () => {
+	expect(parseLimit(undefined, 500)).toBe(500);
+	expect(parseLimit('', 500)).toBe(500);
+	expect(parseLimit('abc', 500)).toBe(500);
+	expect(parseLimit('-1', 500)).toBe(500);
+	expect(parseLimit('0', 500)).toBe(500);
+	expect(parseLimit('1.5', 500)).toBe(500);
+	expect(parseLimit('7', 500)).toBe(7);
 });
 
 test('перезапуск учитывает уже записанное: лимит по числу и по байтам', async () => {

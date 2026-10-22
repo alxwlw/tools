@@ -41,6 +41,13 @@ export async function describeRequest(req: Request, now: Date): Promise<CaptureL
 
 export const MAX_BODY_BYTES = 1024 * 1024;
 
+// A limit from the environment: a positive integer, otherwise the default.
+// Number('') is 0 and Number('abc') is NaN, so both fall back instead of disabling the limit.
+export function parseLimit(value: string | undefined, fallback: number): number {
+	const n = Number(value);
+	return Number.isSafeInteger(n) && n > 0 ? n : fallback;
+}
+
 export type CaptureLimits = { maxFiles: number; maxBytes: number };
 
 // Handler that stores each request as N-<hash>.bin (raw body) and N-<hash>.json (metadata).
@@ -86,8 +93,8 @@ if (import.meta.main) {
 		development: false,
 		maxRequestBodySize: MAX_BODY_BYTES,
 		fetch: createCaptureHandler(dir, {
-			maxFiles: Number(process.env.CAPTURE_MAX_FILES ?? 500),
-			maxBytes: Number(process.env.CAPTURE_MAX_BYTES ?? 50 * 1024 * 1024),
+			maxFiles: parseLimit(process.env.CAPTURE_MAX_FILES, 500),
+			maxBytes: parseLimit(process.env.CAPTURE_MAX_BYTES, 50 * 1024 * 1024),
 		}),
 	});
 }
