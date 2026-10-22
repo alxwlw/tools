@@ -59,6 +59,15 @@ export class SerialQueue {
 		}
 	}
 
+	/** A throwing logger must not abort the drain: jobs still queued would never run. */
+	#safeLog(entry: Parameters<QueueLog>[0]): void {
+		try {
+			this.#log(entry);
+		} catch {
+			// logging is best-effort
+		}
+	}
+
 	async #runJob(job: Job): Promise<void> {
 		for (let attempt = 1; ; attempt++) {
 			try {
@@ -68,10 +77,10 @@ export class SerialQueue {
 				const error = describe(err);
 				const delay = this.#delaysMs[attempt - 1];
 				if (delay === undefined || !isRetryable(err)) {
-					this.#log({ event: 'job.dropped', label: job.label, attempt, error });
+					this.#safeLog({ event: 'job.dropped', label: job.label, attempt, error });
 					return;
 				}
-				this.#log({ event: 'job.retry', label: job.label, attempt, error });
+				this.#safeLog({ event: 'job.retry', label: job.label, attempt, error });
 				await this.#sleep(delay);
 			}
 		}
