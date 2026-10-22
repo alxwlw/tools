@@ -345,7 +345,7 @@ async function liveRows(p: Probe, env: Env, creds: Creds, keep: boolean): Promis
 				p.row(
 					'bot-write',
 					false,
-					`POST /work-items/ → ${created.status}${created.status === 403 ? '' : ''}`,
+					`POST /work-items/ → ${created.status}`,
 				);
 				return;
 			}
