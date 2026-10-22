@@ -23,3 +23,18 @@ test('POST: x-plane-* сохранены, Authorization нет, тело бай�
 	expect(line.headers.authorization).toBeUndefined();
 	expect(Buffer.from(line.bodyBase64 as string, 'base64')).toEqual(Buffer.from(body));
 });
+
+test('метаданные: ts, метод, sha256 тела; HEAD без тела', async () => {
+	const at = new Date('2026-10-22T01:02:03Z');
+	const post = await describeRequest(
+		new Request('http://x/p', { method: 'POST', body: 'abc' }),
+		at,
+	);
+	expect(post.ts).toBe('2026-10-22T01:02:03.000Z');
+	expect(post.method).toBe('POST');
+	expect(post.bodySha256).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+	const head = await describeRequest(new Request('http://x/p', { method: 'HEAD' }), at);
+	expect(head.method).toBe('HEAD');
+	expect(head.bodyBase64).toBeNull();
+	expect(head.bodySha256).toBeNull();
+});
