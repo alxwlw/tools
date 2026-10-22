@@ -11,6 +11,7 @@ function setup() {
 		log: (e) => logs.push(e),
 		sleep: async (ms) => {
 			sleeps.push(ms);
+			if (sleeps.length > 10) throw new Error('sleep storm');
 		},
 	});
 	return { queue, logs, sleeps };
@@ -85,6 +86,19 @@ describe('SerialQueue', () => {
 		expect(calls).toBe(2);
 		expect(sleeps).toEqual([1000]);
 		expect(logs).toEqual([{ event: 'job.retry', label: 'once', attempt: 1, error: 'HTTP 429' }]);
+	});
+
+	test('без sleep — настоящая задержка по умолчанию: 503, затем успех — один job.retry, без job.dropped', async () => {
+		const logs: Entry[] = [];
+		const queue = new SerialQueue({ log: (e) => logs.push(e), delaysMs: [1] });
+		let calls = 0;
+		queue.push('real', async () => {
+			calls++;
+			if (calls === 1) throw statusError(503);
+		});
+		await queue.idle();
+		expect(calls).toBe(2);
+		expect(logs).toEqual([{ event: 'job.retry', label: 'real', attempt: 1, error: 'HTTP 503' }]);
 	});
 
 	test('счётчик попыток не переносится на следующую задачу', async () => {

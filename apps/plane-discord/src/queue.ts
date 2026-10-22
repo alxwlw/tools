@@ -1,6 +1,7 @@
 export type QueueLog = (entry: {
 	event: 'job.retry' | 'job.dropped';
 	label: string;
+	/** number of the failed attempt; for job.dropped, the last one */
 	attempt: number;
 	error: string;
 }) => void;
