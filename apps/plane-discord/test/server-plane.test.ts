@@ -1,0 +1,409 @@
+import { createHmac } from 'node:crypto';
+import { describe, expect, test } from 'bun:test';
+import type { Tenant } from '../src/config.ts';
+import { jsonLog, type LogEntry } from '../src/log.ts';
+import type { PlaneEvent } from '../src/plane/webhook.ts';
+import { createHandler, MAX_PLANE_BODY } from '../src/server.ts';
+import { Store } from '../src/store.ts';
+import { fixture } from './fixtures.ts';
+
+const WORKSPACE = '00000000-0000-4000-8000-000000000002';
+const SECRET = 'test-secret';
+const tenant = (id: string, workspaceId: string, webhookSecret: string): Tenant => ({
+	id,
+	guildId: '111111111111111111',
+	workspace: 'example-ws',
+	workspaceId,
+	auth: { clientId: 'cid', clientSecret: 'csecret', appInstallationId: 'inst' },
+	webhookSecret,
+	serviceChannelId: null,
+	silenceHours: 72,
+	hiddenProjects: [],
+	channels: [],
+	users: [],
+});
+
+function setup(opts: { store?: Store } = {}) {
+	const store = opts.store ?? new Store(':memory:');
+	const events: PlaneEvent[] = [];
+	const logs: LogEntry[] = [];
+	let clock = 1_000;
+	const handler = createHandler({
+		tenantsByWorkspace: new Map([
+			[WORKSPACE, tenant('initech', WORKSPACE, SECRET)],
+			['other-ws', tenant('other', 'other-ws', 'other-secret')],
+		]),
+		store,
+		enqueue: (e) => events.push(e),
+		log: (e) => logs.push(e),
+		now: () => (clock += 7),
+	});
+	return { handler, store, events, logs };
+}
+
+const URL_ = 'http://localhost/plane/webhook';
+const sign = (raw: string | Uint8Array, secret = SECRET) =>
+	createHmac('sha256', secret).update(raw).digest('hex');
+const post = (
+	raw: string | Uint8Array,
+	signature: string | null,
+	headers: Record<string, string> = {},
+) =>
+	new Request(URL_, {
+		method: 'POST',
+		body: raw,
+		headers: { ...(signature === null ? {} : { 'x-plane-signature': signature }), ...headers },
+	});
+const fixtureRequest = (name: string, headers: Record<string, string> = {}) => {
+	const fx = fixture(name);
+	return post(fx.raw, fx.headers['x-plane-signature']!, headers);
+};
+const edited = (name: string, edit: (body: any) => void): string => {
+	const body = structuredClone(fixture(name).body) as any;
+	edit(body);
+	return JSON.stringify(body);
+};
+const only = (logs: LogEntry[], event: string) => logs.filter((l) => l.event === event);
+
+describe('POST /plane/webhook', () => {
+	test('подписанная доставка → 200, один enqueue, plane.accepted, lastEventAt выставлен', async () => {
+		const { handler, store, events, logs } = setup();
+		const res = await handler(
+			fixtureRequest('plane-app-workitem-created', { 'x-plane-delivery': 'd-1' }),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('ok');
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({ kind: 'workitem.created', tenant: 'initech' });
+		expect(logs).toHaveLength(1);
+		expect(logs[0]).toMatchObject({
+			event: 'plane.accepted',
+			tenant: 'initech',
+			kind: 'workitem.created',
+			eventKey: 'issue.created:00000000-0000-4000-8000-000000000003',
+		});
+		expect(logs[0]!.level).toBeUndefined();
+		// the fake clock moves 7 ms per reading: start, touchEvent, claim, end
+		expect(store.silence('initech').lastEventAt).toBe(1_000 + 7 * 2);
+		expect(logs[0]!.ms).toBe(7 * 3);
+		expect(store.silence('other').lastEventAt).toBeNull();
+	});
+
+	test('повтор той же доставки → 200, enqueue не вызван, plane.duplicate', async () => {
+		const { handler, events, logs } = setup();
+		await handler(fixtureRequest('plane-app-workitem-created', { 'x-plane-delivery': 'd-1' }));
+		const res = await handler(
+			fixtureRequest('plane-app-workitem-created', { 'x-plane-delivery': 'd-1' }),
+		);
+		expect(res.status).toBe(200);
+		expect(events).toHaveLength(1);
+		expect(only(logs, 'plane.duplicate')).toEqual([
+			{
+				event: 'plane.duplicate',
+				tenant: 'initech',
+				kind: 'workitem.created',
+				eventKey: 'issue.created:00000000-0000-4000-8000-000000000003',
+			},
+		]);
+	});
+
+	test('вторая доставка того же комментария (другой x-plane-delivery) → 200, enqueue не вызван, plane.duplicate', async () => {
+		const { handler, events, logs } = setup();
+		await handler(fixtureRequest('plane-app-comment-mentions', { 'x-plane-delivery': 'd-98' }));
+		const res = await handler(
+			fixtureRequest('plane-app-comment-mentions-dup', { 'x-plane-delivery': 'd-99' }),
+		);
+		expect(res.status).toBe(200);
+		expect(events).toHaveLength(1);
+		expect(only(logs, 'plane.accepted')).toHaveLength(1);
+		expect(only(logs, 'plane.duplicate')).toHaveLength(1);
+	});
+
+	test('тот же ключ у разных тенантов не дедуплицируется между ними', async () => {
+		const { handler, events } = setup();
+		const body = edited('plane-app-workitem-created', (b) => (b.workspace_id = 'other-ws'));
+		await handler(fixtureRequest('plane-app-workitem-created'));
+		await handler(post(body, sign(body, 'other-secret')));
+		expect(events.map((e) => e.tenant)).toEqual(['initech', 'other']);
+	});
+
+	test('неверная подпись → 200, без enqueue, level error, reason bad_signature', async () => {
+		const { handler, store, events, logs } = setup();
+		const fx = fixture('plane-app-workitem-created');
+		const wrong = [
+			sign(fx.raw, 'rotated-secret'),
+			sign(fx.raw, 'other-secret'),
+			'',
+			'zz',
+			fx.headers['x-plane-signature']!.slice(2),
+			null,
+		];
+		for (const signature of wrong) {
+			const res = await handler(post(fx.raw, signature));
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe('ok');
+		}
+		// the signature of another tenant does not open this one, and a changed body breaks the right one
+		expect((await handler(post(`${fx.raw} `, fx.headers['x-plane-signature']!))).status).toBe(200);
+		expect(events).toEqual([]);
+		const rejected = only(logs, 'plane.rejected');
+		expect(rejected).toHaveLength(wrong.length + 1);
+		for (const entry of rejected)
+			expect(entry).toEqual({
+				event: 'plane.rejected',
+				level: 'error',
+				reason: 'bad_signature',
+				tenant: 'initech',
+			});
+		// an unsigned delivery is not a sign of life
+		expect(store.silence('initech').lastEventAt).toBeNull();
+	});
+
+	test('неизвестный workspace_id, не JSON, тело больше 4 MiB → 200, plane.rejected с нужным reason', async () => {
+		const { handler, events, logs } = setup();
+		const unknown = edited('plane-app-workitem-created', (b) => (b.workspace_id = 'ws-nobody'));
+		const cases: Array<[Request, string, string | undefined]> = [
+			[post(unknown, sign(unknown)), 'unknown_workspace', 'ws-nobody'],
+			[post('not json', sign('not json')), 'unknown_workspace', undefined],
+			[post('', null), 'unknown_workspace', undefined],
+			[post('null', sign('null')), 'unknown_workspace', undefined],
+			[post(`{"workspace_id":"${'w'.repeat(100)}"}`, null), 'unknown_workspace', 'w'.repeat(64)],
+			[post(new Uint8Array([0xff, 0xfe, 0x00]), null), 'unknown_workspace', undefined],
+			[post('x'.repeat(MAX_PLANE_BODY + 1), null), 'too_large', undefined],
+		];
+		for (const [req, reason, workspaceId] of cases) {
+			logs.length = 0;
+			const res = await handler(req);
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe('ok');
+			expect(logs).toEqual([
+				{
+					event: 'plane.rejected',
+					level: 'error',
+					reason,
+					...(workspaceId ? { workspaceId } : {}),
+				},
+			]);
+		}
+		expect(events).toEqual([]);
+	});
+
+	test('тело ровно 4 MiB не too_large; без content-length читается потоком и режется на лету', async () => {
+		const { handler, logs } = setup();
+		const exact = 'x'.repeat(MAX_PLANE_BODY);
+		await handler(post(exact, null));
+		expect(logs).toEqual([
+			{ event: 'plane.rejected', level: 'error', reason: 'unknown_workspace' },
+		]);
+
+		logs.length = 0;
+		let pulled = 0;
+		let cancelled = false;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				pulled++;
+				controller.enqueue(new Uint8Array(1024 * 1024));
+				if (pulled > 50) controller.close();
+			},
+			cancel() {
+				cancelled = true;
+			},
+		});
+		const req = new Request(URL_, { method: 'POST', body: stream, duplex: 'half' } as RequestInit);
+		expect(req.headers.get('content-length')).toBeNull();
+		const res = await handler(req);
+		expect(res.status).toBe(200);
+		expect(logs).toEqual([{ event: 'plane.rejected', level: 'error', reason: 'too_large' }]);
+		expect(cancelled).toBe(true);
+		expect(pulled).toBeLessThan(10);
+	});
+
+	test('объявленный content-length больше лимита → too_large, хотя само тело маленькое', async () => {
+		const { handler, logs } = setup();
+		const req = new Request(URL_, {
+			method: 'POST',
+			body: 'tiny',
+			headers: { 'content-length': String(MAX_PLANE_BODY + 1) },
+		});
+		expect(req.headers.get('content-length')).toBe(String(MAX_PLANE_BODY + 1));
+		const res = await handler(req);
+		expect(res.status).toBe(200);
+		expect(logs).toEqual([{ event: 'plane.rejected', level: 'error', reason: 'too_large' }]);
+	});
+
+	test('подписанная доставка, которую разбор не принимает → 200, bad_payload, level error', async () => {
+		const { handler, events, logs, store } = setup();
+		const body = edited('plane-app-workitem-created', (b) => (b.data.sequence_id = 1e300));
+		const res = await handler(post(body, sign(body)));
+		expect(res.status).toBe(200);
+		expect(events).toEqual([]);
+		expect(logs).toEqual([
+			{
+				event: 'plane.rejected',
+				level: 'error',
+				reason: 'bad_payload',
+				tenant: 'initech',
+				detail: 'data.sequence_id is not an integer',
+			},
+		]);
+		// the signature was valid, so the webhook is alive
+		expect(store.silence('initech').lastEventAt).not.toBeNull();
+		for (const raw of ['null', '[]', '"s"', '7', '{"workspace_id":"' + WORKSPACE + '"}']) {
+			logs.length = 0;
+			const r = await handler(post(raw, sign(raw)));
+			expect(r.status).toBe(200);
+			expect(logs).toMatchObject([{ event: 'plane.rejected', level: 'error' }]);
+		}
+	});
+
+	test('игнорируемая доставка → 200, plane.ignored, enqueue не вызван, ключ не занят', async () => {
+		const { handler, events, logs, store } = setup();
+		const body = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'state'));
+		const res = await handler(post(body, sign(body)));
+		expect(res.status).toBe(200);
+		expect(events).toEqual([]);
+		expect(logs).toEqual([{ event: 'plane.ignored', tenant: 'initech' }]);
+		expect(store.silence('initech').lastEventAt).not.toBeNull();
+	});
+
+	test('сбой внутри обработчика (store или enqueue бросает) → 200, reason internal, текст ошибки не в логе', async () => {
+		const store = new Store(':memory:');
+		store.claim = () => {
+			throw new Error('SECRET-ERROR-TEXT');
+		};
+		const a = setup({ store });
+		const res = await a.handler(fixtureRequest('plane-app-workitem-created'));
+		expect(res.status).toBe(200);
+		expect(a.logs).toEqual([{ event: 'plane.rejected', level: 'error', reason: 'internal' }]);
+
+		const logs: LogEntry[] = [];
+		const handler = createHandler({
+			tenantsByWorkspace: new Map([[WORKSPACE, tenant('initech', WORKSPACE, SECRET)]]),
+			store: new Store(':memory:'),
+			enqueue: () => {
+				throw new Error('SECRET-ERROR-TEXT');
+			},
+			log: (e) => logs.push(e),
+		});
+		expect((await handler(fixtureRequest('plane-app-workitem-created'))).status).toBe(200);
+		expect(logs).toEqual([{ event: 'plane.rejected', level: 'error', reason: 'internal' }]);
+	});
+
+	test('now по умолчанию — Date.now', async () => {
+		const logs: LogEntry[] = [];
+		const store = new Store(':memory:');
+		const handler = createHandler({
+			tenantsByWorkspace: new Map([[WORKSPACE, tenant('initech', WORKSPACE, SECRET)]]),
+			store,
+			enqueue: () => {},
+			log: (e) => logs.push(e),
+		});
+		const before = Date.now();
+		await handler(fixtureRequest('plane-app-workitem-created'));
+		const at = store.silence('initech').lastEventAt!;
+		expect(at).toBeGreaterThanOrEqual(before);
+		expect(at).toBeLessThanOrEqual(Date.now());
+	});
+});
+
+describe('прочие маршруты', () => {
+	test('GET /plane/webhook → 405; GET /healthz → ok; /nope → 404', async () => {
+		const { handler, logs } = setup();
+		const get = (path: string, method = 'GET') =>
+			handler(new Request(`http://localhost${path}`, { method }));
+		const notAllowed = await get('/plane/webhook');
+		expect(notAllowed.status).toBe(405);
+		expect((await get('/plane/webhook', 'PUT')).status).toBe(405);
+		const health = await get('/healthz');
+		expect(health.status).toBe(200);
+		expect(await health.text()).toBe('ok');
+		expect((await get('/nope')).status).toBe(404);
+		expect((await get('/plane/webhook/')).status).toBe(404);
+		expect(logs).toEqual([]);
+	});
+});
+
+describe('лог', () => {
+	test('ни одна строка лога не содержит текст из тела доставки', async () => {
+		const { handler, logs } = setup();
+		const TEXT = 'ТОП-СЕКРЕТНЫЙ-ТЕКСТ-9137';
+		const make = (name: string, edit: (b: any) => void) => edited(name, edit);
+		const bodies = [
+			make('plane-app-comment-mentions', (b) => {
+				b.data.comment_html = `<p>${TEXT}</p>`;
+				b.data.comment_stripped = TEXT;
+			}),
+			make('plane-app-workitem-created', (b) => {
+				b.data.name = TEXT;
+				b.data.description_html = `<p>${TEXT}</p>`;
+				b.data.id = '00000000-0000-4000-8000-0000000000aa';
+			}),
+			make('plane-app-workitem-state-done', (b) => {
+				b.data.name = TEXT;
+				b.activity.field = 'description_html';
+				b.activity.old_value = `<p>${TEXT}</p>`;
+			}),
+			// rejected after verification: the text sits in a rejected delivery
+			make('plane-app-workitem-created', (b) => {
+				b.data.name = TEXT;
+				b.data.sequence_id = TEXT;
+			}),
+		];
+		for (const body of bodies) {
+			await handler(post(body, sign(body)));
+			await handler(post(body, sign(body))); // duplicate path
+			await handler(post(body, 'bad')); // bad signature path
+		}
+		await handler(post(`${TEXT}{`, null));
+		expect(logs.length).toBeGreaterThan(8);
+		const kinds = new Set(logs.map((l) => (l.reason as string | undefined) ?? l.event));
+		expect([...kinds].sort()).toEqual(
+			[
+				'bad_payload',
+				'bad_signature',
+				'plane.accepted',
+				'plane.duplicate',
+				'unknown_workspace',
+			].sort(),
+		);
+		for (const entry of logs) {
+			const line = JSON.stringify(entry);
+			expect(line).not.toContain(TEXT);
+			expect(line).not.toContain(SECRET);
+			expect(line).not.toContain('other-secret');
+		}
+	});
+});
+
+describe('jsonLog', () => {
+	test('одна JSON-строка на запись: ts первым, поля записи следом, level сохраняется', () => {
+		const lines: string[] = [];
+		const log = jsonLog(
+			(line) => lines.push(line),
+			() => new Date('2026-10-22T12:00:00.000Z'),
+		);
+		log({ event: 'plane.rejected', level: 'error', reason: 'bad_signature', tenant: 'initech' });
+		log({ event: 'plane.accepted', ms: 3, note: undefined });
+		expect(lines).toEqual([
+			'{"ts":"2026-10-22T12:00:00.000Z","event":"plane.rejected","level":"error","reason":"bad_signature","tenant":"initech"}',
+			'{"ts":"2026-10-22T12:00:00.000Z","event":"plane.accepted","ms":3}',
+		]);
+	});
+	test('по умолчанию пишет строку в stdout', () => {
+		const written: string[] = [];
+		const original = process.stdout.write;
+		process.stdout.write = ((chunk: string) => {
+			written.push(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			jsonLog()({ event: 'x' });
+		} finally {
+			process.stdout.write = original;
+		}
+		expect(written).toHaveLength(1);
+		expect(written[0]!.endsWith('\n')).toBe(true);
+		expect(JSON.parse(written[0]!)).toMatchObject({ event: 'x' });
+		expect(Date.now() - Date.parse(JSON.parse(written[0]!).ts)).toBeLessThan(60_000);
+	});
+});
