@@ -354,6 +354,11 @@ describe('PlaneClient: списки', () => {
 		expect((await client.listProjects()).map((p) => p.id)).toEqual(['a', 'b']);
 	});
 
+	test('пустое тело вместо списка — ошибка формы, а не TypeError', async () => {
+		const { client } = stub([{ status: 200 }]);
+		expect(String(await failure(client.listProjects()))).toContain('unexpected list shape');
+	});
+
 	test('больше 50 страниц — ошибка после ровно 50 запросов', async () => {
 		let n = 0;
 		const { auth } = fakeAuth();
