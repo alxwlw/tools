@@ -73,6 +73,7 @@ export function planeMentionHtml(
 const OPEN = String.fromCharCode(0xe000);
 const CLOSE = String.fromCharCode(0xe001);
 const MARKERS = new RegExp(`[${OPEN}${CLOSE}]`, 'g');
+const MARKED = new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g');
 
 /** Breaks everything Discord would parse as a ping, however the pieces ended up adjacent. */
 function defang(text: string): string {
@@ -85,10 +86,13 @@ function defang(text: string): string {
  */
 export function planeHtmlToDiscord(html: string, mention: (planeUserId: string) => string): string {
 	const parts: string[] = [];
+	// Fragments are final and marker-free: anything from outside has had MARKERS stripped before it gets here.
 	const hold = (fragment: string): string => {
 		parts.push(fragment);
 		return `${OPEN}${parts.length - 1}${CLOSE}`;
 	};
+	// One pass, no recursion; an index nobody issued expands to nothing.
+	const resolve = (text: string): string => text.replace(MARKED, (_, i) => parts[Number(i)] ?? '');
 	let out = '';
 	let link: { url: string; start: number } | null = null;
 
@@ -97,15 +101,23 @@ export function planeHtmlToDiscord(html: string, mention: (planeUserId: string) 
 			out += '\n';
 		} else if (name === 'mention-component' && !closing) {
 			const id = attr(attrs, 'entity_identifier');
-			if (attr(attrs, 'entity_name') === 'user_mention' && id) out += hold(mention(id));
+			if (attr(attrs, 'entity_name') === 'user_mention' && id) {
+				// A real ping is `<@id>`; any other text from the callback (a display name) goes through the guard.
+				const rendered = mention(id).replace(MARKERS, '');
+				out += hold(/^<@!?[\w-]+>$/.test(rendered) ? rendered : defang(rendered));
+			}
 		} else if (name === 'a' && !closing) {
 			const href = attr(attrs, 'href');
 			link = href && /^https?:\/\//i.test(href) ? { url: href, start: out.length } : null;
 		} else if (name === 'a' && link) {
 			// `<`, `>` and whitespace would end the `<url>` form early.
-			const url = link.url.replace(/[<>\s]/g, (c) => encodeURIComponent(c));
+			// `@everyone` in a URL is percent-encoded so the link still works.
+			const url = link.url
+				.replace(MARKERS, '')
+				.replace(/[<>\s]/g, (c) => encodeURIComponent(c))
+				.replace(/@(?=everyone|here)/gi, '%40');
 			const inner = defang(out.slice(link.start)).replace(/\s+/g, ' ').trim();
-			const label = (inner || url).replace(/[[\]]/g, '\\$&');
+			const label = resolve((inner || url).replace(/[[\]]/g, '\\$&'));
 			out = out.slice(0, link.start) + hold(`[${label}](<${url}>)`);
 			link = null;
 		}
@@ -120,10 +132,6 @@ export function planeHtmlToDiscord(html: string, mention: (planeUserId: string) 
 	}
 	out += decode(html.slice(last).replace(/[ \t\r\n\f]+/g, ' ')).replace(MARKERS, '');
 
-	const resolve = (text: string): string =>
-		text.replace(new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g'), (_, i) =>
-			resolve(parts[Number(i)] as string),
-		);
 	return resolve(
 		defang(out)
 			.replace(/[ \t]*\n[ \t]*/g, '\n')

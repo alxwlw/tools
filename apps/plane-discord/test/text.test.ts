@@ -144,6 +144,35 @@ describe('planeHtmlToDiscord', () => {
 		expect(toText('&#0; &#1114112; &#xD800; &foo; &AMP;')).toBe('&#0; &#1114112; &#xD800; &foo; &');
 	});
 
+	test('служебные символы перед тегом и внутри тега удаляются, не бросают', () => {
+		expect(toText('<p>x&#xE000;0&#xE001;y</p>')).toBe('x0y');
+		expect(toText('<b>a&#xE000;7&#xE001;</b>')).toBe('a7');
+	});
+
+	test('подделка вставок через href не ломает разбор: нет TypeError и бесконечной рекурсии', () => {
+		const a = toText('<a href="https://x/&#xE000;99&#xE001;">l</a>');
+		expect(a).toBe('[l](<https://x/99>)');
+		const b = toText(`${tag('1')}<a href="https://x/&#xE000;1&#xE001;">l</a>`);
+		expect(b).toBe('<@1>[l](<https://x/1>)');
+		// ...and via the label (same link text, marker in the visible part)
+		expect(toText('<a href="https://x/">a&#xE000;5&#xE001;</a>')).toBe('[a5](<https://x/>)');
+	});
+
+	test('имя пользователя из callback проходит через защиту от упоминаний; <@id> остаётся', () => {
+		expect(planeHtmlToDiscord(tag(UUID_A), () => '@everyone')).toBe('@​everyone');
+		expect(planeHtmlToDiscord(tag(UUID_A), () => '@here x')).toBe('@​here x');
+		expect(planeHtmlToDiscord(tag(UUID_A), () => '<@&5>')).toBe('<​@&5>');
+		expect(planeHtmlToDiscord(tag(UUID_A), () => '<@42>')).toBe('<@42>');
+		expect(planeHtmlToDiscord(tag(UUID_A), () => '@a\uE000b')).toBe('@ab');
+	});
+
+	test('@everyone в адресе ссылки кодируется как %40, ссылка остаётся ссылкой', () => {
+		expect(toText('<a href="https://x/@everyone/@here">t</a>')).toBe(
+			'[t](<https://x/%40everyone/%40here>)',
+		);
+		expect(toText('<a href="https://u@host/">t</a>')).toBe('[t](<https://u@host/>)');
+	});
+
 	test('фикстура: упоминания из ответа Plane', () => {
 		const html = (fixture('plane-comment-get-mention').body as { comment_html: string })
 			.comment_html;
