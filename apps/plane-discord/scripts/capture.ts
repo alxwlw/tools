@@ -48,6 +48,13 @@ export function parseLimit(value: string | undefined, fallback: number): number 
 	return Number.isSafeInteger(n) && n > 0 ? n : fallback;
 }
 
+export function limitsFromEnv(env: Record<string, string | undefined>): CaptureLimits {
+	return {
+		maxFiles: parseLimit(env.CAPTURE_MAX_FILES, 500),
+		maxBytes: parseLimit(env.CAPTURE_MAX_BYTES, 50 * 1024 * 1024),
+	};
+}
+
 export type CaptureLimits = { maxFiles: number; maxBytes: number };
 
 // Handler that stores each request as N-<hash>.bin (raw body) and N-<hash>.json (metadata).
@@ -92,9 +99,6 @@ if (import.meta.main) {
 		port: 8080,
 		development: false,
 		maxRequestBodySize: MAX_BODY_BYTES,
-		fetch: createCaptureHandler(dir, {
-			maxFiles: parseLimit(process.env.CAPTURE_MAX_FILES, 500),
-			maxBytes: parseLimit(process.env.CAPTURE_MAX_BYTES, 50 * 1024 * 1024),
-		}),
+		fetch: createCaptureHandler(dir, limitsFromEnv(process.env)),
 	});
 }

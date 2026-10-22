@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
 	createCaptureHandler,
 	describeRequest,
+	limitsFromEnv,
 	MAX_BODY_BYTES,
 	parseLimit,
 } from '../scripts/capture.ts';
@@ -143,6 +144,18 @@ test('разбор лимита из окружения: пусто, нечис�
 	expect(parseLimit('0', 500)).toBe(500);
 	expect(parseLimit('1.5', 500)).toBe(500);
 	expect(parseLimit('7', 500)).toBe(7);
+});
+
+test('лимиты из окружения: дефолты 500 файлов и 50 MiB, переменные читаются раздельно', () => {
+	expect(limitsFromEnv({})).toEqual({ maxFiles: 500, maxBytes: 50 * 1024 * 1024 });
+	expect(limitsFromEnv({ CAPTURE_MAX_FILES: '7', CAPTURE_MAX_BYTES: 'abc' })).toEqual({
+		maxFiles: 7,
+		maxBytes: 50 * 1024 * 1024,
+	});
+	expect(limitsFromEnv({ CAPTURE_MAX_FILES: 'x', CAPTURE_MAX_BYTES: '4096' })).toEqual({
+		maxFiles: 500,
+		maxBytes: 4096,
+	});
 });
 
 test('перезапуск учитывает уже записанное: лимит по числу и по байтам', async () => {
