@@ -1,6 +1,6 @@
 // One-off receiver for the Plane App probe: records every request it gets, byte for byte.
 // Run: bun scripts/capture.ts (CAPTURE_DIR defaults to /captures).
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type CaptureLine = {
@@ -39,22 +39,55 @@ export async function describeRequest(req: Request, now: Date): Promise<CaptureL
 	};
 }
 
-if (import.meta.main) {
-	const dir = process.env.CAPTURE_DIR ?? '/captures';
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+export type CaptureLimits = { maxFiles: number; maxBytes: number };
+
+// Handler that stores each request as N-<hash>.bin (raw body) and N-<hash>.json (metadata).
+// N continues after the highest number already in the directory, so a restart never
+// overwrites old files; writing stops once the directory holds maxFiles requests or maxBytes.
+export function createCaptureHandler(dir: string, limits: CaptureLimits) {
 	mkdirSync(dir, { recursive: true });
 	let n = 0;
+	let files = 0;
+	let bytes = 0;
+	for (const name of readdirSync(dir)) {
+		const m = /^(\d+)-[0-9a-f]{8}\.(bin|json)$/.exec(name);
+		if (!m) continue;
+		n = Math.max(n, Number(m[1]));
+		bytes += statSync(join(dir, name)).size;
+		if (m[2] === 'bin') files += 1;
+	}
+	return async (req: Request): Promise<Response> => {
+		const raw = new Uint8Array(await req.clone().arrayBuffer());
+		const line = await describeRequest(req, new Date());
+		const summary = JSON.stringify({ ...line, bodyBase64: undefined });
+		if (files >= limits.maxFiles || bytes + 2 * raw.length + 1024 > limits.maxBytes) {
+			console.log(JSON.stringify({ dropped: 'limit', method: line.method, path: line.path }));
+			return new Response('ok');
+		}
+		n += 1;
+		files += 1;
+		const base = `${n}-${sha256Hex(raw).slice(0, 8)}`;
+		// The body lives in the .bin file; the .json carries metadata only.
+		const meta = JSON.stringify({ ...line, bodyBase64: undefined });
+		writeFileSync(join(dir, `${base}.bin`), raw);
+		writeFileSync(join(dir, `${base}.json`), meta);
+		bytes += raw.length + meta.length;
+		console.log(summary);
+		return new Response('ok');
+	};
+}
+
+if (import.meta.main) {
+	const dir = process.env.CAPTURE_DIR ?? '/captures';
 	Bun.serve({
 		port: 8080,
 		development: false,
-		async fetch(req) {
-			const raw = new Uint8Array(await req.clone().arrayBuffer());
-			const line = await describeRequest(req, new Date());
-			n += 1;
-			const base = `${n}-${sha256Hex(raw).slice(0, 8)}`;
-			writeFileSync(join(dir, `${base}.bin`), raw);
-			writeFileSync(join(dir, `${base}.json`), JSON.stringify(line));
-			console.log(JSON.stringify({ ...line, bodyBase64: undefined }));
-			return new Response('ok');
-		},
+		maxRequestBodySize: MAX_BODY_BYTES,
+		fetch: createCaptureHandler(dir, {
+			maxFiles: Number(process.env.CAPTURE_MAX_FILES ?? 500),
+			maxBytes: Number(process.env.CAPTURE_MAX_BYTES ?? 50 * 1024 * 1024),
+		}),
 	});
 }

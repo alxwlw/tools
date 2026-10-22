@@ -1,5 +1,8 @@
 import { expect, test } from 'bun:test';
-import { describeRequest } from '../scripts/capture.ts';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createCaptureHandler, describeRequest, MAX_BODY_BYTES } from '../scripts/capture.ts';
 
 test('GET с query: путь и параметры, тела нет', async () => {
 	const line = await describeRequest(
@@ -37,4 +40,81 @@ test('метаданные: ts, метод, sha256 тела; HEAD без тел�
 	expect(head.method).toBe('HEAD');
 	expect(head.bodyBase64).toBeNull();
 	expect(head.bodySha256).toBeNull();
+});
+
+const tmpDir = () => mkdtempSync(join(tmpdir(), 'capture-'));
+const serve = (dir: string, limits = { maxFiles: 500, maxBytes: 50 * 1024 * 1024 }) =>
+	Bun.serve({
+		port: 0,
+		maxRequestBodySize: MAX_BODY_BYTES,
+		fetch: createCaptureHandler(dir, limits),
+	});
+const listing = (dir: string) => readdirSync(dir).sort();
+
+test('тело больше 1 MiB: 413 и файлов нет', async () => {
+	const dir = tmpDir();
+	const server = serve(dir);
+	const res = await fetch(`http://localhost:${server.port}/plane/webhook`, {
+		method: 'POST',
+		body: new Uint8Array(1024 * 1024 + 1),
+	});
+	await server.stop(true);
+	expect(res.status).toBe(413);
+	expect(listing(dir)).toEqual([]);
+});
+
+test('.json без тела, тело только в .bin', async () => {
+	const dir = tmpDir();
+	const server = serve(dir);
+	await fetch(`http://localhost:${server.port}/p`, { method: 'POST', body: 'abc' });
+	await server.stop(true);
+	const files = listing(dir);
+	expect(files).toHaveLength(2);
+	const json = JSON.parse(
+		readFileSync(join(dir, files.find((f) => f.endsWith('.json')) as string), 'utf8'),
+	);
+	expect(json.bodyBase64).toBeUndefined();
+	expect(json.bodySha256).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+	expect(readFileSync(join(dir, files.find((f) => f.endsWith('.bin')) as string), 'utf8')).toBe(
+		'abc',
+	);
+});
+
+test('после лимита по числу запросов файлы не появляются', async () => {
+	const dir = tmpDir();
+	const handle = createCaptureHandler(dir, { maxFiles: 2, maxBytes: 1e9 });
+	for (const body of ['a', 'b', 'c']) {
+		const res = await handle(new Request('http://x/p', { method: 'POST', body }));
+		expect(res.status).toBe(200);
+	}
+	expect(listing(dir)).toHaveLength(4);
+});
+
+test('после лимита по байтам файлы не появляются', async () => {
+	const dir = tmpDir();
+	const handle = createCaptureHandler(dir, { maxFiles: 100, maxBytes: 2000 });
+	await handle(new Request('http://x/p', { method: 'POST', body: 'a' }));
+	const before = listing(dir);
+	await handle(new Request('http://x/p', { method: 'POST', body: 'x'.repeat(2000) }));
+	expect(listing(dir)).toEqual(before);
+});
+
+test('перезапуск продолжает нумерацию и не перезаписывает', async () => {
+	const dir = tmpDir();
+	const limits = { maxFiles: 100, maxBytes: 1e9 };
+	await createCaptureHandler(
+		dir,
+		limits,
+	)(new Request('http://x/p', { method: 'POST', body: 'one' }));
+	const first = listing(dir);
+	const firstBin = first.find((f) => f.endsWith('.bin')) as string;
+	const content = readFileSync(join(dir, firstBin), 'utf8');
+	await createCaptureHandler(
+		dir,
+		limits,
+	)(new Request('http://x/p', { method: 'POST', body: 'one' }));
+	const second = listing(dir);
+	expect(second).toHaveLength(4);
+	expect(second.filter((f) => f.startsWith('2-'))).toHaveLength(2);
+	expect(readFileSync(join(dir, firstBin), 'utf8')).toBe(content);
 });
