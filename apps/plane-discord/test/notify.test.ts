@@ -281,6 +281,13 @@ describe('createNotifier: workitem.created', () => {
 		]);
 	});
 
+	test('автор с пустым именем в members → «кто-то»', async () => {
+		const { notify, plane, discord } = setup([route(TEXT)]);
+		plane.members.push({ id: ID(98), displayName: '' });
+		await runAll(await notify(created({}, ID(98))));
+		expect(sent(discord)[0]?.[1].content.split('\n')[1]).toBe('Задача создана · кто-то');
+	});
+
 	test('автор не в таблице и не в members → «кто-то», не пустая строка', async () => {
 		const { notify, discord } = setup([route(TEXT)]);
 		await runAll(await notify(created({}, ID(99))));
@@ -480,6 +487,31 @@ describe('createNotifier: workitem.updated', () => {
 		plane.botId = ID(15);
 		const deliveries = await notify(created({}, BOT));
 		expect(deliveries).toHaveLength(1);
+	});
+});
+
+describe('createNotifier: бот не получает личку', () => {
+	const withBotMapped = () => {
+		const tenant = tenantOf([]);
+		// a misconfigured table that maps the bot itself must not turn into a DM
+		tenant.users = [...tenant.users, { plane: BOT, discord: D_BOT }];
+		return setup([], tenant);
+	};
+
+	test('создана задача с ботом-исполнителем и упомянутым ботом → DM только человеку', async () => {
+		const { notify, discord } = withBotMapped();
+		await runAll(
+			await notify(created({ assignees: [BOT, BOB], descriptionHtml: mentionHtml(BOT) })),
+		);
+		expect(discord.callsOf('openDm')).toEqual([[D_BOB]]);
+	});
+
+	test('обновление: бот назначен и упомянут в описании → DM нет', async () => {
+		const { notify } = withBotMapped();
+		expect(await notify(updated({ assignees: [] }, { assignees: [BOT] }))).toEqual([]);
+		expect(
+			await notify(updated({ descriptionHtml: null }, { descriptionHtml: mentionHtml(BOT) })),
+		).toEqual([]);
 	});
 });
 
@@ -691,6 +723,27 @@ describe('форум: удалённый пост', () => {
 	});
 });
 
+describe('ошибки не из Discord не принимаются за 404 и 50007', () => {
+	const foreign = (extra: object) => Object.assign(new Error('boom'), extra);
+
+	test('ошибка с status 404 не из DiscordApiError в треде — проброс, поста нет', async () => {
+		const { notify, discord, store } = setup([route(FORUM)]);
+		store.putThread('initech', ITEM, FORUM, 'live-thread');
+		const [forum] = await notify(created());
+		discord.failures.set('sendMessage', foreign({ status: 404 }) as DiscordApiError);
+		await expect((forum as Delivery).run()).rejects.toThrow('boom');
+		expect(discord.callsOf('createForumPost')).toEqual([]);
+	});
+
+	test('ошибка с code 50007 не из DiscordApiError в личке — проброс', async () => {
+		const { notify, discord, logs } = setup([]);
+		const [dm] = await notify(created({ assignees: [BOB] }));
+		discord.failures.set('openDm', foreign({ code: DISCORD_ERR.CANNOT_DM }) as DiscordApiError);
+		await expect((dm as Delivery).run()).rejects.toThrow('boom');
+		expect(logs.filter((e) => e.event === 'dm.closed')).toEqual([]);
+	});
+});
+
 describe('createNotifier: agent.mention', () => {
 	const setupMention = (channels: ChannelRoute[]) => {
 		const ctx = setup(channels);
@@ -763,6 +816,13 @@ describe('createNotifier: agent.mention', () => {
 		expect(lines[3]).toBe(`> ${'я'.repeat(999)}…`);
 		expect(lines[2]).toBe(LINK);
 		expect(lines).toHaveLength(4);
+	});
+
+	test('в цитате упомянутый, которого нет ни в таблице, ни в members → «@кто-то»', async () => {
+		const { notify, discord, plane } = setupMention([route(TEXT)]);
+		plane.comments[0]!.html = `<p>${mentionTag(ID(99))}</p>`;
+		await runAll(await notify(agentMention()));
+		expect((sent(discord)[0]?.[1].content ?? '').split('\n')[3]).toBe('> @кто-то');
 	});
 
 	test('комментарий без текста → сообщение без цитаты', async () => {
