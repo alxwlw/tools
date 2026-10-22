@@ -414,6 +414,8 @@ describe('PlaneClient: списки', () => {
 			{ status: 201, body: { id: 'w' } },
 			{ status: 200, body: [] },
 			{ status: 201, body: { id: 'c' } },
+			{ status: 201 },
+			{ status: 404 },
 		]);
 		const comment = { comment_html: 'h', external_id: 'm1', external_source: 'discord' };
 		await client.getWorkItem('p/1', 'w/1');
@@ -429,6 +431,8 @@ describe('PlaneClient: списки', () => {
 		});
 		await client.findCommentByExternalId('p/1', 'w/1', 'discord', 'm1');
 		await client.createComment('p/1', 'w/1', comment);
+		await client.createRunActivity('run/1', 'b');
+		await client.getWorkItemByKey('LAB/40');
 		expect(calls.map((c) => c.url)).toEqual([
 			`${ROOT}/projects/p%2F1/work-items/w%2F1/`,
 			`${ROOT}/projects/p%2F1/modules/m%2F1/module-issues/?per_page=100`,
@@ -438,7 +442,23 @@ describe('PlaneClient: списки', () => {
 			`${ROOT}/projects/p%2F1/work-items/`,
 			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/?per_page=100`,
 			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/`,
+			`${ROOT}/runs/run%2F1/activities/`,
+			`${ROOT}/work-items/LAB%2F40/`,
 		]);
+		const wsUrls: string[] = [];
+		const wsClient = new PlaneClient({
+			baseUrl: 'https://plane.test/',
+			workspace: 'ex/ws',
+			auth: fakeAuth().auth,
+			appInstallationId: 'inst-1',
+			fetch: async (url: string): Promise<Response> => {
+				wsUrls.push(url);
+				return new Response('', { status: 404 });
+			},
+			limiter: { acquire: async () => {} },
+		});
+		await wsClient.getWorkItemByKey('LAB-1');
+		expect(wsUrls).toEqual(['https://plane.test/api/v1/workspaces/ex%2Fws/work-items/LAB-1/']);
 	});
 
 	test('поля: нет строки или пустая строка — ошибка; assignees фильтруются до строк', async () => {
