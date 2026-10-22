@@ -394,7 +394,7 @@ test('--keep: задача остаётся, id в строке cleanup, DELETE 
 	).toBe(false);
 });
 
-test('бот не участник проекта: 403 → ✗ с подсказкой, код 1, 70 запросов rate всё равно идут', async () => {
+test('запись бота: 403 → ✗ без подсказки, код 1, 70 запросов rate всё равно идут', async () => {
 	const stub = stubPlane({
 		'POST /projects/p1/work-items/': () => new Response('{}', { status: 403 }),
 		'GET /projects/': () => new Response('{}', { status: 429, headers: { 'retry-after': '9' } }),
@@ -405,7 +405,8 @@ test('бот не участник проекта: 403 → ✗ с подсказ
 		stub.server.stop(true);
 	}
 	const out = logs.join('\n');
-	expect(out).toContain('✗ bot-write — POST /work-items/ → 403 (бот не участник проекта');
+	expect(out).toContain('✗ bot-write — POST /work-items/ → 403');
+	expect(out).not.toContain('не участник');
 	expect(out).toContain('rate 429 на запросе 1: Retry-After=9');
 	expect(out).toMatch(/✓ rate — 70 запросов за \d+ мс, 429: 70 \(первый на 1\)/);
 	expect(out).toContain('✓ cleanup — нечего удалять');
@@ -424,28 +425,6 @@ test('сеть упала в одной строке: ✗ с именем оши
 	const out = logs.join('\n');
 	expect(out).toContain('✗ webhook-status — TypeError: boom');
 	expect(out).toContain('✓ rate');
-});
-
-test('режим key: X-API-Key вместо токена, строк token и installation нет', async () => {
-	const stub = stubPlane();
-	try {
-		const env = {
-			...appEnv(stub.url),
-			PROBE_CLIENT_ID: '',
-			PROBE_CLIENT_SECRET: '',
-			PROBE_INSTALLATION_ID: '',
-			PROBE_API_KEY: 'k1',
-		};
-		expect(await main([], env)).toBe(0);
-	} finally {
-		stub.server.stop(true);
-	}
-	const out = logs.join('\n');
-	expect(out).not.toContain('token');
-	expect(out).not.toContain('installation');
-	expect(out).toContain('created_by=не app_bot');
-	expect(out).toContain('бот в списке: app_bot неизвестен');
-	expect(stub.seen.every((r) => r.apiKey === 'k1' && r.auth === '')).toBe(true);
 });
 
 test('нет PROBE_PROJECT_ID: ✗ env, код 1', async () => {

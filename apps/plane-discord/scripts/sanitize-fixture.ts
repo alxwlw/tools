@@ -12,7 +12,13 @@ export type PlaneFixture = {
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const NAME_KEYS = new Set(['display_name', 'first_name', 'last_name']);
+// display_name, first_name, last_name and derived keys such as min_assignee_first_name.
+const NAME_KEY = /(?:^|_)(?:display|first|last)_name$/;
+// Free-text names Plane denormalizes into work items: min_module_name, min_label_name, ... (the
+// person ones are already caught by NAME_KEY). Each distinct value becomes Name<N>.
+const MIN_NAME_KEY = /^min_.*_name$/;
+// The Plane App client id (agent_run_* deliveries) is internal and stable: one placeholder.
+const CLIENT_ID_KEY = /(?:^|_)client_id$/;
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -33,6 +39,7 @@ export function createSanitizer(opts: {
 }): (text: string) => string {
 	const uuids = new Map<string, string>();
 	const people = new Map<string, number>();
+	const names = new Map<string, number>();
 	const slugMap = new Map(
 		opts.slugs.map((s, i) => [s.toLowerCase(), i === 0 ? 'example-ws' : `example-ws-${i + 1}`]),
 	);
@@ -53,6 +60,13 @@ export function createSanitizer(opts: {
 		return n;
 	};
 
+	const freeName = (value: string): number => {
+		const known = names.get(value);
+		if (known !== undefined) return known;
+		names.set(value, names.size + 1);
+		return names.size;
+	};
+
 	const walk = (node: unknown, key?: string): unknown => {
 		if (Array.isArray(node)) return node.map((x) => walk(x));
 		if (node !== null && typeof node === 'object') {
@@ -60,7 +74,9 @@ export function createSanitizer(opts: {
 		}
 		if (key !== undefined && /^avatar/.test(key)) return null;
 		if (typeof node === 'string' && node !== '') {
-			if (key !== undefined && NAME_KEYS.has(key)) return `User${person(node)}`;
+			if (key !== undefined && NAME_KEY.test(key)) return `User${person(node)}`;
+			if (key !== undefined && MIN_NAME_KEY.test(key)) return `Name${freeName(node)}`;
+			if (key !== undefined && CLIENT_ID_KEY.test(key)) return 'example-client-id';
 			if (key === 'email') return `user${person(node)}@example.com`;
 		}
 		return node;

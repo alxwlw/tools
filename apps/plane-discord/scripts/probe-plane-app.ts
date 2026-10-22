@@ -31,8 +31,7 @@ export const USAGE = `usage: bun scripts/probe-plane-app.ts [--keep]
 env (probe rows, run-reply, comment-get):
   PROBE_PLANE_URL, PROBE_WORKSPACE (slug)
   PROBE_PROJECT_ID                       project for the throwaway work item (rows)
-  app mode: PROBE_CLIENT_ID, PROBE_CLIENT_SECRET, PROBE_INSTALLATION_ID
-  key mode: PROBE_API_KEY
+  PROBE_CLIENT_ID, PROBE_CLIENT_SECRET, PROBE_INSTALLATION_ID   (the app is the only mode)
   PROBE_SCOPES                           optional, space-separated; default is the plan's 13 scopes
 rows: token, installation, bot-write, browse-url, modules, webhook-status, rate, cleanup
 --keep keeps the throwaway work item.
@@ -263,24 +262,17 @@ const prefix = (token: string): string => `${token.slice(0, 6)}…`;
 
 type Creds = { clientId: string; clientSecret: string; installationId: string };
 
-function credsFromEnv(
-	env: Env,
-): { mode: 'app'; creds: Creds } | { mode: 'key'; apiKey: string } | string[] {
+function credsFromEnv(env: Env): { creds: Creds } | string[] {
 	const app = ['PROBE_CLIENT_ID', 'PROBE_CLIENT_SECRET', 'PROBE_INSTALLATION_ID'];
-	if (env.PROBE_CLIENT_ID || env.PROBE_CLIENT_SECRET || env.PROBE_INSTALLATION_ID) {
-		const missing = app.filter((n) => !env[n]);
-		if (missing.length > 0) return missing;
-		return {
-			mode: 'app',
-			creds: {
-				clientId: env.PROBE_CLIENT_ID as string,
-				clientSecret: env.PROBE_CLIENT_SECRET as string,
-				installationId: env.PROBE_INSTALLATION_ID as string,
-			},
-		};
-	}
-	if (env.PROBE_API_KEY) return { mode: 'key', apiKey: env.PROBE_API_KEY };
-	return [`${app.join(' + ')} (app) or PROBE_API_KEY (key)`];
+	const missing = app.filter((n) => !env[n]);
+	if (missing.length > 0) return missing;
+	return {
+		creds: {
+			clientId: env.PROBE_CLIENT_ID as string,
+			clientSecret: env.PROBE_CLIENT_SECRET as string,
+			installationId: env.PROBE_INSTALLATION_ID as string,
+		},
+	};
 }
 
 function scopesFromEnv(env: Env): string[] {
@@ -294,10 +286,6 @@ async function authenticate(
 	scopes: string[],
 ): Promise<boolean> {
 	if (Array.isArray(c)) return false;
-	if (c.mode === 'key') {
-		p.auth = { 'X-API-Key': c.apiKey };
-		return true;
-	}
 	let ok = false;
 	await p.guard('token', async () => {
 		const r = await requestToken(p.fetchFn, p.url, c.creds, scopes);
@@ -317,13 +305,7 @@ async function authenticate(
 	return ok;
 }
 
-async function liveRows(
-	p: Probe,
-	env: Env,
-	mode: 'app' | 'key',
-	creds: Creds | null,
-	keep: boolean,
-): Promise<void> {
+async function liveRows(p: Probe, env: Env, creds: Creds, keep: boolean): Promise<void> {
 	const projectId = env.PROBE_PROJECT_ID;
 	if (!projectId) {
 		p.row('env', false, 'PROBE_PROJECT_ID не задан');
@@ -336,22 +318,20 @@ async function liveRows(
 	let botId: string | undefined;
 
 	try {
-		if (mode === 'app' && creds) {
-			await p.guard('installation', async () => {
-				const r = await p.call(
-					'GET',
-					`${p.url}/auth/o/app-installation/?${new URLSearchParams({ id: creds.installationId })}`,
-				);
-				const inst = Array.isArray(r.body) ? r.body[0] : r.body;
-				botId = typeof inst?.app_bot === 'string' ? inst.app_bot : undefined;
-				const hook = inst?.webhook;
-				p.row(
-					'installation',
-					r.status === 200 && inst !== undefined,
-					`${r.status}, workspace=${inst?.workspace ?? '—'}, slug=${inst?.workspace_detail?.slug ?? '—'}, app_bot=${botId ?? '—'}, status=${inst?.status ?? '—'}, webhook=${hook === undefined ? 'нет поля' : `${typeof hook}${hook !== null && typeof hook === 'object' ? ` {${keysOf(hook)}}` : ''}`}`,
-				);
-			});
-		}
+		await p.guard('installation', async () => {
+			const r = await p.call(
+				'GET',
+				`${p.url}/auth/o/app-installation/?${new URLSearchParams({ id: creds.installationId })}`,
+			);
+			const inst = Array.isArray(r.body) ? r.body[0] : r.body;
+			botId = typeof inst?.app_bot === 'string' ? inst.app_bot : undefined;
+			const hook = inst?.webhook;
+			p.row(
+				'installation',
+				r.status === 200 && inst !== undefined,
+				`${r.status}, workspace=${inst?.workspace ?? '—'}, slug=${inst?.workspace_detail?.slug ?? '—'}, app_bot=${botId ?? '—'}, status=${inst?.status ?? '—'}, webhook=${hook === undefined ? 'нет поля' : `${typeof hook}${hook !== null && typeof hook === 'object' ? ` {${keysOf(hook)}}` : ''}`}`,
+			);
+		});
 
 		await p.guard('bot-write', async () => {
 			const created = await p.call('POST', `${project}/work-items/`, {
@@ -365,7 +345,7 @@ async function liveRows(
 				p.row(
 					'bot-write',
 					false,
-					`POST /work-items/ → ${created.status}${created.status === 403 ? ' (бот не участник проекта: добавить в Project settings → Members и записать в §10)' : ''}`,
+					`POST /work-items/ → ${created.status}${created.status === 403 ? '' : ''}`,
 				);
 				return;
 			}
@@ -569,13 +549,7 @@ export async function main(argv: string[], env: Env, fetchFn: Fetch = fetch): Pr
 			);
 		});
 	} else {
-		await liveRows(
-			p,
-			env,
-			creds.mode,
-			'creds' in creds ? creds.creds : null,
-			argv.includes('--keep'),
-		);
+		await liveRows(p, env, creds.creds, argv.includes('--keep'));
 	}
 	console.log(p.failed === 0 ? 'контракт подтверждён' : `расхождений: ${p.failed}`);
 	return p.failed === 0 ? 0 : 1;

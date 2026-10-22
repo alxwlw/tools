@@ -139,6 +139,30 @@ test('один человек — один номер во всех ключах
 	expect(out.text).toBe('cc user2@example.com');
 });
 
+test('производные ключи имени и client_id заменены; name и client_identifier — нет', () => {
+	const sanitize = createSanitizer({ slugs: [], hosts: [] });
+	const out = JSON.parse(
+		sanitize(
+			JSON.stringify({
+				min_assignee_first_name: 'ivanr',
+				app_client_id: 'AbCdEf0123456789',
+				client_id: 'ZyX987',
+				min_label_name: 'bug',
+				name: 'Задача',
+				client_identifier: 'keep',
+			}),
+		),
+	);
+	expect(out).toEqual({
+		min_assignee_first_name: 'User1',
+		app_client_id: 'example-client-id',
+		client_id: 'example-client-id',
+		min_label_name: 'Name1',
+		name: 'Задача',
+		client_identifier: 'keep',
+	});
+});
+
 test('пустые slug и host в списке не превращают весь текст в подмену', () => {
 	const out = createSanitizer({ slugs: [''], hosts: [''] })('{"a":"plain text"}');
 	expect(JSON.parse(out)).toEqual({ a: 'plain text' });
@@ -172,4 +196,26 @@ test('cli: без --slug и --host работает, UUID всё равно чи
 	const out = JSON.parse(cli([file, 'issue'])) as { raw: string };
 	expect(JSON.parse(out.raw)).toEqual({ id: '00000000-0000-4000-8000-000000000001' });
 	expect(() => cli([file])).toThrow(/usage/);
+});
+
+test('min_module_name / min_label_name — свободные имена заменены, одинаковые → одна подмена', () => {
+	const sanitize = createSanitizer({ slugs: [], hosts: [] });
+	const out = JSON.parse(
+		sanitize(
+			JSON.stringify({
+				a: {
+					min_module_name: 'x',
+					min_label_name: 'secret-label',
+					min_assignee_first_name: 'Ivan',
+				},
+				b: { min_module_name: 'x', min_label_name: null, min_cycle_name: '' },
+			}),
+		),
+	);
+	expect(out.a).toEqual({
+		min_module_name: 'Name1',
+		min_label_name: 'Name2',
+		min_assignee_first_name: 'User1',
+	});
+	expect(out.b).toEqual({ min_module_name: 'Name1', min_label_name: null, min_cycle_name: '' });
 });
