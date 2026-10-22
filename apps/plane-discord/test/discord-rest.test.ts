@@ -173,6 +173,8 @@ describe('DiscordRest: ответы', () => {
 	});
 
 	test('ответ без id / не массив / без type — ошибка разбора', async () => {
+		const empty = stub([{ status: 200, body: { id: '' } }]);
+		expect(String(await failure(empty.rest.sendMessage('c', msg)))).toContain('"id"');
 		expect(
 			String(await failure(stub([{ status: 200, body: {} }]).rest.sendMessage('c', msg))),
 		).toContain('"id"');
