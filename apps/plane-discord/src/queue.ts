@@ -50,7 +50,20 @@ export class SerialQueue {
 
 	async #drain(): Promise<void> {
 		try {
-			for (let job = this.#jobs.shift(); job; job = this.#jobs.shift()) await this.#runJob(job);
+			for (let job = this.#jobs.shift(); job; job = this.#jobs.shift()) {
+				const progress = { attempt: 0 };
+				try {
+					await this.#runJob(job, progress);
+				} catch (err) {
+					// unexpected (describe/isRetryable on a hostile error): drop this job, keep draining
+					this.#safeLog({
+						event: 'job.dropped',
+						label: job.label,
+						attempt: progress.attempt,
+						error: describe(err),
+					});
+				}
+			}
 		} finally {
 			this.#running = false;
 			const waiters = this.#waiters;
@@ -68,8 +81,9 @@ export class SerialQueue {
 		}
 	}
 
-	async #runJob(job: Job): Promise<void> {
+	async #runJob(job: Job, progress: { attempt: number }): Promise<void> {
 		for (let attempt = 1; ; attempt++) {
+			progress.attempt = attempt;
 			try {
 				await job.run();
 				return;
@@ -88,7 +102,11 @@ export class SerialQueue {
 }
 
 function describe(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	try {
+		return err instanceof Error ? err.message : String(err);
+	} catch {
+		return 'unknown error';
+	}
 }
 
 /** true: an error with numeric `status` ≥ 500 or 429; a fetch TypeError; a TimeoutError/AbortError. */

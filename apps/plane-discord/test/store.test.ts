@@ -88,7 +88,6 @@ describe('Store', () => {
 		first.touchEvent('acme', 42);
 		first.close();
 		expect(() => first.silence('acme')).toThrow();
-		expect(existsSync(`${path}-wal`)).toBe(false);
 		const second = new Store(path);
 		expect(second.claim('k', 2000)).toBe(false);
 		expect(second.getThread('acme', 'item-1', 'chan-1')).toBe('thread-1');
@@ -98,6 +97,16 @@ describe('Store', () => {
 		});
 		expect(second.silence('acme').lastEventAt).toBe(42);
 		second.close();
+	});
+
+	test('close сворачивает WAL: файла -wal на диске нет', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-discord-store-'));
+		dirs.push(dir);
+		const path = join(dir, 'state.sqlite');
+		const store = new Store(path);
+		store.touchEvent('acme', 1);
+		store.close();
+		expect(existsSync(`${path}-wal`)).toBe(false);
 	});
 
 	test('файловая база открывается в режиме WAL', () => {

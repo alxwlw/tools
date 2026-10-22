@@ -124,6 +124,98 @@ describe('SerialQueue', () => {
 		expect(queue.size).toBe(0);
 	});
 
+	test('log бросает на job.dropped — один вызов log, следующая задача выполняется, idle резолвится', async () => {
+		let logCalls = 0;
+		const queue = new SerialQueue({
+			log: () => {
+				logCalls++;
+				throw new Error('log down');
+			},
+			sleep: async () => {},
+		});
+		let bRan = false;
+		queue.push('a', async () => {
+			throw statusError(404);
+		});
+		queue.push('b', async () => {
+			bRan = true;
+		});
+		await queue.idle();
+		expect(logCalls).toBe(1);
+		expect(bRan).toBe(true);
+		expect(queue.size).toBe(0);
+	});
+
+	test('враждебная ошибка и бросающий log — следующая задача выполняется', async () => {
+		const queue = new SerialQueue({
+			log: () => {
+				throw new Error('log down');
+			},
+			sleep: async () => {},
+		});
+		let bRan = false;
+		queue.push('a', async () => {
+			throw Object.defineProperty(new Error('boom'), 'status', {
+				get() {
+					throw new Error('getter');
+				},
+			});
+		});
+		queue.push('b', async () => {
+			bRan = true;
+		});
+		await queue.idle();
+		expect(bRan).toBe(true);
+		expect(queue.size).toBe(0);
+	});
+
+	describe('враждебная ошибка не обрывает drain', () => {
+		async function run(thrown: () => unknown) {
+			const unhandled: unknown[] = [];
+			const onUnhandled = (reason: unknown) => unhandled.push(reason);
+			process.on('unhandledRejection', onUnhandled);
+			try {
+				const { queue, logs } = setup();
+				let bRan = false;
+				queue.push('a', async () => {
+					throw thrown();
+				});
+				queue.push('b', async () => {
+					bRan = true;
+				});
+				await queue.idle();
+				await new Promise((resolve) => setImmediate(resolve));
+				return { bRan, size: queue.size, unhandled, logs };
+			} finally {
+				process.off('unhandledRejection', onUnhandled);
+			}
+		}
+
+		test('Object.create(null)', async () => {
+			const r = await run(() => Object.create(null));
+			expect(r.bRan).toBe(true);
+			expect(r.size).toBe(0);
+			expect(r.unhandled).toEqual([]);
+			expect(r.logs).toEqual([
+				{ event: 'job.dropped', label: 'a', attempt: 1, error: 'unknown error' },
+			]);
+		});
+
+		test('бросающий геттер status', async () => {
+			const r = await run(() =>
+				Object.defineProperty(new Error('boom'), 'status', {
+					get() {
+						throw new Error('getter');
+					},
+				}),
+			);
+			expect(r.bRan).toBe(true);
+			expect(r.size).toBe(0);
+			expect(r.unhandled).toEqual([]);
+			expect(r.logs).toEqual([{ event: 'job.dropped', label: 'a', attempt: 1, error: 'getter' }]);
+		});
+	});
+
 	test('счётчик попыток не переносится на следующую задачу', async () => {
 		const { queue, logs } = setup();
 		const calls = { a: 0, b: 0 };
