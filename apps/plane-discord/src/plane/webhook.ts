@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export type WorkItemSnapshot = {
 	id: string;
@@ -199,17 +199,25 @@ export function parsePlaneDelivery(
 	const old = activity.old_value;
 	const previous: { stateId?: string; assignees?: string[]; descriptionHtml?: string | null } = {};
 	if (field === 'state_id') {
-		if (typeof old !== 'string') throw new BadDelivery('activity.old_value is not a string');
-		previous.stateId = old;
+		// A work item created without a state arrives with old_value null: no previous state.
+		if (old !== null && typeof old !== 'string')
+			throw new BadDelivery('activity.old_value is not a string');
+		if (old !== null) previous.stateId = old;
 	} else if (field === 'assignee_ids') {
 		previous.assignees = ids(old, 'activity.old_value', false);
 	} else {
 		previous.descriptionHtml = htmlOrNull(old, 'activity.old_value');
 	}
+	// last_activity_at alone could merge two quick changes of one field; the values tell them apart,
+	// and a re-sent delivery carries the same ones.
+	const change = createHash('sha256')
+		.update(JSON.stringify([old ?? null, activity.new_value ?? null]))
+		.digest('hex')
+		.slice(0, 16);
 	return {
 		kind: 'workitem.updated',
 		tenant,
-		eventKey: `issue.updated:${item.id}:${field}:${str(data, 'last_activity_at', 'data')}`,
+		eventKey: `issue.updated:${item.id}:${field}:${str(data, 'last_activity_at', 'data')}:${change}`,
 		actorId: str(obj(activity, 'actor', 'activity'), 'id', 'activity.actor'),
 		item,
 		previous,

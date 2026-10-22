@@ -49,8 +49,16 @@ async function readBounded(req: Request): Promise<Uint8Array | null> {
  */
 export function createHandler(deps: ServerDeps): (req: Request) => Promise<Response> {
 	const now = deps.now ?? Date.now;
+	// Logging is best-effort: a throwing sink (EPIPE on stdout) must not turn a delivery into a 5xx.
+	const log: Log = (entry) => {
+		try {
+			deps.log(entry);
+		} catch {
+			// nothing else to do with a broken log
+		}
+	};
 	const rejected = (reason: string, extra: Record<string, string | undefined> = {}) => {
-		deps.log({ event: 'plane.rejected', level: 'error', reason, ...extra });
+		log({ event: 'plane.rejected', level: 'error', reason, ...extra });
 		return ok();
 	};
 
@@ -73,11 +81,11 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			return rejected('bad_payload', { tenant: tenant.id, detail: error.message });
 		}
 		if (event === null) {
-			deps.log({ event: 'plane.ignored', tenant: tenant.id });
+			log({ event: 'plane.ignored', tenant: tenant.id });
 			return ok();
 		}
 		if (!deps.store.claim(`plane:${tenant.id}:${event.eventKey}`, now())) {
-			deps.log({
+			log({
 				event: 'plane.duplicate',
 				tenant: tenant.id,
 				kind: event.kind,
@@ -86,7 +94,7 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			return ok();
 		}
 		deps.enqueue(event);
-		deps.log({
+		log({
 			event: 'plane.accepted',
 			tenant: tenant.id,
 			kind: event.kind,

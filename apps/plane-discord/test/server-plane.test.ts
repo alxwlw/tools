@@ -288,6 +288,59 @@ describe('POST /plane/webhook', () => {
 		}
 	});
 
+	test('порядок: неподписанное тело с битым содержимым — bad_signature, не bad_payload; ключ дедупа не занят', async () => {
+		const { handler, store, events, logs } = setup();
+		const broken = [
+			edited('plane-app-workitem-created', (b) => (b.data.sequence_id = 1e300)),
+			JSON.stringify({ workspace_id: WORKSPACE }),
+		];
+		for (const raw of broken) {
+			logs.length = 0;
+			expect((await handler(post(raw, sign(raw, 'wrong')))).status).toBe(200);
+			expect(logs).toEqual([
+				{ event: 'plane.rejected', level: 'error', reason: 'bad_signature', tenant: 'initech' },
+			]);
+			expect(store.silence('initech').lastEventAt).toBeNull();
+		}
+		// an unsigned copy of a valid delivery must not burn its dedup key
+		const fx = fixture('plane-app-workitem-created');
+		logs.length = 0;
+		await handler(post(fx.raw, sign(fx.raw, 'wrong')));
+		expect(logs.map((l) => l.reason)).toEqual(['bad_signature']);
+		expect(events).toEqual([]);
+		logs.length = 0;
+		await handler(post(fx.raw, fx.headers['x-plane-signature']!));
+		expect(logs.map((l) => l.event)).toEqual(['plane.accepted']);
+		expect(events).toHaveLength(1);
+	});
+
+	test('log бросает на любом вызове → ответ всё равно 200 (принятая, отвергнутая, дубликат, игнорируемая)', async () => {
+		const store = new Store(':memory:');
+		const events: PlaneEvent[] = [];
+		const handler = createHandler({
+			tenantsByWorkspace: new Map([[WORKSPACE, tenant('initech', WORKSPACE, SECRET)]]),
+			store,
+			enqueue: (e) => events.push(e),
+			log: () => {
+				throw new Error('EPIPE');
+			},
+		});
+		const ignored = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'state'));
+		const requests: Array<() => Request> = [
+			() => fixtureRequest('plane-app-workitem-created'), // accepted
+			() => fixtureRequest('plane-app-workitem-created'), // duplicate
+			() => post(ignored, sign(ignored)), // ignored
+			() => post('{"workspace_id":"' + WORKSPACE + '"}', 'zz'), // bad_signature
+			() => post('{"workspace_id":"nope"}', 'zz'), // unknown_workspace
+		];
+		for (const make of requests) {
+			const res = await handler(make());
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe('ok');
+		}
+		expect(events).toHaveLength(1);
+	});
+
 	test('игнорируемая доставка → 200, plane.ignored, enqueue не вызван, ключ не занят', async () => {
 		const { handler, events, logs, store } = setup();
 		const body = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'state'));

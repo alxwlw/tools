@@ -48,7 +48,7 @@ describe('parsePlaneDelivery', () => {
 		expect(event).toMatchObject({
 			kind: 'workitem.updated',
 			tenant: 'initech',
-			eventKey: `issue.updated:${ID(3)}:state_id:2026-10-22T14:10:07.079913Z`,
+			eventKey: `issue.updated:${ID(3)}:state_id:2026-10-22T14:10:07.079913Z:d21ce489ad2594bb`,
 			actorId: ID(8),
 			previous: { stateId: ID(4) },
 			item: { id: ID(3), stateId: ID(9), assignees: [ID(8)] },
@@ -213,9 +213,32 @@ describe('parsePlaneDelivery', () => {
 			}),
 		)!;
 		expect(new Set([a.eventKey, later.eventKey, other.eventKey]).size).toBe(3);
-		expect(later.eventKey).toBe(`issue.updated:${ID(3)}:state_id:2026-10-22T15:00:00.000000Z`);
+		expect(later.eventKey).toBe(`issue.updated:${ID(3)}:state_id:2026-10-22T15:00:00.000000Z:d21ce489ad2594bb`);
 		// a repeat of one delivery keeps its key
 		expect(parse('plane-app-workitem-state-done')!.eventKey).toBe(a.eventKey);
+	});
+
+	test('state_id с old_value null → событие принято, previous.stateId не выставлен', () => {
+		const event = parseBody(
+			edited('plane-app-workitem-state-done', (b) => (b.activity.old_value = null)),
+		) as { kind: string; previous: object };
+		expect(event.kind).toBe('workitem.updated');
+		expect(event.previous).toEqual({});
+	});
+
+	test('два изменения одного поля в одну метку last_activity_at → разные eventKey; повтор — тот же', () => {
+		const change = (oldValue: string, newValue: string) =>
+			edited('plane-app-workitem-state-done', (b) => {
+				b.activity.old_value = oldValue;
+				b.activity.new_value = newValue;
+			});
+		const a = parseBody(change(ID(4), ID(9)))!;
+		const b = parseBody(change(ID(9), ID(4)))!;
+		const c = parseBody(change(ID(4), ID(5)))!;
+		expect(new Set([a.eventKey, b.eventKey, c.eventKey]).size).toBe(3);
+		expect(parseBody(change(ID(4), ID(9)))!.eventKey).toBe(a.eventKey);
+		// the hash is 16 hex chars after the timestamp
+		expect(a.eventKey).toMatch(/:\d{2}:\d{2}\.\d+Z:[0-9a-f]{16}$/);
 	});
 
 	test('враждебное тело → BadDelivery, не другое исключение', () => {
@@ -247,7 +270,7 @@ describe('parsePlaneDelivery', () => {
 			edited('plane-app-workitem-created', (b) => (b.data.assignees = [{ id: 5 }])),
 			edited('plane-app-workitem-created', (b) => (b.data.description_html = 5)),
 			edited('plane-app-workitem-created', (b) => (b.activity.actor = null)),
-			edited('plane-app-workitem-state-done', (b) => (b.activity.old_value = null)),
+			edited('plane-app-workitem-state-done', (b) => (b.activity.old_value = 5)),
 			edited('plane-app-workitem-state-done', (b) => delete b.data.last_activity_at),
 			edited('plane-app-workitem-assigned', (b) => (b.activity.old_value = 'x')),
 			edited('plane-app-workitem-assigned', (b) => (b.activity.old_value = [5])),
