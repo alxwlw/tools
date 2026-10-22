@@ -86,6 +86,30 @@ describe('parsePlaneDelivery', () => {
 		expect(empty).toMatchObject({ previous: { descriptionHtml: null } });
 	});
 
+	test('assignee_ids с непустым old_value → previous.assignees — те же id', () => {
+		const event = parseBody(
+			edited('plane-app-workitem-assigned', (b) => {
+				b.activity.old_value = [ID(8), ID(9)];
+			}),
+		);
+		expect(event).toMatchObject({ previous: { assignees: [ID(8), ID(9)] } });
+	});
+
+	test('отсутствующее поле html → null, а не ошибка', () => {
+		const comment = parseBody(
+			edited('plane-app-comment-mentions', (b) => {
+				delete b.data.comment_html;
+			}),
+		);
+		expect(comment).toMatchObject({ kind: 'comment.created', commentHtml: null });
+		const created = parseBody(
+			edited('plane-app-workitem-created', (b) => {
+				delete b.data.description_html;
+			}),
+		);
+		expect(created).toMatchObject({ kind: 'workitem.created', item: { descriptionHtml: null } });
+	});
+
 	test('issue_comment → comment.created, commentHtml из data.comment_html', () => {
 		const event = parse('plane-app-comment-mentions');
 		expect(event).toMatchObject({
@@ -123,6 +147,11 @@ describe('parsePlaneDelivery', () => {
 			}),
 		);
 		expect(noComment).toMatchObject({ kind: 'agent.mention', commentId: null });
+		for (const edit of [(b: any) => delete b.data.comment_id, (b: any) => (b.data.comment_id = '')])
+			expect(parseBody(edited('plane-app-agent-run-create', edit))).toMatchObject({
+				kind: 'agent.mention',
+				commentId: null,
+			});
 	});
 
 	test('двойная доставка комментария → один eventKey', () => {
@@ -197,6 +226,8 @@ describe('parsePlaneDelivery', () => {
 			42,
 			{},
 			{ event: 1, action: 'created' },
+			{ event: 'issue', action: 5 },
+			edited('plane-app-workitem-created', (b) => (b.data.id = '')),
 			{ event: 'issue', action: 'created' },
 			{ event: 'issue', action: 'created', activity: null, data: {} },
 			{ event: 'issue', action: 'created', activity: [], data: {} },

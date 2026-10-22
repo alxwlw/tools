@@ -188,6 +188,38 @@ describe('POST /plane/webhook', () => {
 		expect(events).toEqual([]);
 	});
 
+	test('лимит тела — 4 MiB; запрос без тела — plane.rejected, а не сбой', async () => {
+		expect(MAX_PLANE_BODY).toBe(4_194_304);
+		const { handler, logs } = setup();
+		const res = await handler(new Request(URL_, { method: 'POST' }));
+		expect(res.status).toBe(200);
+		expect(logs).toEqual([
+			{ event: 'plane.rejected', level: 'error', reason: 'unknown_workspace' },
+		]);
+	});
+
+	test('тело из нескольких кусков собирается целиком: подпись сходится', async () => {
+		const { handler, events } = setup();
+		const fx = fixture('plane-app-workitem-created');
+		const bytes = new TextEncoder().encode(fx.raw);
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(bytes.slice(0, 100));
+				controller.enqueue(bytes.slice(100, 700));
+				controller.enqueue(bytes.slice(700));
+				controller.close();
+			},
+		});
+		const req = new Request(URL_, {
+			method: 'POST',
+			body: stream,
+			duplex: 'half',
+			headers: { 'x-plane-signature': fx.headers['x-plane-signature']! },
+		} as RequestInit);
+		expect((await handler(req)).status).toBe(200);
+		expect(events).toHaveLength(1);
+	});
+
 	test('тело ровно 4 MiB не too_large; без content-length читается потоком и режется на лету', async () => {
 		const { handler, logs } = setup();
 		const exact = 'x'.repeat(MAX_PLANE_BODY);
