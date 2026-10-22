@@ -180,5 +180,6 @@ describe('isRetryable', () => {
 		expect(isRetryable(new Error('x'))).toBe(false);
 		expect(isRetryable('str')).toBe(false);
 		expect(isRetryable(null)).toBe(false);
+		expect(isRetryable(undefined)).toBe(false);
 	});
 });
