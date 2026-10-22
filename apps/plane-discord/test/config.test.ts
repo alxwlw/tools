@@ -41,6 +41,17 @@ describe('loadConfig', () => {
 		expect(describeTenants(config)).toEqual([{ id: 'acme', channels: 1, users: 1 }]);
 	});
 
+	test('без silenceHours, hiddenProjects и serviceChannelId — значения по умолчанию', () => {
+		const file = example();
+		delete file.tenants[0]!.silenceHours;
+		delete file.tenants[0]!.hiddenProjects;
+		delete file.tenants[0]!.serviceChannelId;
+		const [tenant] = load(file).tenants;
+		expect(tenant?.silenceHours).toBe(72);
+		expect(tenant?.hiddenProjects).toEqual([]);
+		expect(tenant?.serviceChannelId).toBeNull();
+	});
+
 	test('нет трёх обязательных env — одна ошибка, в ней все три имени', () => {
 		const env = { ...BASE_ENV };
 		delete env.PLANE_DISCORD_PLANE_URL;
