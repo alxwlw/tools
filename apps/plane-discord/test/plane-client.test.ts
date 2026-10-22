@@ -166,7 +166,7 @@ describe('PlaneClient: чтение', () => {
 					id: 'c1',
 					comment_html: '<p>hi</p>',
 					actor: 'u9',
-					external_source: null,
+					external_source: 'discord',
 					external_id: 'x7',
 				},
 			},
@@ -175,7 +175,7 @@ describe('PlaneClient: чтение', () => {
 			id: 'c1',
 			html: '<p>hi</p>',
 			actorId: 'u9',
-			externalSource: null,
+			externalSource: 'discord',
 			externalId: 'x7',
 		});
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/c1/`);
@@ -311,5 +311,148 @@ describe('PlaneClient: лимит запросов', () => {
 			fetch: async () => new Response('[]', { status: 200 }),
 		});
 		expect(await client.listProjects()).toEqual([]);
+	});
+});
+
+describe('PlaneClient: списки', () => {
+	const projectRow = (id: string) => ({ id, identifier: id.toUpperCase(), name: id });
+
+	test('курсоры: пока next_page_results true и курсор строка; стоп при false, при нестроковом курсоре', async () => {
+		const { calls, client } = stub([
+			{
+				status: 200,
+				body: { results: [projectRow('a')], next_page_results: true, next_cursor: 'c2' },
+			},
+			// next_page_results false with a cursor present: the list ends here.
+			{
+				status: 200,
+				body: { results: [projectRow('b')], next_page_results: false, next_cursor: 'c3' },
+			},
+			{
+				status: 200,
+				body: { results: [projectRow('c')], next_page_results: true, next_cursor: null },
+			},
+		]);
+		expect((await client.listProjects()).map((p) => p.id)).toEqual(['a', 'b']);
+		expect(calls).toHaveLength(2);
+		expect((await client.listProjects()).map((p) => p.id)).toEqual(['c']);
+		expect(calls).toHaveLength(3);
+	});
+
+	test('страница, потом голый массив: строки обеих; не-объекты в списках отбрасываются', async () => {
+		const { client } = stub([
+			{
+				status: 200,
+				body: {
+					results: [projectRow('a'), null, 'text', ['arr']],
+					next_page_results: true,
+					next_cursor: 'c2',
+				},
+			},
+			{ status: 200, body: [projectRow('b'), 7, null, ['arr']] },
+		]);
+		expect((await client.listProjects()).map((p) => p.id)).toEqual(['a', 'b']);
+	});
+
+	test('больше 50 страниц — ошибка после ровно 50 запросов', async () => {
+		let n = 0;
+		const { auth } = fakeAuth();
+		const client = new PlaneClient({
+			baseUrl: 'https://plane.test',
+			workspace: 'example-ws',
+			auth,
+			appInstallationId: 'inst-1',
+			limiter: { acquire: async () => {} },
+			fetch: async () => {
+				n++;
+				return new Response(
+					JSON.stringify({ results: [], next_page_results: true, next_cursor: `c${n}` }),
+					{ status: 200 },
+				);
+			},
+		});
+		expect(String(await failure(client.listProjects()))).toContain('more than 50 pages');
+		expect(n).toBe(50);
+	});
+
+	test('getWorkItemModules узнаёт задачу по id, issue и issue_id', async () => {
+		for (const row of [{ id: 'w1' }, { issue: 'w1' }, { issue_id: 'w1' }]) {
+			const { client } = stub([{ status: 200, body: [row] }]);
+			expect(await client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual(['m-a']);
+		}
+		const { client } = stub([{ status: 200, body: [{ id: 'x', issue: 'y', issue_id: 'z' }] }]);
+		expect(await client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual([]);
+	});
+
+	test('поля: нет строки или пустая строка — ошибка; assignees фильтруются до строк', async () => {
+		const { client } = stub([
+			{ status: 200, body: [{ id: 'p1', identifier: '', name: 'n' }] },
+			{ status: 200, body: [{ identifier: 'A', name: 'n' }] },
+			{ status: 200, body: { ...workItemRow, assignees: ['u1', null, 5] } },
+			{ status: 200, body: [] },
+			{ status: 200 },
+		]);
+		expect(String(await failure(client.listProjects()))).toContain('"identifier"');
+		expect(String(await failure(client.listProjects()))).toContain('"id"');
+		expect((await client.getWorkItem('p1', 'w1')).assignees).toEqual(['u1']);
+		expect(String(await failure(client.getWorkItem('p1', 'w1')))).toContain('Plane response: no');
+		expect(String(await failure(client.getWorkItem('p1', 'w1')))).toContain('Plane response: no');
+	});
+
+	test('getComment: пустой или не строковый external_id → null', async () => {
+		const base = { id: 'c1', comment_html: '<p>x</p>', actor: 'u1' };
+		const { client } = stub([
+			{ status: 200, body: { ...base, external_id: '', external_source: 7 } },
+		]);
+		const got = await client.getComment('p1', 'w1', 'c1');
+		expect([got.externalId, got.externalSource]).toEqual([null, null]);
+	});
+});
+
+describe('PlaneClient: лимитер и таймаут', () => {
+	function limited(fetch: (u: string, i: RequestInit) => Promise<Response>, timeoutMs?: number) {
+		const { auth } = fakeAuth();
+		const acquired: string[] = [];
+		const order: string[] = [];
+		const client = new PlaneClient({
+			baseUrl: 'https://plane.test',
+			workspace: 'example-ws',
+			auth,
+			appInstallationId: 'inst-1',
+			timeoutMs,
+			fetch: async (u, i) => {
+				order.push('fetch');
+				return fetch(u, i);
+			},
+			limiter: {
+				acquire: async () => {
+					acquired.push('acquire');
+					order.push('acquire');
+				},
+			},
+		});
+		return { client, acquired, order };
+	}
+
+	test('acquire перед каждым запросом, в том числе перед повтором после 401', async () => {
+		const statuses = [401, 200];
+		const { client, order } = limited(
+			async () => new Response('[]', { status: statuses.shift() ?? 500 }),
+		);
+		await client.listProjects();
+		expect(order).toEqual(['acquire', 'fetch', 'acquire', 'fetch']);
+	});
+
+	test('timeoutMs обрывает запрос, который не отвечает', async () => {
+		const { client } = limited(
+			(_u, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					(init.signal as AbortSignal).addEventListener('abort', () =>
+						reject(new Error('aborted')),
+					);
+				}),
+			20,
+		);
+		expect(String(await failure(client.listProjects()))).toContain('aborted');
 	});
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { botTokenAuth, PLANE_SCOPES, PlaneAuthError } from '../src/plane/auth.ts';
 
-type Call = { url: string; headers: Record<string, string>; body: string };
+type Call = { url: string; headers: Record<string, string>; body: string; signal: unknown };
 
 /** fetch stub: every call answers with the next token `tok-N`, expires_in 36000 unless `replies` says otherwise. */
 function stub(replies: Array<{ status: number; body?: unknown; delay?: Promise<void> }> = []) {
@@ -12,6 +12,7 @@ function stub(replies: Array<{ status: number; body?: unknown; delay?: Promise<v
 			url,
 			headers: init.headers as Record<string, string>,
 			body: String(init.body),
+			signal: init.signal,
 		});
 		const reply = replies.shift() ?? {
 			status: 200,
@@ -48,6 +49,7 @@ describe('botTokenAuth', () => {
 		expect(form.get('app_installation_id')).toBe('inst-1');
 		expect(form.get('scope')).toBe(PLANE_SCOPES.join(' '));
 		expect(PLANE_SCOPES).toHaveLength(13);
+		expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	test('токен живёт до expires_in − 600 с, потом запрашивается новый', async () => {
@@ -92,8 +94,11 @@ describe('botTokenAuth', () => {
 		const auth = make(fetch, () => 0);
 		const first = auth.headers();
 		auth.invalidate();
+		// Asked before the stale request lands: must not join it.
+		const second = auth.headers();
 		release();
 		expect((await first).Authorization).toBe('Bearer stale');
+		expect((await second).Authorization).toBe('Bearer tok-1');
 		expect((await auth.headers()).Authorization).toBe('Bearer tok-1');
 		expect(calls).toHaveLength(2);
 	});
@@ -129,5 +134,38 @@ describe('botTokenAuth', () => {
 			const { fetch } = stub([{ status: 200, body }]);
 			await expect(make(fetch, () => 0).headers()).rejects.toBeInstanceOf(PlaneAuthError);
 		}
+	});
+
+	test('500 даже с телом токена — PlaneAuthError 500', async () => {
+		const { fetch } = stub([{ status: 500, body: { access_token: 'x', expires_in: 36000 } }]);
+		const err = await make(fetch, () => 0)
+			.headers()
+			.then(
+				() => null,
+				(e: unknown) => e,
+			);
+		expect(err).toBeInstanceOf(PlaneAuthError);
+		expect((err as PlaneAuthError).status).toBe(500);
+	});
+
+	test('пустой токен и expires_in строкой — PlaneAuthError', async () => {
+		for (const body of [
+			{ access_token: '', expires_in: 36000 },
+			{ access_token: 'x', expires_in: '36000' },
+		]) {
+			const { fetch } = stub([{ status: 200, body }]);
+			await expect(make(fetch, () => 0).headers()).rejects.toBeInstanceOf(PlaneAuthError);
+		}
+	});
+
+	test('expires_in короче запаса в 600 с: токен выдан, но не кэшируется', async () => {
+		const { calls, fetch } = stub([
+			{ status: 200, body: { access_token: 'short-1', expires_in: 1 } },
+			{ status: 200, body: { access_token: 'short-2', expires_in: 1 } },
+		]);
+		const auth = make(fetch, () => 0);
+		expect((await auth.headers()).Authorization).toBe('Bearer short-1');
+		expect((await auth.headers()).Authorization).toBe('Bearer short-2');
+		expect(calls).toHaveLength(2);
 	});
 });
