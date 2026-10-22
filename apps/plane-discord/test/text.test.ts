@@ -166,6 +166,23 @@ describe('planeHtmlToDiscord', () => {
 		expect(planeHtmlToDiscord(tag(UUID_A), () => '@a\uE000b')).toBe('@ab');
 	});
 
+	test('имя из callback не склеивается с соседним текстом в пинг; пустое имя ничего не склеивает', () => {
+		const at = (html: string, name: string) => planeHtmlToDiscord(html, () => name);
+		expect(at(`@${tag(UUID_A)}`, 'everyone')).toBe('@​everyone');
+		expect(at(`@${tag(UUID_A)}everyone`, '')).toBe('@​everyone');
+		expect(at(`<p>&lt;${tag(UUID_A)}</p>`, '@123>')).toBe('<​@123>');
+		// a genuine ping next to the same neighbours stays a ping
+		expect(at(`@${tag(UUID_A)}`, '<@123456789012345678>')).toBe('@<@123456789012345678>');
+		expect(at(tag(UUID_A), '<@123456789012345678>')).toBe('<@123456789012345678>');
+	});
+
+	test('имя упоминания в метке ссылки не внедряет вторую ссылку', () => {
+		const html = `<a href="https://a.test/">${tag(UUID_A)}</a>`;
+		expect(planeHtmlToDiscord(html, () => 'x](<https://evil>)[')).toBe(
+			'[x\\](<https://evil>)\\[](<https://a.test/>)',
+		);
+	});
+
 	test('@everyone в адресе ссылки кодируется как %40, ссылка остаётся ссылкой', () => {
 		expect(toText('<a href="https://x/@everyone/@here">t</a>')).toBe(
 			'[t](<https://x/%40everyone/%40here>)',

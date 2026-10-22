@@ -75,7 +75,11 @@ const CLOSE = String.fromCharCode(0xe001);
 const MARKERS = new RegExp(`[${OPEN}${CLOSE}]`, 'g');
 const MARKED = new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g');
 
-/** Breaks everything Discord would parse as a ping, however the pieces ended up adjacent. */
+/**
+ * Breaks everything Discord would parse as a ping in `text`. It is only correct on the text as it will be sent: the
+ * caller keeps every non-ping piece (including display names) inline, so no neighbour can join it afterwards; the
+ * legitimate `<@id>` fragments are held out as marker tokens and never reach this function.
+ */
 function defang(text: string): string {
 	return text.replace(/<(?=@)|@(?=everyone|here)/gi, (m) => `${m}​`);
 }
@@ -102,9 +106,10 @@ export function planeHtmlToDiscord(html: string, mention: (planeUserId: string) 
 		} else if (name === 'mention-component' && !closing) {
 			const id = attr(attrs, 'entity_identifier');
 			if (attr(attrs, 'entity_name') === 'user_mention' && id) {
-				// A real ping is `<@id>`; any other text from the callback (a display name) goes through the guard.
+				// A real ping `<@id>` is held out of the guard. Anything else (a display name) stays inline in `out`,
+				// so the guard and the link-label escaping see it with its real neighbours (an empty one joins nothing).
 				const rendered = mention(id).replace(MARKERS, '');
-				out += hold(/^<@!?[\w-]+>$/.test(rendered) ? rendered : defang(rendered));
+				out += /^<@!?[\w-]+>$/.test(rendered) ? hold(rendered) : rendered;
 			}
 		} else if (name === 'a' && !closing) {
 			const href = attr(attrs, 'href');
