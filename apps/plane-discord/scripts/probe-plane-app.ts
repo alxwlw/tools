@@ -342,11 +342,7 @@ async function liveRows(p: Probe, env: Env, creds: Creds, keep: boolean): Promis
 			});
 			itemId = typeof created.body?.id === 'string' ? created.body.id : null;
 			if (itemId === null) {
-				p.row(
-					'bot-write',
-					false,
-					`POST /work-items/ → ${created.status}`,
-				);
+				p.row('bot-write', false, `POST /work-items/ → ${created.status}`);
 				return;
 			}
 			const comment = await p.call('POST', `${project}/work-items/${itemId}/comments/`, {
