@@ -409,14 +409,35 @@ describe('PlaneClient: списки', () => {
 			{ status: 200, body: { ...workItemRow } },
 			{ status: 200, body: [] },
 			{ status: 200, body: { id: 'c', comment_html: 'h', actor: 'a' } },
+			{ status: 200, body: [] },
+			{ status: 200, body: { id: 'w' } },
+			{ status: 201, body: { id: 'w' } },
+			{ status: 200, body: [] },
+			{ status: 201, body: { id: 'c' } },
 		]);
+		const comment = { comment_html: 'h', external_id: 'm1', external_source: 'discord' };
 		await client.getWorkItem('p/1', 'w/1');
 		await client.getWorkItemModules('p/1', 'w/1', ['m/1']);
 		await client.getComment('p/1', 'w/1', 'c/1');
+		await client.listStates('p/1');
+		await client.findWorkItemByExternalId('p/1', 'discord', 'm1');
+		await client.createWorkItem('p/1', {
+			name: 'n',
+			description_html: 'h',
+			external_id: 'm1',
+			external_source: 'discord',
+		});
+		await client.findCommentByExternalId('p/1', 'w/1', 'discord', 'm1');
+		await client.createComment('p/1', 'w/1', comment);
 		expect(calls.map((c) => c.url)).toEqual([
 			`${ROOT}/projects/p%2F1/work-items/w%2F1/`,
 			`${ROOT}/projects/p%2F1/modules/m%2F1/module-issues/?per_page=100`,
 			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/c%2F1/`,
+			`${ROOT}/projects/p%2F1/states/?per_page=100`,
+			`${ROOT}/projects/p%2F1/work-items/?external_id=m1&external_source=discord`,
+			`${ROOT}/projects/p%2F1/work-items/`,
+			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/?per_page=100`,
+			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/`,
 		]);
 	});
 
