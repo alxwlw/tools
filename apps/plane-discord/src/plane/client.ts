@@ -141,8 +141,13 @@ export class PlaneClient implements PlaneApi {
 			[],
 			this.#origin,
 		);
-		// The endpoint answers one installation, as an object or a one-row array.
-		return field(Array.isArray(res.body) ? res.body[0] : res.body, 'app_bot');
+		// The endpoint answers one installation, as an object or an array of rows.
+		if (!Array.isArray(res.body)) return field(res.body, 'app_bot');
+		const row: unknown = (res.body as unknown[]).find(
+			(r) => field(r, 'id') === this.#installationId,
+		);
+		if (!row) throw new Error('Plane app-installation: no row for this installation');
+		return field(row, 'app_bot');
 	}
 
 	async listProjects(): Promise<ProjectSummary[]> {
@@ -154,11 +159,13 @@ export class PlaneClient implements PlaneApi {
 	}
 
 	async listStates(projectId: string): Promise<StateSummary[]> {
-		return (await this.#listAll(`/projects/${projectId}/states/`)).map((row) => ({
-			id: field(row, 'id'),
-			name: field(row, 'name'),
-			group: field(row, 'group'),
-		}));
+		return (await this.#listAll(`/projects/${encodeURIComponent(projectId)}/states/`)).map(
+			(row) => ({
+				id: field(row, 'id'),
+				name: field(row, 'name'),
+				group: field(row, 'group'),
+			}),
+		);
 	}
 
 	async listMembers(): Promise<MemberSummary[]> {
@@ -169,7 +176,10 @@ export class PlaneClient implements PlaneApi {
 	}
 
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItem> {
-		const res = await this.#request('GET', `/projects/${projectId}/work-items/${workItemId}/`);
+		const res = await this.#request(
+			'GET',
+			`/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/`,
+		);
 		return workItem(res.body);
 	}
 
@@ -190,9 +200,11 @@ export class PlaneClient implements PlaneApi {
 	): Promise<string[]> {
 		const found: string[] = [];
 		for (const moduleId of moduleIds) {
-			const rows = await this.#listAll(`/projects/${projectId}/modules/${moduleId}/module-issues/`);
-			// The rows name the work item by id (probe 2026-10-22); `issue` / `issue_id` are the relation spellings.
-			if (rows.some((row) => [row.id, row.issue, row.issue_id].includes(workItemId))) {
+			const rows = await this.#listAll(
+				`/projects/${encodeURIComponent(projectId)}/modules/${encodeURIComponent(moduleId)}/module-issues/`,
+			);
+			// Live check 2026-10-22: each row is a full work item, so its id is the `id` key.
+			if (rows.some((row) => row.id === workItemId)) {
 				found.push(moduleId);
 			}
 		}
@@ -206,7 +218,7 @@ export class PlaneClient implements PlaneApi {
 	): Promise<CommentDetail> {
 		const res = await this.#request(
 			'GET',
-			`/projects/${projectId}/work-items/${workItemId}/comments/${commentId}/`,
+			`/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/comments/${encodeURIComponent(commentId)}/`,
 		);
 		return {
 			id: field(res.body, 'id'),
@@ -225,7 +237,7 @@ export class PlaneClient implements PlaneApi {
 		const query = new URLSearchParams({ external_id: externalId, external_source: source });
 		const res = await this.#request(
 			'GET',
-			`/projects/${projectId}/work-items/?${query.toString()}`,
+			`/projects/${encodeURIComponent(projectId)}/work-items/?${query.toString()}`,
 			undefined,
 			[404],
 		);
@@ -233,7 +245,7 @@ export class PlaneClient implements PlaneApi {
 	}
 
 	createWorkItem(projectId: string, item: NewWorkItem): Promise<Upsert> {
-		return this.#upsert(`/projects/${projectId}/work-items/`, item);
+		return this.#upsert(`/projects/${encodeURIComponent(projectId)}/work-items/`, item);
 	}
 
 	async findCommentByExternalId(
@@ -242,7 +254,9 @@ export class PlaneClient implements PlaneApi {
 		source: string,
 		externalId: string,
 	): Promise<{ id: string } | null> {
-		const rows = await this.#listAll(`/projects/${projectId}/work-items/${workItemId}/comments/`);
+		const rows = await this.#listAll(
+			`/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/comments/`,
+		);
 		const found = rows.find(
 			(row) => row.external_source === source && row.external_id === externalId,
 		);
@@ -250,7 +264,10 @@ export class PlaneClient implements PlaneApi {
 	}
 
 	createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert> {
-		return this.#upsert(`/projects/${projectId}/work-items/${workItemId}/comments/`, comment);
+		return this.#upsert(
+			`/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(workItemId)}/comments/`,
+			comment,
+		);
 	}
 
 	async createRunActivity(runId: string, body: string): Promise<void> {

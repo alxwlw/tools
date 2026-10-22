@@ -226,12 +226,29 @@ describe('PlaneClient: чтение', () => {
 	});
 
 	test('botUserId: app-installation → app_bot; второй вызов без запроса', async () => {
-		const { calls, client } = stub([{ status: 200, body: [{ app_bot: 'bot-1', status: 'x' }] }]);
+		const { calls, client } = stub([
+			{ status: 200, body: [{ id: 'inst-1', app_bot: 'bot-1', status: 'x' }] },
+		]);
 		expect(await client.botUserId()).toBe('bot-1');
 		expect(await client.botUserId()).toBe('bot-1');
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.url).toBe('https://plane.test/auth/o/app-installation/?id=inst-1');
 		expect(calls[0]?.headers.Authorization).toBe('Bearer tok-0');
+	});
+
+	test('botUserId: из массива берётся строка своей установки, а не первая; нет такой — ошибка', async () => {
+		const { client } = stub([
+			{
+				status: 200,
+				body: [
+					{ id: 'other', app_bot: 'bot-X' },
+					{ id: 'inst-1', app_bot: 'bot-1' },
+				],
+			},
+		]);
+		expect(await client.botUserId()).toBe('bot-1');
+		const missing = stub([{ status: 200, body: [{ id: 'other', app_bot: 'bot-X' }] }]);
+		expect(String(await failure(missing.client.botUserId()))).toContain('no row');
 	});
 
 	test('botUserId: сбой не запоминается, следующий вызов спрашивает снова', async () => {
@@ -380,13 +397,27 @@ describe('PlaneClient: списки', () => {
 		expect(n).toBe(50);
 	});
 
-	test('getWorkItemModules узнаёт задачу по id, issue и issue_id', async () => {
-		for (const row of [{ id: 'w1' }, { issue: 'w1' }, { issue_id: 'w1' }]) {
-			const { client } = stub([{ status: 200, body: [row] }]);
-			expect(await client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual(['m-a']);
-		}
-		const { client } = stub([{ status: 200, body: [{ id: 'x', issue: 'y', issue_id: 'z' }] }]);
-		expect(await client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual([]);
+	test('getWorkItemModules: строка module-issues — work item, задачу узнаёт только по id', async () => {
+		const { client } = stub([{ status: 200, body: [{ id: 'w1' }] }]);
+		expect(await client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual(['m-a']);
+		const other = stub([{ status: 200, body: [{ id: 'x', issue: 'w1', issue_id: 'w1' }] }]);
+		expect(await other.client.getWorkItemModules('p1', 'w1', ['m-a'])).toEqual([]);
+	});
+
+	test('id в путях экранируются', async () => {
+		const { calls, client } = stub([
+			{ status: 200, body: { ...workItemRow } },
+			{ status: 200, body: [] },
+			{ status: 200, body: { id: 'c', comment_html: 'h', actor: 'a' } },
+		]);
+		await client.getWorkItem('p/1', 'w/1');
+		await client.getWorkItemModules('p/1', 'w/1', ['m/1']);
+		await client.getComment('p/1', 'w/1', 'c/1');
+		expect(calls.map((c) => c.url)).toEqual([
+			`${ROOT}/projects/p%2F1/work-items/w%2F1/`,
+			`${ROOT}/projects/p%2F1/modules/m%2F1/module-issues/?per_page=100`,
+			`${ROOT}/projects/p%2F1/work-items/w%2F1/comments/c%2F1/`,
+		]);
 	});
 
 	test('поля: нет строки или пустая строка — ошибка; assignees фильтруются до строк', async () => {
