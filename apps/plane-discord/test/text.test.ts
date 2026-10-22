@@ -41,7 +41,7 @@ describe('planeMentions', () => {
 	});
 
 	test('без дублей; чужой entity_name, закрывающий тег и тег без идентификатора пропускаются', () => {
-		const html = `${tag(UUID_B)}${tag(UUID_A)}${tag(UUID_B)}${tag('x', 'issue_mention')}</mention-component><mention-component entity_name="user_mention"></mention-component><b entity_identifier="y" entity_name="user_mention"></b>`;
+		const html = `${tag(UUID_B)}${tag(UUID_A)}${tag(UUID_B)}${tag('x', 'issue_mention')}</mention-component entity_identifier="closing" entity_name="user_mention"></mention-component><mention-component entity_name="user_mention"></mention-component><b entity_identifier="y" entity_name="user_mention"></b>`;
 		expect(planeMentions(html)).toEqual([UUID_B, UUID_A]);
 	});
 
@@ -85,6 +85,9 @@ describe('planeHtmlToDiscord', () => {
 		expect(toText('<a href="HTTP://a.test/">t</a>')).toBe('[t](<HTTP://a.test/>)');
 		expect(toText('<a href="javascript:alert(1)">t</a>')).toBe('t');
 		expect(toText('<a>t</a>')).toBe('t');
+		expect(toText('see <a href="https://a.test/">t</a> now')).toBe(
+			'see [t](<https://a.test/>) now',
+		);
 		expect(toText('&lt;b&gt;x&lt;/b&gt;')).toBe('<b>x</b>');
 	});
 
@@ -113,6 +116,9 @@ describe('planeHtmlToDiscord', () => {
 			'x',
 		);
 		expect(planeHtmlToDiscord(tag(UUID_A), () => '@Имя')).toBe('@Имя');
+		expect(
+			toText(`</mention-component entity_identifier="${UUID_A}" entity_name="user_mention">x`),
+		).toBe('x');
 		// the same mention inside a link label
 		expect(toText(`<a href="https://a.test/">${tag('7')}</a>`)).toBe('[<@7>](<https://a.test/>)');
 	});
@@ -132,7 +138,8 @@ describe('planeHtmlToDiscord', () => {
 	});
 
 	test('служебные символы из входа не подделывают вставки; сущности — за один проход', () => {
-		expect(toText(`x0y &#xE000;0&#xE001;`)).toBe('x0y 0');
+		const [open, close] = [String.fromCharCode(0xe000), String.fromCharCode(0xe001)];
+		expect(toText(`x${open}0${close}y &#xE000;0&#xE001;`)).toBe('x0y 0');
 		expect(toText('&amp;lt; &#65;&#x42; a&nbsp;b')).toBe('&lt; AB a b');
 		expect(toText('&#0; &#1114112; &#xD800; &foo; &AMP;')).toBe('&#0; &#1114112; &#xD800; &foo; &');
 	});

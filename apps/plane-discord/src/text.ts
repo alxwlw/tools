@@ -44,7 +44,8 @@ function decode(text: string): string {
 function attr(attrs: string, name: string): string | null {
 	const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(attrs);
 	if (!m) return null;
-	return decode(m[1] ?? m[2] ?? '');
+	// One of the two quoted groups always took part.
+	return decode((m[1] ?? m[2]) as string);
 }
 
 /** Plane user UUIDs mentioned in Plane HTML, unique, in document order. */
@@ -52,7 +53,7 @@ export function planeMentions(html: string): string[] {
 	const ids = new Set<string>();
 	for (const m of html.matchAll(TAG)) {
 		if (m[1] === '/' || m[2]?.toLowerCase() !== 'mention-component') continue;
-		const attrs = m[3] ?? '';
+		const attrs = m[3] as string;
 		const id = attr(attrs, 'entity_identifier');
 		if (attr(attrs, 'entity_name') === 'user_mention' && id) ids.add(id);
 	}
@@ -69,8 +70,9 @@ export function planeMentionHtml(
 
 // Private-use markers for already-final fragments (mentions, links) inside the text being built:
 // the mention guard below runs over the whole string and must not touch them.
-const OPEN = '';
-const CLOSE = '';
+const OPEN = String.fromCharCode(0xe000);
+const CLOSE = String.fromCharCode(0xe001);
+const MARKERS = new RegExp(`[${OPEN}${CLOSE}]`, 'g');
 
 /** Breaks everything Discord would parse as a ping, however the pieces ended up adjacent. */
 function defang(text: string): string {
@@ -112,11 +114,11 @@ export function planeHtmlToDiscord(html: string, mention: (planeUserId: string) 
 	let last = 0;
 	for (const m of html.matchAll(TAG)) {
 		const text = html.slice(last, m.index);
-		out += decode(text.replace(/[ \t\r\n\f]+/g, ' ')).replace(/[]/g, '');
+		out += decode(text.replace(/[ \t\r\n\f]+/g, ' ')).replace(MARKERS, '');
 		last = m.index + m[0].length;
-		onTag(m[1] === '/', (m[2] ?? '').toLowerCase(), m[3] ?? '');
+		onTag(m[1] === '/', (m[2] as string).toLowerCase(), m[3] as string);
 	}
-	out += decode(html.slice(last).replace(/[ \t\r\n\f]+/g, ' ')).replace(/[]/g, '');
+	out += decode(html.slice(last).replace(/[ \t\r\n\f]+/g, ' ')).replace(MARKERS, '');
 
 	const resolve = (text: string): string =>
 		text.replace(new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g'), (_, i) =>
