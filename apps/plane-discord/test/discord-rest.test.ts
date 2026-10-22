@@ -1,0 +1,355 @@
+import { describe, expect, test } from 'bun:test';
+import { CHANNEL, DISCORD_ERR, DiscordApiError, DiscordRest } from '../src/discord/rest.ts';
+
+type Reply = { status: number; body?: unknown };
+type Call = { url: string; method: string; headers: Record<string, string>; body: any };
+
+const API = 'https://discord.com/api/v10';
+const TOKEN = 'itok.SECRET/part';
+
+function stub(replies: Reply[]) {
+	const calls: Call[] = [];
+	const sleeps: number[] = [];
+	const fetch = async (url: string, init: RequestInit): Promise<Response> => {
+		calls.push({
+			url,
+			method: init.method ?? 'GET',
+			headers: init.headers as Record<string, string>,
+			body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
+		});
+		const reply = replies.shift();
+		if (!reply) throw new Error(`unexpected request ${init.method} ${url}`);
+		return new Response(reply.body === undefined ? '' : JSON.stringify(reply.body), {
+			status: reply.status,
+		});
+	};
+	const sleep = async (ms: number): Promise<void> => {
+		sleeps.push(ms);
+		if (sleeps.length > 10) throw new Error('runaway sleep');
+	};
+	const rest = new DiscordRest({ botToken: 'BOTSECRET', applicationId: 'app1', fetch, sleep });
+	return { calls, sleeps, rest };
+}
+
+async function failure(promise: Promise<unknown>): Promise<unknown> {
+	return promise.then(
+		() => {
+			throw new Error('expected a rejection');
+		},
+		(err: unknown) => err,
+	);
+}
+
+const NO_PINGS = { parse: [], replied_user: false };
+const msg = { content: 'hi @everyone <@&1>' };
+
+/** One stubbed call per message-sending method, each answering with whatever shape it needs. */
+const senders: Array<[string, (rest: DiscordRest) => Promise<unknown>, Reply]> = [
+	['sendMessage', (r) => r.sendMessage('c1', msg), { status: 200, body: { id: 'm1' } }],
+	[
+		'createForumPost',
+		(r) => r.createForumPost('f1', 'name', msg),
+		{ status: 200, body: { id: 't1', message: { id: 'm1' } } },
+	],
+	['editOriginal', (r) => r.editOriginal(TOKEN, msg), { status: 200, body: {} }],
+	['followup', (r) => r.followup(TOKEN, msg), { status: 200, body: {} }],
+];
+
+describe('DiscordRest: сообщения', () => {
+	for (const [name, send, reply] of senders) {
+		test(`${name} — allowed_mentions {parse: [], replied_user: false}`, async () => {
+			const { calls, rest } = stub([reply]);
+			await send(rest);
+			const body = calls[0]?.body;
+			const message = name === 'createForumPost' ? body.message : body;
+			expect(message.allowed_mentions).toEqual(NO_PINGS);
+			expect(message.content).toBe('hi @everyone <@&1>');
+		});
+	}
+
+	test('content из 2500 символов → 2000 code points; эмодзи на границе целый', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.sendMessage('c1', { content: `${'a'.repeat(1998)}😀😀😀` });
+		const content: string = calls[0]?.body.content;
+		expect(Array.from(content)).toHaveLength(2000);
+		expect(content).toBe(`${'a'.repeat(1998)}😀…`);
+		const exact = stub([{ status: 200, body: { id: 'm1' } }]);
+		await exact.rest.sendMessage('c1', { content: 'b'.repeat(2000) });
+		expect(exact.calls[0]?.body.content).toBe('b'.repeat(2000));
+	});
+
+	test('имя поста из 150 символов → 100; content первого сообщения режется так же', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 't1', message: { id: 'm1' } } }]);
+		await rest.createForumPost('f1', '😀'.repeat(150), { content: 'x'.repeat(2500) });
+		expect(Array.from(calls[0]?.body.name)).toHaveLength(100);
+		expect(calls[0]?.body.name).toBe(`${'😀'.repeat(99)}…`);
+		expect(Array.from(calls[0]?.body.message.content)).toHaveLength(2000);
+	});
+
+	test('embed: title 256, description 4096, field name 256, value 1024; короткое не меняется', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.sendMessage('c1', {
+			content: 'c',
+			embeds: [
+				{
+					title: 't'.repeat(300),
+					url: 'https://example.com/x',
+					description: 'd'.repeat(5000),
+					fields: [
+						{ name: 'n'.repeat(300), value: 'v'.repeat(1100), inline: true },
+						{ name: 'short', value: 'val' },
+					],
+				},
+			],
+		});
+		const embed = calls[0]?.body.embeds[0];
+		expect(embed.title).toBe(`${'t'.repeat(255)}…`);
+		expect(embed.description).toBe(`${'d'.repeat(4095)}…`);
+		expect(embed.url).toBe('https://example.com/x');
+		expect(embed.fields[0]).toEqual({
+			name: `${'n'.repeat(255)}…`,
+			value: `${'v'.repeat(1023)}…`,
+			inline: true,
+		});
+		expect(embed.fields[1]).toEqual({ name: 'short', value: 'val' });
+	});
+
+	test('без embeds, replyTo и ephemeral в теле нет message_reference, flags и embeds', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.sendMessage('c1', { content: 'c' });
+		expect(Object.keys(calls[0]?.body).sort()).toEqual(['allowed_mentions', 'content']);
+	});
+
+	test('replyTo → message_reference с fail_if_not_exists false; ephemeral → flags 64', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.sendMessage('c1', { content: 'c', replyTo: 'm0', ephemeral: true });
+		expect(calls[0]?.body.message_reference).toEqual({
+			message_id: 'm0',
+			fail_if_not_exists: false,
+		});
+		expect(calls[0]?.body.flags).toBe(64);
+		const plain = stub([{ status: 200, body: { id: 'm1' } }]);
+		await plain.rest.sendMessage('c1', { content: 'c', ephemeral: false });
+		expect(plain.calls[0]?.body.flags).toBeUndefined();
+	});
+});
+
+describe('DiscordRest: ответы', () => {
+	test('createForumPost: id поста и id первого сообщения', async () => {
+		const { rest } = stub([{ status: 200, body: { id: 't1', message: { id: 'm9' } } }]);
+		expect(await rest.createForumPost('f1', 'n', msg)).toEqual({ threadId: 't1', messageId: 'm9' });
+	});
+
+	test('createForumPost без message в ответе: первое сообщение поста имеет id поста', async () => {
+		const { rest } = stub([{ status: 200, body: { id: 't1' } }]);
+		expect(await rest.createForumPost('f1', 'n', msg)).toEqual({ threadId: 't1', messageId: 't1' });
+	});
+
+	test('getChannel и listGuildChannels разбирают поля канала', async () => {
+		const row = {
+			id: 'c1',
+			type: CHANNEL.PUBLIC_THREAD,
+			parent_id: 'f1',
+			guild_id: 'g1',
+			name: 'n',
+		};
+		const { rest } = stub([
+			{ status: 200, body: row },
+			{ status: 200, body: [row, { id: 'c2', type: CHANNEL.TEXT }] },
+		]);
+		const expected = { id: 'c1', type: 11, parentId: 'f1', guildId: 'g1', name: 'n' };
+		expect(await rest.getChannel('c1')).toEqual(expected);
+		expect(await rest.listGuildChannels('g1')).toEqual([
+			expected,
+			{ id: 'c2', type: 0, parentId: null, guildId: null, name: null },
+		]);
+	});
+
+	test('openDm возвращает id канала; тело — recipient_id', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'dm1' } }]);
+		expect(await rest.openDm('u1')).toBe('dm1');
+		expect(calls[0]?.body).toEqual({ recipient_id: 'u1' });
+		expect(calls[0]?.url).toBe(`${API}/users/@me/channels`);
+	});
+
+	test('ответ без id / не массив / без type — ошибка разбора', async () => {
+		expect(
+			String(await failure(stub([{ status: 200, body: {} }]).rest.sendMessage('c', msg))),
+		).toContain('"id"');
+		expect(
+			String(await failure(stub([{ status: 200, body: {} }]).rest.listGuildChannels('g'))),
+		).toContain('array');
+		expect(
+			String(await failure(stub([{ status: 200, body: { id: 'c' } }]).rest.getChannel('c'))),
+		).toContain('"type"');
+	});
+
+	test('bulkOverwriteGuildCommands: PUT списка команд на сервер приложения', async () => {
+		const { calls, rest } = stub([{ status: 200, body: [] }]);
+		await rest.bulkOverwriteGuildCommands('g1', [{ name: 'a' }]);
+		expect(calls[0]).toMatchObject({
+			method: 'PUT',
+			url: `${API}/applications/app1/guilds/g1/commands`,
+			body: [{ name: 'a' }],
+		});
+	});
+
+	test('deleteOriginal: DELETE без тела на @original', async () => {
+		const { calls, rest } = stub([{ status: 204 }]);
+		await rest.deleteOriginal('tok');
+		expect(calls[0]).toMatchObject({
+			method: 'DELETE',
+			url: `${API}/webhooks/app1/tok/messages/@original`,
+			body: undefined,
+		});
+	});
+});
+
+describe('DiscordRest: маршруты и авторизация', () => {
+	test('бот — Authorization: Bot …; interaction webhook — без Authorization', async () => {
+		const { calls, rest } = stub([
+			{ status: 200, body: { id: 'm1' } },
+			{ status: 200, body: {} },
+			{ status: 200, body: {} },
+			{ status: 204 },
+		]);
+		await rest.sendMessage('c1', msg);
+		await rest.editOriginal('tok', msg);
+		await rest.followup('tok', msg);
+		await rest.deleteOriginal('tok');
+		expect(calls[0]?.headers.Authorization).toBe('Bot BOTSECRET');
+		for (const call of calls.slice(1)) expect(call.headers.Authorization).toBeUndefined();
+	});
+
+	test('каждый id в пути экранируется (канал, форум, сервер, приложение, токен interaction)', async () => {
+		const ID = 'a/b?c#d';
+		const E = 'a%2Fb%3Fc%23d';
+		const mk = (replies: Reply[]) => {
+			const s = stub(replies);
+			const rest = new DiscordRest({
+				botToken: 'B',
+				applicationId: ID,
+				fetch: async (url, init) => {
+					s.calls.push({ url, method: init.method ?? 'GET', headers: {}, body: undefined });
+					return new Response(JSON.stringify(replies.shift() ?? {}), { status: 200 });
+				},
+			});
+			return { calls: s.calls, rest };
+		};
+		const urls = async (run: (r: DiscordRest) => Promise<unknown>, body: unknown) => {
+			const { calls, rest } = mk([{ status: 200, body } as Reply]);
+			await run(rest).catch(() => {});
+			return calls[0]?.url;
+		};
+		expect(await urls((r) => r.getChannel(ID), { id: 'x', type: 0 })).toBe(`${API}/channels/${E}`);
+		expect(await urls((r) => r.listGuildChannels(ID), [])).toBe(`${API}/guilds/${E}/channels`);
+		expect(await urls((r) => r.createForumPost(ID, 'n', msg), { id: 't' })).toBe(
+			`${API}/channels/${E}/threads`,
+		);
+		expect(await urls((r) => r.sendMessage(ID, msg), { id: 'm' })).toBe(
+			`${API}/channels/${E}/messages`,
+		);
+		expect(await urls((r) => r.editOriginal(ID, msg), {})).toBe(
+			`${API}/webhooks/${E}/${E}/messages/@original`,
+		);
+		expect(await urls((r) => r.deleteOriginal(ID), {})).toBe(
+			`${API}/webhooks/${E}/${E}/messages/@original`,
+		);
+		expect(await urls((r) => r.followup(ID, msg), {})).toBe(`${API}/webhooks/${E}/${E}`);
+		expect(await urls((r) => r.bulkOverwriteGuildCommands(ID, []), [])).toBe(
+			`${API}/applications/${E}/guilds/${E}/commands`,
+		);
+	});
+});
+
+describe('DiscordRest: ошибки и 429', () => {
+	test('429 с retry_after 0.5 → sleep(500) и успех', async () => {
+		const { calls, sleeps, rest } = stub([
+			{ status: 429, body: { retry_after: 0.5, global: false } },
+			{ status: 200, body: { id: 'm1' } },
+		]);
+		expect(await rest.sendMessage('c1', msg)).toEqual({ id: 'm1' });
+		expect(sleeps).toEqual([500]);
+		expect(calls).toHaveLength(2);
+	});
+
+	test('429 без retry_after → sleep(1000)', async () => {
+		const { sleeps, rest } = stub([
+			{ status: 429, body: {} },
+			{ status: 200, body: { id: 'm1' } },
+		]);
+		await rest.sendMessage('c1', msg);
+		expect(sleeps).toEqual([1000]);
+	});
+
+	test('четыре 429 подряд → DiscordApiError 429, три sleep, четыре запроса', async () => {
+		const { calls, sleeps, rest } = stub(
+			Array.from({ length: 4 }, () => ({ status: 429, body: { retry_after: 1.2 } })),
+		);
+		const err = await failure(rest.sendMessage('c1', msg));
+		expect(err).toBeInstanceOf(DiscordApiError);
+		expect((err as DiscordApiError).status).toBe(429);
+		expect(sleeps).toEqual([1200, 1200, 1200]);
+		expect(calls).toHaveLength(4);
+	});
+
+	test('403 с code 50007 → DiscordApiError status 403, code 50007, без тела в сообщении', async () => {
+		const { rest } = stub([
+			{
+				status: 403,
+				body: { code: DISCORD_ERR.CANNOT_DM, message: 'Cannot send messages to this user' },
+			},
+		]);
+		const err = (await failure(rest.openDm('u1'))) as DiscordApiError;
+		expect(err).toBeInstanceOf(DiscordApiError);
+		expect([err.status, err.code, err.method, err.route]).toEqual([
+			403,
+			50007,
+			'POST',
+			'/users/@me/channels',
+		]);
+		expect(err.message).toBe('Discord POST /users/@me/channels → 403 (code 50007)');
+	});
+
+	test('ошибка без JSON-кода: code null; нечисловой code — тоже null', async () => {
+		const plain = stub([{ status: 500 }]);
+		expect(((await failure(plain.rest.getChannel('c'))) as DiscordApiError).code).toBeNull();
+		const odd = stub([{ status: 400, body: { code: '50007' } }]);
+		expect(((await failure(odd.rest.getChannel('c'))) as DiscordApiError).code).toBeNull();
+	});
+
+	test('токен interaction не попадает ни в message, ни в route ошибки', async () => {
+		for (const call of [
+			(r: DiscordRest) => r.editOriginal(TOKEN, msg),
+			(r: DiscordRest) => r.deleteOriginal(TOKEN),
+			(r: DiscordRest) => r.followup(TOKEN, msg),
+		]) {
+			const { rest } = stub([{ status: 404, body: { code: 10015, message: TOKEN } }]);
+			const err = (await failure(call(rest))) as DiscordApiError;
+			expect(err.message).not.toContain('SECRET');
+			expect(err.route).not.toContain('SECRET');
+			expect(err.route).toContain('/webhooks/app1/:token');
+		}
+	});
+
+	test('сбой транспорта: ошибка с маршрутом, без URL с токеном и без токена бота', async () => {
+		const rest = new DiscordRest({
+			botToken: 'BOTSECRET',
+			applicationId: 'app1',
+			fetch: async (url) => {
+				throw new Error(`connect failed ${url}`);
+			},
+		});
+		const err = (await failure(rest.followup(TOKEN, msg))) as DiscordApiError;
+		expect(err).toBeInstanceOf(DiscordApiError);
+		expect(err.status).toBe(0);
+		expect(err.message).not.toContain('SECRET');
+		expect(err.message).toBe('Discord POST /webhooks/app1/:token → 0');
+	});
+
+	test('токен бота не попадает в ошибку', async () => {
+		const { rest } = stub([{ status: 401, body: { message: '401: Unauthorized' } }]);
+		const err = (await failure(rest.getChannel('c1'))) as DiscordApiError;
+		expect(JSON.stringify([err.message, err.route])).not.toContain('BOTSECRET');
+	});
+});
