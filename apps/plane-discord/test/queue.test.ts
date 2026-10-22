@@ -133,6 +133,23 @@ describe('SerialQueue', () => {
 	});
 });
 
+describe('SerialQueue: размер и ожидание', () => {
+	test('size считает выполняющуюся и ожидающие; idle не разрешается, пока задача идёт', async () => {
+		const { queue } = setup();
+		let release: () => void = () => {};
+		queue.push('slow', () => new Promise<void>((resolve) => (release = resolve)));
+		queue.push('next', async () => {});
+		expect(queue.size).toBe(2);
+		let idled = false;
+		const waiting = queue.idle().then(() => (idled = true));
+		await Promise.resolve();
+		expect(idled).toBe(false);
+		release();
+		await waiting;
+		expect(queue.size).toBe(0);
+	});
+});
+
 describe('isRetryable', () => {
 	test('5xx, 429, TypeError, TimeoutError, AbortError — да', () => {
 		expect(isRetryable(statusError(500))).toBe(true);

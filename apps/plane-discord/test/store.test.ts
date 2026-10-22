@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,5 +96,17 @@ describe('Store', () => {
 		});
 		expect(second.silence('acme').lastEventAt).toBe(42);
 		second.close();
+	});
+
+	test('файловая база открывается в режиме WAL', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-discord-store-'));
+		dirs.push(dir);
+		const path = join(dir, 'state.sqlite');
+		new Store(path).close();
+		const probe = new Database(path, { readonly: true });
+		expect(
+			probe.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get()?.journal_mode,
+		).toBe('wal');
+		probe.close();
 	});
 });
