@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { CHANNEL, DISCORD_ERR, DiscordApiError, DiscordRest } from '../src/discord/rest.ts';
 
 type Reply = { status: number; body?: unknown };
@@ -351,5 +351,31 @@ describe('DiscordRest: ошибки и 429', () => {
 		const { rest } = stub([{ status: 401, body: { message: '401: Unauthorized' } }]);
 		const err = (await failure(rest.getChannel('c1'))) as DiscordApiError;
 		expect(JSON.stringify([err.message, err.route])).not.toContain('BOTSECRET');
+	});
+
+	test('по умолчанию: глобальный fetch с (url, init), реальный sleep, signal таймаута', async () => {
+		const seen: Array<{ url: unknown; init: RequestInit }> = [];
+		const replies = [
+			new Response(JSON.stringify({ retry_after: 0.001 }), { status: 429 }),
+			new Response(JSON.stringify({ id: 'm1' }), { status: 200 }),
+		];
+		const spy = spyOn(globalThis, 'fetch').mockImplementation((async (
+			url: unknown,
+			init: RequestInit,
+		) => {
+			seen.push({ url, init });
+			return replies.shift() as Response;
+		}) as unknown as typeof fetch);
+		try {
+			const rest = new DiscordRest({ botToken: 'B', applicationId: 'app1' });
+			expect(await rest.sendMessage('c1', msg)).toEqual({ id: 'm1' });
+		} finally {
+			spy.mockRestore();
+		}
+		expect(seen).toHaveLength(2);
+		expect(seen[0]?.url).toBe(`${API}/channels/c1/messages`);
+		expect(seen[0]?.init.method).toBe('POST');
+		expect(seen[0]?.init.signal).toBeInstanceOf(AbortSignal);
+		expect(seen[0]?.init.signal?.aborted).toBe(false);
 	});
 });

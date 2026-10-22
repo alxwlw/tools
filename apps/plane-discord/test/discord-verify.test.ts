@@ -52,6 +52,11 @@ describe('verifyDiscordRequest', () => {
 		expect(await call('', '', '')).toBe(false);
 	});
 
+	test('нет timestamp, но подпись сделана над «null»+тело — false', async () => {
+		const s = await signed('null', 'x');
+		expect(await verifyDiscordRequest(s.publicKey, s.signature, null, s.bytes)).toBe(false);
+	});
+
 	test('ключ из 32 нулевых байт: подпись не сходится — false без исключения', async () => {
 		const s = await signed('1700000000', 'x');
 		expect(await verifyDiscordRequest('00'.repeat(32), s.signature, '1700000000', s.bytes)).toBe(
