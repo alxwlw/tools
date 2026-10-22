@@ -27,14 +27,20 @@ function literalsRegExp(values: string[], boundary: boolean): RegExp | null {
 	return new RegExp(boundary ? `(?<![A-Za-z0-9-])(?:${body})(?![A-Za-z0-9-])` : body, 'gi');
 }
 
-export function createSanitizer(opts: { slugs: string[]; hosts: string[] }): (text: string) => string {
+export function createSanitizer(opts: {
+	slugs: string[];
+	hosts: string[];
+}): (text: string) => string {
 	const uuids = new Map<string, string>();
 	const people = new Map<string, number>();
 	const slugMap = new Map(
 		opts.slugs.map((s, i) => [s.toLowerCase(), i === 0 ? 'example-ws' : `example-ws-${i + 1}`]),
 	);
 	const hostMap = new Map(
-		opts.hosts.map((h, i) => [h.toLowerCase(), i === 0 ? 'plane.example.com' : `host${i + 1}.example.com`]),
+		opts.hosts.map((h, i) => [
+			h.toLowerCase(),
+			i === 0 ? 'plane.example.com' : `host${i + 1}.example.com`,
+		]),
 	);
 	const slugRe = literalsRegExp(opts.slugs, true);
 	const hostRe = literalsRegExp(opts.hosts, false);
@@ -94,7 +100,8 @@ export function fixtureOf(raw: string, event: string, secret = 'test-secret'): P
 	};
 }
 
-const USAGE = 'usage: bun scripts/sanitize-fixture.ts <capture.bin> <event> [--slug <ws>]... [--host <host>]...';
+const USAGE =
+	'usage: bun scripts/sanitize-fixture.ts <capture.bin> <event> [--slug <ws>]... [--host <host>]...';
 
 /** Returns the fixture JSON for `argv` (without bun/script). */
 export function cli(argv: string[]): string {
