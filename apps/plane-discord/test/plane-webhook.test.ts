@@ -213,7 +213,9 @@ describe('parsePlaneDelivery', () => {
 			}),
 		)!;
 		expect(new Set([a.eventKey, later.eventKey, other.eventKey]).size).toBe(3);
-		expect(later.eventKey).toBe(`issue.updated:${ID(3)}:state_id:2026-10-22T15:00:00.000000Z:d21ce489ad2594bb`);
+		expect(later.eventKey).toBe(
+			`issue.updated:${ID(3)}:state_id:2026-10-22T15:00:00.000000Z:d21ce489ad2594bb`,
+		);
 		// a repeat of one delivery keeps its key
 		expect(parse('plane-app-workitem-state-done')!.eventKey).toBe(a.eventKey);
 	});
