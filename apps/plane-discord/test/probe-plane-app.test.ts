@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -235,4 +235,276 @@ test('PROBE_SCOPES уходит в запрос token, по умолчанию �
 	expect(await main([], { ...env, PROBE_SCOPES: 'x:read y:write' }, fetchFn)).toBe(1);
 	expect(await main([], env, fetchFn)).toBe(1);
 	expect(seen).toEqual(['null', 'x:read y:write', 'null', DEFAULT_SCOPES.join(' ')]);
+});
+
+test('DEFAULT_SCOPES — тринадцать скоупов плана', () => {
+	expect(DEFAULT_SCOPES).toEqual([
+		'projects:read',
+		'projects.work_items:read',
+		'projects.work_items:write',
+		'projects.work_items.comments:read',
+		'projects.work_items.comments:write',
+		'projects.states:read',
+		'projects.members:read',
+		'projects.modules:read',
+		'workspaces.members:read',
+		'agents.runs:read',
+		'agents.runs:write',
+		'agents.run_activities:read',
+		'agents.run_activities:write',
+	]);
+});
+
+type Seen = { method: string; path: string; auth: string; apiKey: string; body: string };
+
+/** A Plane in memory: enough routes for every probe row. `over` replaces a route's reply. */
+function stubPlane(over: Record<string, () => Response> = {}) {
+	const seen: Seen[] = [];
+	const json = (b: unknown, status = 200, headers: Record<string, string> = {}) =>
+		new Response(JSON.stringify(b), { status, headers });
+	const server = Bun.serve({
+		port: 0,
+		async fetch(req) {
+			const p = new URL(req.url).pathname;
+			const m = req.method;
+			const body = await req.text();
+			seen.push({
+				method: m,
+				path: p,
+				auth: req.headers.get('authorization') ?? '',
+				apiKey: req.headers.get('x-api-key') ?? '',
+				body,
+			});
+			const key = `${m} ${p.replace(/^\/api\/v1\/workspaces\/example-ws/, '')}`;
+			const custom = over[key];
+			if (custom) return custom();
+			if (p === '/auth/o/token/') {
+				return body.includes('scope=')
+					? json({ access_token: 'tok123456789', expires_in: 86400 })
+					: json({ error: 'invalid_scope' }, 400);
+			}
+			if (p === '/auth/o/app-installation/') {
+				return json([
+					{
+						workspace: 'ws-uuid',
+						workspace_detail: { slug: 'example-ws' },
+						app_bot: 'bot-1',
+						status: 'installed',
+						webhook: { url: 'u', secret_key: 'LEAK-WEBHOOK' },
+					},
+				]);
+			}
+			if (key === 'POST /projects/p1/work-items/') return json({ id: 'item-1' }, 201);
+			if (key === 'POST /projects/p1/work-items/item-1/comments/') return json({ id: 'c1' }, 201);
+			if (key === 'GET /projects/p1/work-items/item-1/comments/c1/') {
+				return json({ id: 'c1', created_by: 'bot-1', comment_html: '<p>SECRET-COMMENT</p>' });
+			}
+			if (key === 'GET /projects/p1/members/') {
+				return json([{ member: { id: 'bot-1', display_name: 'Probe Bot' } }]);
+			}
+			if (key === 'GET /projects/p1/') return json({ identifier: 'DX' });
+			if (key === 'GET /projects/p1/work-items/item-1/') {
+				return json({ sequence_id: 7, module_ids: ['mod-1'], modules: [{ id: 'mod-1' }] });
+			}
+			if (key === 'GET /projects/p1/modules/') return json({ results: [{ id: 'mod-1' }] });
+			if (key === 'GET /projects/p1/modules/mod-1/module-issues/') {
+				return json({ results: [{ id: 'item-1' }] });
+			}
+			if (key.startsWith('POST /projects/p1/modules/mod-1/module-issues/')) return json({});
+			if (key === 'GET /webhooks/') {
+				return json([{ id: 'h1', is_active: true, secret_key: 'LEAK-WEBHOOK' }]);
+			}
+			if (key === 'GET /projects/')
+				return json({ results: [] }, 200, { 'x-ratelimit-limit': '60' });
+			if (m === 'DELETE') return new Response(null, { status: 204 });
+			if (key === 'POST /runs/run-1/activities/') return json({}, 201);
+			return json({}, 404);
+		},
+	});
+	return { seen, server, url: `http://localhost:${server.port}` };
+}
+
+const appEnv = (url: string) => ({
+	PROBE_PLANE_URL: `${url}/`,
+	PROBE_WORKSPACE: 'example-ws',
+	PROBE_PROJECT_ID: 'p1',
+	PROBE_CLIENT_ID: 'cid',
+	PROBE_CLIENT_SECRET: 'csecret',
+	PROBE_INSTALLATION_ID: 'inst-1',
+});
+
+test('строки пробы: все ✓, что бот пишет и читает, ни одного секрета и текста в stdout', async () => {
+	const stub = stubPlane();
+	try {
+		expect(await main([], appEnv(stub.url))).toBe(0);
+	} finally {
+		stub.server.stop(true);
+	}
+	const out = logs.join('\n');
+	expect(out).toContain('token без scope: 400 error=invalid_scope');
+	expect(out).toContain('✓ token — сработал вариант «со scope», префикс tok123…, expires_in=86400');
+	expect(out).toContain(
+		'✓ installation — 200, workspace=ws-uuid, slug=example-ws, app_bot=bot-1, status=installed, webhook=object {secret_key,url}',
+	);
+	expect(out).toContain(
+		'✓ bot-write — задача 201, комментарий 201, чтение 200, actor=нет поля, created_by=app_bot; GET /members/ 200 массив (1), ключи строки: member, бот в списке: да, display_name=Probe Bot',
+	);
+	expect(out).toContain(
+		`✓ browse-url — открыть и подтвердить: ${stub.url}/example-ws/browse/DX-7/`,
+	);
+	expect(out).toContain(
+		'✓ modules — добавление в модуль 200; GET /modules/ 200; деталь: module_ids=массив(1); ?expand=modules 200: modules=массив(1), module_ids=массив(1); GET /modules/{m}/module-issues/ 200, задача в списке: да',
+	);
+	expect(out).toContain(
+		'✓ webhook-status — 200, массив (1), ключи: id,is_active,secret_key, is_active: true',
+	);
+	expect(out).toMatch(
+		/✓ rate — 70 запросов за \d+ мс, 429: 0, последний ответ 200, x-ratelimit-limit=60/,
+	);
+	expect(out).toContain('✓ cleanup — DELETE → 204');
+	expect(out).toContain('контракт подтверждён');
+	for (const leak of ['LEAK-WEBHOOK', 'SECRET-COMMENT', 'tok123456789', 'csecret']) {
+		expect(out).not.toContain(leak);
+	}
+	const create = stub.seen.find((r) => r.method === 'POST' && r.path.endsWith('/p1/work-items/'));
+	expect(JSON.parse(create?.body ?? '{}')).toMatchObject({
+		priority: 'none',
+		external_source: 'plane-discord-probe',
+	});
+	expect(create?.auth).toBe('Bearer tok123456789');
+	expect(
+		stub.seen.filter((r) => r.path.endsWith('/example-ws/projects/') && r.method === 'GET'),
+	).toHaveLength(70);
+	expect(stub.seen.at(-1)).toMatchObject({ method: 'DELETE' });
+	expect(
+		stub.seen.some((r) => r.path.includes('/module-issues/item-1/') && r.method === 'DELETE'),
+	).toBe(true);
+});
+
+test('--keep: задача остаётся, id в строке cleanup, DELETE работы не было', async () => {
+	const stub = stubPlane();
+	try {
+		expect(await main(['--keep'], appEnv(stub.url))).toBe(0);
+	} finally {
+		stub.server.stop(true);
+	}
+	expect(logs.join('\n')).toContain('✓ cleanup — --keep: задача пробы оставлена, id=item-1');
+	expect(
+		stub.seen.some((r) => r.method === 'DELETE' && r.path.endsWith('/work-items/item-1/')),
+	).toBe(false);
+});
+
+test('бот не участник проекта: 403 → ✗ с подсказкой, код 1, 70 запросов rate всё равно идут', async () => {
+	const stub = stubPlane({
+		'POST /projects/p1/work-items/': () => new Response('{}', { status: 403 }),
+		'GET /projects/': () => new Response('{}', { status: 429, headers: { 'retry-after': '9' } }),
+	});
+	try {
+		expect(await main([], appEnv(stub.url))).toBe(1);
+	} finally {
+		stub.server.stop(true);
+	}
+	const out = logs.join('\n');
+	expect(out).toContain('✗ bot-write — POST /work-items/ → 403 (бот не участник проекта');
+	expect(out).toContain('rate 429 на запросе 1: Retry-After=9');
+	expect(out).toMatch(/✓ rate — 70 запросов за \d+ мс, 429: 70 \(первый на 1\)/);
+	expect(out).toContain('✓ cleanup — нечего удалять');
+	expect(out).toContain('расхождений: 3');
+});
+
+test('сеть упала в одной строке: ✗ с именем ошибки, следующие строки идут', async () => {
+	const stub = stubPlane();
+	const flaky = (url: string, init?: RequestInit): Promise<Response> =>
+		url.includes('/webhooks/') ? Promise.reject(new TypeError('boom')) : fetch(url, init);
+	try {
+		expect(await main([], appEnv(stub.url), flaky)).toBe(1);
+	} finally {
+		stub.server.stop(true);
+	}
+	const out = logs.join('\n');
+	expect(out).toContain('✗ webhook-status — TypeError: boom');
+	expect(out).toContain('✓ rate');
+});
+
+test('режим key: X-API-Key вместо токена, строк token и installation нет', async () => {
+	const stub = stubPlane();
+	try {
+		const env = {
+			...appEnv(stub.url),
+			PROBE_CLIENT_ID: '',
+			PROBE_CLIENT_SECRET: '',
+			PROBE_INSTALLATION_ID: '',
+			PROBE_API_KEY: 'k1',
+		};
+		expect(await main([], env)).toBe(0);
+	} finally {
+		stub.server.stop(true);
+	}
+	const out = logs.join('\n');
+	expect(out).not.toContain('token');
+	expect(out).not.toContain('installation');
+	expect(out).toContain('created_by=не app_bot');
+	expect(out).toContain('бот в списке: app_bot неизвестен');
+	expect(stub.seen.every((r) => r.apiKey === 'k1' && r.auth === '')).toBe(true);
+});
+
+test('нет PROBE_PROJECT_ID: ✗ env, код 1', async () => {
+	const stub = stubPlane();
+	try {
+		expect(await main([], { ...appEnv(stub.url), PROBE_PROJECT_ID: '' })).toBe(1);
+	} finally {
+		stub.server.stop(true);
+	}
+	expect(logs.join('\n')).toContain('✗ env — PROBE_PROJECT_ID не задан');
+});
+
+test('token отказан в обоих вариантах: код 1, дальше не идём', async () => {
+	const stub = stubPlane({
+		'POST /auth/o/token/': () => new Response('{"error":"invalid_client"}', { status: 401 }),
+	});
+	try {
+		expect(await main([], appEnv(stub.url))).toBe(1);
+	} finally {
+		stub.server.stop(true);
+	}
+	const out = logs.join('\n');
+	expect(out).toContain('✗ token — ни один вариант не выдал токен');
+	expect(out).toContain('token со scope: 401 error=invalid_client');
+	expect(out).toContain('нет авторизации');
+	expect(stub.seen.every((r) => r.path === '/auth/o/token/')).toBe(true);
+});
+
+test('run-reply: POST activities с type response', async () => {
+	const stub = stubPlane();
+	try {
+		expect(await main(['run-reply', 'run-1'], appEnv(stub.url))).toBe(0);
+	} finally {
+		stub.server.stop(true);
+	}
+	expect(logs.join('\n')).toContain('✓ run-reply — 201');
+	const post = stub.seen.find((r) => r.path.endsWith('/runs/run-1/activities/'));
+	expect(JSON.parse(post?.body ?? '{}')).toMatchObject({
+		type: 'response',
+		content: { type: 'response' },
+	});
+	expect(await main(['run-reply'], appEnv(stub.url))).toBe(2);
+});
+
+test('comment-get: сырой JSON в файл, в stdout только размер и путь', async () => {
+	const stub = stubPlane();
+	const out = join(mkdtempSync(join(tmpdir(), 'cg-')), 'c.json');
+	try {
+		expect(await main(['comment-get', 'p1', 'item-1', 'c1', out], appEnv(stub.url))).toBe(0);
+		expect(readFileSync(out, 'utf8')).toContain('SECRET-COMMENT');
+		expect(statSync(out).mode & 0o777).toBe(0o600);
+		const missing = join(mkdtempSync(join(tmpdir(), 'cg-')), 'none.json');
+		expect(await main(['comment-get', 'p1', 'item-1', 'nope', missing], appEnv(stub.url))).toBe(1);
+		expect(existsSync(missing)).toBe(false);
+	} finally {
+		stub.server.stop(true);
+	}
+	const printed = logs.join('\n');
+	expect(printed).toContain(`✓ comment-get — 200, ${readFileSync(out).length} байт → ${out}`);
+	expect(printed).toContain('✗ comment-get — 404');
+	expect(printed).not.toContain('SECRET-COMMENT');
 });

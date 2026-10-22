@@ -117,3 +117,59 @@ test('cli: capture.bin → фикстура с очищенным телом и 
 test('cli: без аргументов — ошибка с подсказкой', () => {
 	expect(() => cli([])).toThrow(/usage/);
 });
+
+test('один человек — один номер во всех ключах и строках, пустые и null не трогаются', () => {
+	const sanitize = createSanitizer({ slugs: [], hosts: [] });
+	const out = JSON.parse(
+		sanitize(
+			JSON.stringify({
+				a: { display_name: 'Ivan', email: 'ivan@corp.test', first_name: null, last_name: '' },
+				b: { display_name: 'Ivan', email: 'ivan@corp.test', first_name: 7 },
+				text: 'cc ivan@corp.test',
+			}),
+		),
+	);
+	expect(out.a).toEqual({
+		display_name: 'User1',
+		email: 'user2@example.com',
+		first_name: null,
+		last_name: '',
+	});
+	expect(out.b).toEqual({ display_name: 'User1', email: 'user2@example.com', first_name: 7 });
+	expect(out.text).toBe('cc user2@example.com');
+});
+
+test('пустые slug и host в списке не превращают весь текст в подмену', () => {
+	const out = createSanitizer({ slugs: [''], hosts: [''] })('{"a":"plain text"}');
+	expect(JSON.parse(out)).toEqual({ a: 'plain text' });
+});
+
+test('несколько хостов и slug получают разные подмены; ключ avatar* в любом регистре значения', () => {
+	const sanitize = createSanitizer({
+		slugs: ['one-ws', 'two-ws'],
+		hosts: ['a.real.io', 'b.real.io'],
+	});
+	const out = JSON.parse(
+		sanitize(
+			JSON.stringify({
+				u: 'https://a.real.io/one-ws/x',
+				v: 'https://b.real.io/two-ws/y',
+				avatar_asset: 'z',
+			}),
+		),
+	);
+	expect(out).toEqual({
+		u: 'https://plane.example.com/example-ws/x',
+		v: 'https://host2.example.com/example-ws-2/y',
+		avatar_asset: null,
+	});
+});
+
+test('cli: без --slug и --host работает, UUID всё равно чистятся', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sanitize-'));
+	const file = join(dir, '1-aaaaaaaa.bin');
+	writeFileSync(file, `{"id":"${UUID_A}"}`);
+	const out = JSON.parse(cli([file, 'issue'])) as { raw: string };
+	expect(JSON.parse(out.raw)).toEqual({ id: '00000000-0000-4000-8000-000000000001' });
+	expect(() => cli([file])).toThrow(/usage/);
+});
