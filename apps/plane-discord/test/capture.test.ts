@@ -118,3 +118,18 @@ test('перезапуск продолжает нумерацию и не пе�
 	expect(second.filter((f) => f.startsWith('2-'))).toHaveLength(2);
 	expect(readFileSync(join(dir, firstBin), 'utf8')).toBe(content);
 });
+
+test('перезапуск учитывает уже записанное: лимит по числу и по байтам', async () => {
+	const dir = tmpDir();
+	const post = (h: (r: Request) => Promise<Response>) =>
+		h(new Request('http://x/p', { method: 'POST', body: 'one' }));
+	await post(createCaptureHandler(dir, { maxFiles: 100, maxBytes: 1e9 }));
+	const before = listing(dir);
+	expect(before.every((f) => f.startsWith('1-'))).toBe(true);
+	await post(createCaptureHandler(dir, { maxFiles: 1, maxBytes: 1e9 }));
+	expect(listing(dir)).toEqual(before);
+	await post(createCaptureHandler(dir, { maxFiles: 100, maxBytes: 1100 }));
+	expect(listing(dir)).toEqual(before);
+	await post(createCaptureHandler(dir, { maxFiles: 100, maxBytes: 1e9 }));
+	expect(listing(dir)).toHaveLength(4);
+});
