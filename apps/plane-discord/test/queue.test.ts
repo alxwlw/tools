@@ -90,15 +90,38 @@ describe('SerialQueue', () => {
 
 	test('без sleep — настоящая задержка по умолчанию: 503, затем успех — один job.retry, без job.dropped', async () => {
 		const logs: Entry[] = [];
-		const queue = new SerialQueue({ log: (e) => logs.push(e), delaysMs: [1] });
+		const queue = new SerialQueue({ log: (e) => logs.push(e), delaysMs: [20] });
 		let calls = 0;
 		queue.push('real', async () => {
 			calls++;
 			if (calls === 1) throw statusError(503);
 		});
+		const t0 = Date.now();
 		await queue.idle();
+		expect(Date.now() - t0).toBeGreaterThanOrEqual(15);
 		expect(calls).toBe(2);
 		expect(logs).toEqual([{ event: 'job.retry', label: 'real', attempt: 1, error: 'HTTP 503' }]);
+	});
+
+	test('log бросает на job.retry — следующая задача всё равно выполняется, idle резолвится', async () => {
+		const queue = new SerialQueue({
+			log: () => {
+				throw new Error('log down');
+			},
+			sleep: async () => {},
+		});
+		let aCalls = 0;
+		let bRan = false;
+		queue.push('a', async () => {
+			if (++aCalls === 1) throw statusError(503);
+		});
+		queue.push('b', async () => {
+			bRan = true;
+		});
+		await queue.idle();
+		expect(aCalls).toBe(2);
+		expect(bRan).toBe(true);
+		expect(queue.size).toBe(0);
 	});
 
 	test('счётчик попыток не переносится на следующую задачу', async () => {

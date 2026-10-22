@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.ts';
@@ -87,6 +87,8 @@ describe('Store', () => {
 		first.putDiscordItem('acme', 'msg-1', 'proj-1', 'item-1');
 		first.touchEvent('acme', 42);
 		first.close();
+		expect(() => first.silence('acme')).toThrow();
+		expect(existsSync(`${path}-wal`)).toBe(false);
 		const second = new Store(path);
 		expect(second.claim('k', 2000)).toBe(false);
 		expect(second.getThread('acme', 'item-1', 'chan-1')).toBe('thread-1');
