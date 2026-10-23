@@ -1,7 +1,7 @@
 // Discord HTTP interactions: «message → work item» and «add to work item» (design §3 «1c»).
 // Order of every request: signature over the raw bytes, then parse, then claim, then dispatch. A modal must open
 // within 3 s (primary response, cache only); a form submit gets a deferred ephemeral reply and the work runs after it.
-import { esc, link, truncate } from '../html.ts';
+import { esc, truncate } from '../html.ts';
 import type { Log } from '../log.ts';
 import type { TenantRuntime } from '../notify.ts';
 import { PlaneApiError, type ProjectSummary, type WorkItem } from '../plane/client.ts';
@@ -54,6 +54,7 @@ const FIELDS_MAX = 20;
 const WALK_DEPTH = 4;
 
 const SNOWFLAKE = /^\d{1,20}$/;
+const HTTP_URL = /^https?:\/\//i;
 const KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
 const CUSTOM_ID = /^(create|append):(.{1,64})$/;
 const SOURCE = 'discord';
@@ -103,8 +104,8 @@ type FormContext = {
 };
 
 type Fields = {
-	text: (id: string) => string | null;
-	chosen: (id: string) => string | null;
+	text: (id: string) => string | undefined;
+	chosen: (id: string) => string | undefined;
 };
 
 /** Text inputs (`value`) and selects (`values`) of a modal submit, found wherever the labels nest them. */
@@ -129,7 +130,7 @@ function collectFields(components: unknown): Fields {
 		walk(item.component, depth + 1);
 	};
 	walk(components, 0);
-	return { text: (id) => texts.get(id) ?? null, chosen: (id) => chosen.get(id) ?? null };
+	return { text: (id) => texts.get(id), chosen: (id) => chosen.get(id) };
 }
 
 /** At most `max` code points AND `max` UTF-16 units, so the prefill fits whichever way Discord counts. */
@@ -220,17 +221,14 @@ export function createInteractionHandler(
 		return planeId !== null ? planeMentionHtml(planeId) : esc(ctx.author.name);
 	}
 
-	const attachmentsHtml = (ctx: FormContext): string => {
-		const items = ctx.attachments
-			.map((a) => link(a.url, a.filename))
-			.filter((a): a is string => a !== null)
-			.map((a) => `<li>${a}</li>`);
-		return items.length === 0 ? '' : `<ul>${items.join('')}</ul>`;
-	};
+	// Attachment URLs were checked to be http(s) when the command came in.
+	const attachmentsHtml = (ctx: FormContext): string =>
+		ctx.attachments.length === 0
+			? ''
+			: `<ul>${ctx.attachments.map((a) => `<li><a href="${esc(a.url)}">${esc(a.filename)}</a></li>`).join('')}</ul>`;
 
 	const messageLink = (ctx: FormContext, text: string): string =>
-		link(`https://discord.com/channels/${ctx.guildId}/${ctx.channelId}/${ctx.messageId}`, text) ??
-		esc(text);
+		`<a href="https://discord.com/channels/${ctx.guildId}/${ctx.channelId}/${ctx.messageId}">${esc(text)}</a>`;
 
 	const isHidden = (rt: TenantRuntime, projectId: string): boolean =>
 		rt.tenant.hiddenProjects.includes(projectId);
@@ -256,7 +254,7 @@ export function createInteractionHandler(
 		let projectId = ctx.projectId;
 		if (projectId === null) {
 			const chosen = fields.chosen('project');
-			if (chosen === null) return edit(token, 'Проект не выбран.');
+			if (chosen === undefined) return edit(token, 'Проект не выбран.');
 			if (!ctx.offered.has(chosen) || isHidden(rt, chosen))
 				return edit(token, 'Этого проекта нет в списке, вызови команду ещё раз.');
 			projectId = chosen;
@@ -425,7 +423,7 @@ export function createInteractionHandler(
 			if (cached === null) return ephemeral(TEXT.coldCache);
 			offered = cached
 				.filter((p) => !isHidden(rt, p.id))
-				.sort((a, b) => (a.identifier < b.identifier ? -1 : a.identifier > b.identifier ? 1 : 0))
+				.sort((a, b) => a.identifier.localeCompare(b.identifier, 'en'))
 				.slice(0, SELECT_MAX);
 			if (offered.length === 0) return ephemeral(TEXT.noProjects);
 		}
@@ -445,7 +443,7 @@ export function createInteractionHandler(
 			if (attachments.length >= ATTACHMENTS_MAX) break;
 			const file = rec(raw);
 			const url = str(file?.url);
-			if (url !== null && link(url, 'x') !== null)
+			if (url !== null && HTTP_URL.test(url))
 				attachments.push({ url, filename: truncate(str(file?.filename) ?? 'файл', FILENAME_MAX) });
 		}
 

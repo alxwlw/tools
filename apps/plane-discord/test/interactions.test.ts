@@ -21,6 +21,7 @@ import { FakePlane } from './fake-plane.ts';
 
 const GUILD = '111111111111111111';
 const OTHER_GUILD = '111111111111111112';
+const NOCONF_GUILD = '111111111111111113';
 const MAPPED = '222222222222222221';
 const UNMAPPED = '222222222222222222';
 const FORUM = '222222222222222223';
@@ -71,6 +72,8 @@ async function setup(
 		cached?: ProjectSummary[] | null;
 		store?: Store;
 		withDefer?: boolean;
+		/** Leave `now` and `nonce` to the handler's own defaults. */
+		realClockAndNonce?: boolean;
 		throwingLog?: boolean;
 	} = {},
 ) {
@@ -101,12 +104,19 @@ async function setup(
 		states: async () => [],
 		members: async () => [],
 	};
+	const rt2: TenantRuntime = {
+		...rt,
+		tenant: { ...tenant(), id: 'umbrella', guildId: OTHER_GUILD, channels: [], users: [] },
+	};
 	const pending: Promise<void>[] = [];
 	let clock = 1_000_000;
 	let nonces = 0;
 	const handler = createInteractionHandler({
 		publicKey: signer.publicKey,
-		runtimesByGuild: new Map([[GUILD, rt]]),
+		runtimesByGuild: new Map([
+			[GUILD, rt],
+			[OTHER_GUILD, rt2],
+		]),
 		discord,
 		store,
 		planeUrl: PLANE_URL,
@@ -115,8 +125,7 @@ async function setup(
 			logs.push(e);
 			if (opts.throwingLog) throw new Error('EPIPE');
 		},
-		now: () => clock,
-		nonce: () => `n${++nonces}`,
+		...(opts.realClockAndNonce === true ? {} : { now: () => clock, nonce: () => `n${++nonces}` }),
 		...(opts.withDefer === false
 			? {}
 			: { defer: (work: () => Promise<void>) => void pending.push(work()) }),
@@ -134,10 +143,14 @@ async function setup(
 		handler,
 		ids,
 		advance: (ms: number) => void (clock += ms),
-		async ask(payload: unknown): Promise<{ status: number; body: any }> {
+		async ask(payload: unknown): Promise<{ status: number; body: any; headers: Headers }> {
 			const res = await handler(await signer.request(JSON.stringify(payload)));
 			const text = await res.text();
-			return { status: res.status, body: text.startsWith('{') ? JSON.parse(text) : text };
+			return {
+				status: res.status,
+				body: text.startsWith('{') ? JSON.parse(text) : text,
+				headers: res.headers,
+			};
 		},
 		async settle(): Promise<void> {
 			await Promise.all(pending);
@@ -187,7 +200,8 @@ describe('createInteractionHandler: подпись и служебные отв�
 		);
 		expect(noHeaders.status).toBe(401);
 		const good = await w.ask({ type: 1 });
-		expect(good).toEqual({ status: 200, body: { type: 1 } });
+		expect([good.status, good.body]).toEqual([200, { type: 1 }]);
+		expect(good.headers.get('content-type')).toBe('application/json');
 	});
 
 	test('подпись проверяется до разбора: подписанный не-JSON → 400, неподписанный не-JSON → 401', async () => {
@@ -215,7 +229,7 @@ describe('createInteractionHandler: подпись и служебные отв�
 		const res = await w.ask(
 			commandPayload({
 				id: w.ids.next(),
-				guildId: OTHER_GUILD,
+				guildId: NOCONF_GUILD,
 				channel: { id: MAPPED, type: 0 },
 				name: CREATE_COMMAND,
 				message: msg(),
@@ -993,96 +1007,71 @@ describe('createInteractionHandler: враждебный ввод', () => {
 	test('поля неверных типов, пустые, огромные — обработчик отвечает, не падает', async () => {
 		const w = await setup();
 		const huge = 'z'.repeat(200_000);
-		const bad: unknown[] = [
-			{},
-			{ type: 'x' },
-			{ type: 2 },
-			{ type: 2, id: 5 },
-			{ type: 2, id: 'abc' },
-			{ type: 2, id: '1'.repeat(40) },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD, data: null },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD, data: [] },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD, data: { type: 2, name: CREATE_COMMAND } },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD, data: { type: 3, name: 'другая' } },
-			{ type: 2, id: w.ids.next(), guild_id: GUILD, data: { type: 3, name: CREATE_COMMAND } },
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: { type: 3, name: CREATE_COMMAND, target_id: MSG, resolved: 'x' },
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: { type: 3, name: CREATE_COMMAND, target_id: MSG, resolved: { messages: [] } },
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: { type: 3, name: CREATE_COMMAND, target_id: '__proto__', resolved: { messages: {} } },
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: {
-					type: 3,
-					name: CREATE_COMMAND,
-					target_id: 'constructor',
-					resolved: { messages: {} },
+		const BROKEN = 'Не удалось разобрать запрос Discord.';
+		const UNKNOWN = 'Неизвестная команда.';
+		const NO_MESSAGE = 'Не удалось прочитать сообщение.';
+		const NO_CHANNEL = 'Не удалось определить канал.';
+		const EXPIRED = 'Форма устарела, вызови команду ещё раз.';
+		const command = (data: unknown, extra: Record<string, unknown> = {}) => ({
+			type: 2,
+			id: w.ids.next(),
+			guild_id: GUILD,
+			channel: { id: MAPPED, type: 0 },
+			data,
+			...extra,
+		});
+		const target = (over: Record<string, unknown>) => ({
+			type: 3,
+			name: CREATE_COMMAND,
+			target_id: MSG,
+			resolved: { messages: { [MSG]: { id: MSG } } },
+			...over,
+		});
+		const bad: Array<[unknown, string]> = [
+			[{}, BROKEN],
+			[{ type: 'x' }, BROKEN],
+			[{ type: 2 }, BROKEN],
+			[{ type: 2, id: 5 }, BROKEN],
+			[{ type: 2, id: 'abc' }, BROKEN],
+			[{ type: 2, id: '1'.repeat(40) }, BROKEN],
+			[command(null), UNKNOWN],
+			[command(undefined), UNKNOWN],
+			[command([]), UNKNOWN],
+			[command(target({ type: 2 })), UNKNOWN],
+			[command(target({ type: '3' })), UNKNOWN],
+			[command(target({ name: 'другая' })), UNKNOWN],
+			[command(target({ name: 5 })), UNKNOWN],
+			[command(target({ target_id: undefined })), NO_MESSAGE],
+			[command(target({ target_id: 5 })), NO_MESSAGE],
+			[command(target({ target_id: '__proto__', resolved: { messages: {} } })), NO_MESSAGE],
+			[command(target({ target_id: 'constructor', resolved: { messages: {} } })), NO_MESSAGE],
+			[command(target({ resolved: 'x' })), NO_MESSAGE],
+			[command(target({ resolved: { messages: [] } })), NO_MESSAGE],
+			[command(target({ resolved: { messages: { [MSG]: 'str' } } })), NO_MESSAGE],
+			[command(target({ resolved: { messages: { [MSG]: { id: 5 } } } })), NO_MESSAGE],
+			[
+				command(target({ resolved: { messages: { [MSG]: { id: 'not-a-snowflake' } } } })),
+				NO_MESSAGE,
+			],
+			[command(target({}), { channel: 'x' }), NO_CHANNEL],
+			[command(target({}), { channel: { id: 'abc' } }), NO_CHANNEL],
+			[command(target({}), { channel: undefined }), NO_CHANNEL],
+			[command(target({}), { guild_id: 7 }), 'Этот сервер не настроен.'],
+			[command(target({}), { type: 3 }), UNKNOWN],
+			[{ type: 5, id: w.ids.next(), guild_id: GUILD, data: 'x' }, EXPIRED],
+			[
+				{
+					type: 5,
+					id: w.ids.next(),
+					guild_id: GUILD,
+					data: { custom_id: 'create:n1', components: 'x' },
 				},
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: {
-					type: 3,
-					name: CREATE_COMMAND,
-					target_id: MSG,
-					resolved: { messages: { [MSG]: 'str' } },
-				},
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: {
-					type: 3,
-					name: CREATE_COMMAND,
-					target_id: MSG,
-					resolved: { messages: { [MSG]: { id: 5 } } },
-				},
-			},
-			{
-				type: 2,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				channel: 'x',
-				data: {
-					type: 3,
-					name: CREATE_COMMAND,
-					target_id: MSG,
-					resolved: { messages: { [MSG]: { id: MSG } } },
-				},
-			},
-			{ type: 2, id: w.ids.next(), guild_id: 7, channel: { id: MAPPED }, data: {} },
-			{ type: 3, id: w.ids.next(), guild_id: GUILD },
-			{ type: 5, id: w.ids.next(), guild_id: GUILD, data: 'x' },
-			{
-				type: 5,
-				id: w.ids.next(),
-				guild_id: GUILD,
-				data: { custom_id: 'create:n1', components: 'x' },
-			},
+				EXPIRED,
+			],
 		];
-		for (const payload of bad) {
+		for (const [payload, content] of bad) {
 			const res = await w.ask(payload);
-			expect(res.status).toBe(200);
-			expect([4, 9]).toContain(res.body.type);
+			expect([res.status, res.body.type, res.body.data.content]).toEqual([200, 4, content]);
 		}
 		// The tolerant ones with a channel still open a modal even when every optional field is garbage.
 		const sloppy = commandPayload({
@@ -1141,9 +1130,9 @@ describe('createInteractionHandler: враждебный ввод', () => {
 					'x',
 					{ custom_id: 5, value: 'нет' },
 					{ type: 18, component: { custom_id: 'title', value: 7 } },
-					// Too deep to be a real modal: ignored rather than followed.
-					nest(10, { custom_id: 'title', value: 'глубоко' }),
 					{ type: 1, components: [{ type: 4, custom_id: 'title', value: 'из ActionRow' }] },
+					// Too deep to be a real modal: ignored rather than followed (it comes last, so it would win).
+					nest(10, { custom_id: 'title', value: 'глубоко' }),
 				],
 			},
 		};
@@ -1199,6 +1188,305 @@ describe('createInteractionHandler: враждебный ввод', () => {
 		expect(res.status).toBe(200);
 		expect(res.body.data.content).toBe('Внутренняя ошибка, повтори через минуту.');
 		expect(w.logs.find((l) => l.event === 'ix.failed')).toMatchObject({ error: 'handler' });
+	});
+});
+
+describe('createInteractionHandler: ветви, которые легко потерять', () => {
+	const EXPIRED = 'Форма устарела, вызови команду ещё раз.';
+	const edits = (w: World) =>
+		w.discord.callsOf('editOriginal').map((c) => (c[1] as { content: string }).content);
+	const seedLab = (w: World) =>
+		w.plane.items.set('w40', {
+			id: 'w40',
+			projectId: P_LAB,
+			sequenceId: 40,
+			name: 'Старая задача',
+			stateId: '',
+			assignees: [],
+			priority: 'none',
+			descriptionHtml: null,
+		});
+
+	test('подписи и признаки полей обеих модалок', async () => {
+		const w = await setup();
+		const create = await open(w, { channel: { id: UNMAPPED, type: 0 } });
+		expect(create.body.data.components.map((c: any) => c.label)).toEqual([
+			'Название',
+			'Описание',
+			'Проект',
+		]);
+		const append = await open(w, { name: APPEND_COMMAND });
+		expect(append.body.data.components.map((c: any) => c.label)).toEqual(['Ключ задачи', 'Текст']);
+		expect(field(append.body, 'key').required).toBe(true);
+		expect(field(append.body, 'text').required).toBe(false);
+	});
+
+	test('имя автора: пустой global_name уступает username', async () => {
+		const w = await setup();
+		const { customId } = await open(w, {
+			message: msg({ author: { id: AUTHOR, username: 'mira', global_name: '' } }),
+		});
+		await submitCreate(w, customId, { title: 'T' });
+		await w.settle();
+		expect(w.plane.createdItems[0]!.item.description_html).toContain('автор: mira</p>');
+	});
+
+	test('канал берётся из channel_id, когда объекта channel нет', async () => {
+		const w = await setup();
+		const payload = {
+			...commandPayload({
+				id: w.ids.next(),
+				guildId: GUILD,
+				channel: {},
+				name: CREATE_COMMAND,
+				message: msg(),
+			}),
+			channel: undefined,
+			channel_id: MAPPED,
+		};
+		const res = await w.ask(payload);
+		expect(res.body.type).toBe(9);
+		expect(res.body.data.components).toHaveLength(2);
+	});
+
+	test('без now и nonce в зависимостях: nonce — UUID, время настоящее, форма работает', async () => {
+		const w = await setup({ realClockAndNonce: true });
+		const { customId } = await open(w);
+		expect(customId).toMatch(
+			/^create:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+		);
+		const other = await open(w, { message: msg({ id: '444444444444444449' }) });
+		expect(other.customId).not.toBe(customId);
+		expect((await submitCreate(w, customId, { title: 'T' })).body.type).toBe(5);
+		await w.settle();
+		expect(w.plane.createdItems).toHaveLength(1);
+	});
+
+	test('новая форма не стирает живые старые', async () => {
+		const w = await setup();
+		const first = await open(w);
+		await open(w, { message: msg({ id: '444444444444444446' }) });
+		await open(w, { message: msg({ id: '444444444444444447' }) });
+		expect((await submitCreate(w, first.customId, { title: 'T' })).body.type).toBe(5);
+	});
+
+	test('форма живёт ровно 15 минут: за миллисекунду до — жива, ровно в срок — устарела', async () => {
+		const w = await setup();
+		const alive = await open(w);
+		const dead = await open(w, { message: msg({ id: '444444444444444446' }) });
+		w.advance(15 * 60_000 - 1);
+		expect((await submitCreate(w, alive.customId, { title: 'T' })).body.type).toBe(5);
+		w.advance(1);
+		expect((await submitCreate(w, dead.customId, { title: 'T' })).body.data.content).toBe(EXPIRED);
+	});
+
+	test('форма, открытая на одном сервере, не принимается с другого', async () => {
+		const w = await setup();
+		const { customId } = await open(w);
+		const res = await w.ask(
+			submitPayload({ id: w.ids.next(), guildId: OTHER_GUILD, customId, texts: { title: 'T' } }),
+		);
+		expect(res.body.data.content).toBe(EXPIRED);
+		await w.settle();
+		expect(w.plane.createdItems).toEqual([]);
+		// The right server still can.
+		expect((await submitCreate(w, customId, { title: 'T' })).body.type).toBe(5);
+	});
+
+	test('лог: ix.done с id, тенантом, видом и временем; отклонения — со своей причиной', async () => {
+		const w = await setup();
+		const { customId } = await open(w);
+		const submit = submitPayload({
+			id: '777000000000000001',
+			guildId: GUILD,
+			customId,
+			texts: { title: 'T' },
+		});
+		await w.ask(submit);
+		await w.settle();
+		expect(w.logs.find((l) => l.event === 'ix.done')).toEqual({
+			event: 'ix.done',
+			tenant: 'initech',
+			interaction: '777000000000000001',
+			kind: 'create',
+			ms: 0,
+		});
+		await w.handler(await (await makeSigner()).request('{}'));
+		await w.handler(await w.signer.request('nope'));
+		await w.ask({ type: 2, id: '777000000000000002', guild_id: NOCONF_GUILD });
+		await w.ask(submit);
+		expect(w.logs.filter((l) => l.event !== 'ix.done')).toEqual([
+			{ event: 'ix.rejected', level: 'warn', reason: 'bad_signature' },
+			{ event: 'ix.rejected', level: 'error', reason: 'bad_json' },
+			{ event: 'ix.unconfigured', interaction: '777000000000000002' },
+			{ event: 'ix.duplicate', interaction: '777000000000000001' },
+		]);
+	});
+
+	test('лог ix.failed: id взаимодействия, статус Discord-ошибки и время', async () => {
+		const w = await setup();
+		seedLab(w);
+		w.discord.failures.set(
+			'editOriginal',
+			new DiscordApiError(500, 'PATCH', '/webhooks/:app/:token/messages/@original'),
+		);
+		const { customId } = await open(w, { name: APPEND_COMMAND });
+		await w.ask(
+			submitPayload({
+				id: '777000000000000003',
+				guildId: GUILD,
+				customId,
+				texts: { key: 'LAB-40', text: 'x' },
+			}),
+		);
+		await w.settle();
+		expect(w.logs.find((l) => l.event === 'ix.failed')).toEqual({
+			event: 'ix.failed',
+			level: 'error',
+			tenant: 'initech',
+			interaction: '777000000000000003',
+			kind: 'append',
+			error: 'DiscordApiError',
+			status: 500,
+			ms: 0,
+		});
+		expect(w.logs.find((l) => l.event === 'ix.reply_failed')).toMatchObject({
+			interaction: '777000000000000003',
+		});
+	});
+
+	test('в отправке нет полей названия, ключа, текста → понятные ответы, не «внутренняя ошибка»', async () => {
+		const w = await setup();
+		seedLab(w);
+		const noTitle = await open(w);
+		await w.ask(submitPayload({ id: w.ids.next(), guildId: GUILD, customId: noTitle.customId }));
+		const noKey = await open(w, {
+			name: APPEND_COMMAND,
+			message: msg({ id: '444444444444444446' }),
+		});
+		await w.ask(submitPayload({ id: w.ids.next(), guildId: GUILD, customId: noKey.customId }));
+		const noText = await open(w, {
+			name: APPEND_COMMAND,
+			message: msg({ id: '444444444444444447' }),
+		});
+		await w.ask(
+			submitPayload({
+				id: w.ids.next(),
+				guildId: GUILD,
+				customId: noText.customId,
+				texts: { key: 'LAB-40' },
+			}),
+		);
+		const noDescription = await open(w, { message: msg({ id: '444444444444444448' }) });
+		await w.ask(
+			submitPayload({
+				id: w.ids.next(),
+				guildId: GUILD,
+				customId: noDescription.customId,
+				texts: { title: 'T' },
+			}),
+		);
+		await w.settle();
+		expect(edits(w)).toEqual([
+			'Название обязательно.',
+			'Нужен ключ вида LAB-40.',
+			'→ комментарий в [`LAB-40`](<https://plane.example.com/example-ws/browse/LAB-40/>)',
+		]);
+		expect(w.plane.createdComments[0]!.comment.comment_html).not.toContain('<blockquote>');
+		expect(w.plane.createdItems).toHaveLength(1);
+	});
+
+	test('больше 20 полей в отправке: лишние (в том числе нужное) отбрасываются', async () => {
+		const w = await setup();
+		const { customId } = await open(w);
+		const junk = Array.from({ length: 20 }, (_, i) => ({
+			type: 18,
+			component: { type: 4, custom_id: `junk${i}`, value: 'x' },
+		}));
+		await w.ask({
+			...submitPayload({ id: w.ids.next(), guildId: GUILD, customId }),
+			data: {
+				custom_id: customId,
+				components: [...junk, { type: 18, component: { type: 4, custom_id: 'title', value: 'T' } }],
+			},
+		});
+		await w.settle();
+		expect(edits(w)).toEqual(['Название обязательно.']);
+	});
+
+	test('проект скрыли между открытием формы и отправкой → отказ', async () => {
+		const w = await setup();
+		const { customId } = await open(w, { channel: { id: UNMAPPED, type: 0 } });
+		w.rt.tenant.hiddenProjects = [P_ENG];
+		await submitCreate(w, customId, { title: 'T' }, { project: [P_ENG] });
+		await w.settle();
+		expect(w.plane.createdItems).toEqual([]);
+		expect(edits(w)).toEqual(['Этого проекта нет в списке, вызови команду ещё раз.']);
+	});
+
+	test('«добавить в задачу» в канале скрытого проекта открывает модалку: решает ключ, а не канал', async () => {
+		const w = await setup();
+		w.rt.tenant.hiddenProjects = [P_LAB];
+		const { body } = await open(w, { name: APPEND_COMMAND });
+		expect(body.type).toBe(9);
+	});
+
+	test('не-Plane ошибка со статусом 404 не принимается за «задача удалена»', async () => {
+		const w = await setup();
+		w.store.putDiscordItem('initech', MSG, P_LAB, 'x');
+		w.plane.getWorkItem = async () => {
+			throw Object.assign(new Error('not a PlaneApiError'), { status: 404 });
+		};
+		const { customId } = await open(w);
+		await submitCreate(w, customId, { title: 'T' });
+		await w.settle();
+		expect(w.plane.createdItems).toEqual([]);
+		expect(edits(w)).toEqual(['Не получилось: внутренняя ошибка.']);
+	});
+
+	test('потерян store: задача найдена поиском по external_id, а не созданием', async () => {
+		const w = await setup();
+		const first = await open(w);
+		await submitCreate(w, first.customId, { title: 'T' });
+		await w.settle();
+		const fresh = await setup();
+		fresh.plane.items = w.plane.items;
+		const again = await open(fresh);
+		await submitCreate(fresh, again.customId, { title: 'T' });
+		await fresh.settle();
+		expect(fresh.planeCalls).toContain('findWorkItemByExternalId');
+		expect(fresh.planeCalls).not.toContain('createWorkItem');
+	});
+
+	test('sendMessage упал не Discord-ошибкой → «внутренняя ошибка», задача при этом создана', async () => {
+		const w = await setup();
+		w.discord.sendMessage = async () => {
+			throw new TypeError('boom');
+		};
+		const { customId } = await open(w);
+		await submitCreate(w, customId, { title: 'T' });
+		await w.settle();
+		expect(w.plane.createdItems).toHaveLength(1);
+		expect(edits(w)).toEqual(['Не получилось: внутренняя ошибка.']);
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([]);
+	});
+
+	test('комментарий: упоминание привязанного пользователя — mention Plane, чужого — имя', async () => {
+		const w = await setup();
+		seedLab(w);
+		const text = `смотри <@${LINKED}> и <@${AUTHOR}>`;
+		const { customId } = await open(w, {
+			name: APPEND_COMMAND,
+			message: msg({
+				content: text,
+				mentions: [{ id: AUTHOR, username: 'bob<b>', global_name: null }],
+			}),
+		});
+		await submitCreate(w, customId, { key: 'LAB-40', text });
+		await w.settle();
+		const html = w.plane.createdComments[0]!.comment.comment_html;
+		expect(html).toContain('entity_identifier="plane-user-1"');
+		expect(html).toContain('и bob&lt;b&gt;</p></blockquote>');
 	});
 });
 
