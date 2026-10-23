@@ -73,6 +73,11 @@ const EMBED_DESCRIPTION_MAX = 4096;
 const FIELD_NAME_MAX = 256;
 const FIELD_VALUE_MAX = 1024;
 const MAX_RATE_RETRIES = 3;
+/**
+ * Total 429 waiting allowed for one interaction call. The token lives 15 minutes; a reply that late is worthless,
+ * and a sleeping call holds the work that follows. Over the budget the 429 is thrown instead of slept.
+ */
+const INTERACTION_MAX_WAIT_MS = 60_000;
 const FLAG_EPHEMERAL = 64;
 
 type Rec = Record<string, unknown>;
@@ -141,6 +146,8 @@ export type DiscordRestOptions = {
 	fetch?: Fetch;
 	sleep?: (ms: number) => Promise<void>;
 	timeoutMs?: number;
+	/** Cap on the summed 429 waits of one interaction-webhook call (default 60 s). */
+	interactionMaxWaitMs?: number;
 };
 
 export class DiscordRest implements DiscordApi {
@@ -149,6 +156,7 @@ export class DiscordRest implements DiscordApi {
 	readonly #fetch: Fetch;
 	readonly #sleep: (ms: number) => Promise<void>;
 	readonly #timeoutMs: number;
+	readonly #interactionMaxWaitMs: number;
 
 	constructor(options: DiscordRestOptions) {
 		this.#botToken = options.botToken;
@@ -156,6 +164,7 @@ export class DiscordRest implements DiscordApi {
 		this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
 		this.#sleep = options.sleep ?? ((ms) => Bun.sleep(ms));
 		this.#timeoutMs = options.timeoutMs ?? 10_000;
+		this.#interactionMaxWaitMs = options.interactionMaxWaitMs ?? INTERACTION_MAX_WAIT_MS;
 	}
 
 	async getChannel(channelId: string): Promise<ChannelInfo> {
@@ -217,7 +226,7 @@ export class DiscordRest implements DiscordApi {
 	}
 
 	#bot(method: string, path: string, body?: unknown): Promise<unknown> {
-		return this.#request(method, path, path, true, body);
+		return this.#request(method, path, path, true, Number.POSITIVE_INFINITY, body);
 	}
 
 	/** Interaction webhook routes authenticate by the token in the path; the token never reaches an error. */
@@ -228,6 +237,7 @@ export class DiscordRest implements DiscordApi {
 			`${base}/${encodeURIComponent(token)}${suffix}`,
 			`${base}/:token${suffix}`,
 			false,
+			this.#interactionMaxWaitMs,
 			body,
 		);
 	}
@@ -237,8 +247,10 @@ export class DiscordRest implements DiscordApi {
 		path: string,
 		route: string,
 		bot: boolean,
+		maxWaitMs: number,
 		body?: unknown,
 	): Promise<unknown> {
+		let waited = 0;
 		for (let attempt = 0; ; attempt++) {
 			let res: Response;
 			let text: string;
@@ -268,8 +280,13 @@ export class DiscordRest implements DiscordApi {
 			}
 			if (res.status === 429 && attempt < MAX_RATE_RETRIES) {
 				const wait = isRecord(parsed) ? parsed.retry_after : undefined;
-				await this.#sleep(typeof wait === 'number' ? Math.ceil(wait * 1000) : 1000);
-				continue;
+				const ms = typeof wait === 'number' ? Math.ceil(wait * 1000) : 1000;
+				// Over the budget, fall through: the 429 below is thrown instead of slept.
+				if (waited + ms <= maxWaitMs) {
+					waited += ms;
+					await this.#sleep(ms);
+					continue;
+				}
 			}
 			if (!res.ok) {
 				const code = isRecord(parsed) && typeof parsed.code === 'number' ? parsed.code : null;

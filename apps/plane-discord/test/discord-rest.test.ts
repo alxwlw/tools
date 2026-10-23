@@ -295,6 +295,43 @@ describe('DiscordRest: ошибки и 429', () => {
 		expect(calls).toHaveLength(4);
 	});
 
+	test('interaction-вызов: retry_after сверх бюджета не спится — сразу DiscordApiError 429', async () => {
+		for (const call of [
+			(r: DiscordRest) => r.editOriginal(TOKEN, msg),
+			(r: DiscordRest) => r.followup(TOKEN, msg),
+			(r: DiscordRest) => r.deleteOriginal(TOKEN),
+		]) {
+			const { calls, sleeps, rest } = stub([{ status: 429, body: { retry_after: 900 } }]);
+			const err = await failure(call(rest));
+			expect(err).toBeInstanceOf(DiscordApiError);
+			expect((err as DiscordApiError).status).toBe(429);
+			expect(sleeps).toEqual([]);
+			expect(calls).toHaveLength(1);
+		}
+	});
+
+	test('interaction-вызов: бюджет — сумма ожиданий; в пределах 60 с спим, сверх — бросаем', async () => {
+		const { calls, sleeps, rest } = stub([
+			{ status: 429, body: { retry_after: 30 } },
+			{ status: 429, body: { retry_after: 30 } },
+			{ status: 429, body: { retry_after: 0.001 } },
+		]);
+		const err = await failure(rest.editOriginal(TOKEN, msg));
+		expect((err as DiscordApiError).status).toBe(429);
+		// 30 s + 30 s is exactly the budget and is slept; one more millisecond is not.
+		expect(sleeps).toEqual([30_000, 30_000]);
+		expect(calls).toHaveLength(3);
+	});
+
+	test('бот-вызов: длинный retry_after по-прежнему спится (бюджет только у interaction)', async () => {
+		const { sleeps, rest } = stub([
+			{ status: 429, body: { retry_after: 900 } },
+			{ status: 200, body: { id: 'm1' } },
+		]);
+		expect(await rest.sendMessage('c1', msg)).toEqual({ id: 'm1' });
+		expect(sleeps).toEqual([900_000]);
+	});
+
 	test('403 с code 50007 → DiscordApiError status 403, code 50007, без тела в сообщении', async () => {
 		const { rest } = stub([
 			{
