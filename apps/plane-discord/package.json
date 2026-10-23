@@ -4,6 +4,9 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"start": "bun src/index.ts",
+		"register-commands": "bun scripts/register-commands.ts",
+		"list-channels": "bun scripts/list-channels.ts",
 		"capture": "bun scripts/capture.ts"
 	},
 	"devDependencies": {
