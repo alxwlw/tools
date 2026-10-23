@@ -103,6 +103,24 @@ describe('createRuntime: кэши', () => {
 	});
 });
 
+describe('createRuntime: часы по умолчанию', () => {
+	test('без now кэш живёт по настоящему времени: два чтения — один запрос', async () => {
+		let projectsFetched = 0;
+		const runtime = createRuntime(configOf().tenants[0]!, {
+			planeUrl: 'https://plane.example.com',
+			fetch: async (url) => {
+				const { pathname } = new URL(url);
+				if (pathname === '/auth/o/token/') return json({ access_token: 't', expires_in: 36_000 });
+				projectsFetched++;
+				return json({ results: [row('a')], next_page_results: false });
+			},
+		});
+		await runtime.projects();
+		await runtime.projects();
+		expect(projectsFetched).toBe(1);
+	});
+});
+
 describe('createRuntime: projectsCached и warm', () => {
 	test('projectsCached: null на холодном старте, после загрузки — список, после сбоя обновления — прежний', async () => {
 		const w = world();

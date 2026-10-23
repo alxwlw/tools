@@ -17,14 +17,13 @@ export function setupRedirect(config: Config, url: URL): Response {
 	const tenant = config.tenants.find((t) => t.id === id);
 	if (tenant === undefined) return text('not found', 404);
 	// Plane v3.3.0 answers invalid_scope without `scope` (design §10); %20, not '+', between scopes.
-	const query = [
+	const params: Array<[string, string]> = [
 		['client_id', tenant.auth.clientId],
 		['response_type', 'code'],
 		['redirect_uri', `${config.publicUrl}/plane/oauth/callback`],
 		['scope', PLANE_SCOPES.join(' ')],
-	]
-		.map(([key, value]) => `${key}=${encodeURIComponent(value ?? '')}`)
-		.join('&');
+	];
+	const query = params.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
 	return new Response(null, {
 		status: 302,
 		headers: { location: `${config.planeUrl}/auth/o/authorize-app/?${query}` },

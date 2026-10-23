@@ -165,11 +165,11 @@ export function startService(
 	// Startup waits for no network: warm-up (projects, the bot user) runs in the background and may fail.
 	const warm = () => {
 		for (const [tenant, runtime] of runtimes)
-			runtime
-				.warm()
-				.catch((error: unknown) =>
+			runtime.warm().then(
+				() => log({ event: 'warm.ok', tenant }),
+				(error: unknown) =>
 					log({ event: 'warm.failed', level: 'warn', tenant, error: errorName(error) }),
-				);
+			);
 	};
 	warm();
 	const cancel = [
@@ -203,24 +203,36 @@ export function startService(
 		idle: () => queue.idle(),
 		async stop() {
 			for (const stopTimer of cancel) stopTimer();
-			await server.stop();
+			// Not awaited: it resolves only when keep-alive connections close. New connections are refused at once.
+			server.stop().catch(() => {});
 			// Jobs in flight get a few seconds; the rest is lost (the queue is in memory by design).
-			await Promise.race([queue.idle(), Bun.sleep(DRAIN_MS)]);
+			let giveUp: ReturnType<typeof setTimeout> | undefined;
+			await Promise.race([
+				queue.idle(),
+				new Promise<void>((resolve) => {
+					giveUp = setTimeout(resolve, DRAIN_MS);
+				}),
+			]);
+			clearTimeout(giveUp);
 			store.close();
 		},
 	};
 }
 
-function main(): void {
-	// A rejection nobody awaits must not kill the process: log it and carry on.
-	const sink = jsonLog();
-	process.on('unhandledRejection', (reason) => {
+/** The handler for `unhandledRejection`: logs the error class and carries on; a broken log changes nothing. */
+export function logUnhandled(sink: Log): (reason: unknown) => void {
+	return (reason) => {
 		try {
 			sink({ event: 'unhandled.rejection', level: 'error', error: errorName(reason) });
 		} catch {
 			// nothing else to do with a broken log
 		}
-	});
+	};
+}
+
+function main(): void {
+	// A rejection nobody awaits must not kill the process.
+	process.on('unhandledRejection', logUnhandled(jsonLog()));
 	let service: Service;
 	try {
 		service = startService(process.env);

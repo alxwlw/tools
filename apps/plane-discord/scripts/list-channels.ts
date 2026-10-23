@@ -12,5 +12,7 @@ const discord = new DiscordRest({
 for (const tenant of config.tenants) {
 	console.log(`# ${tenant.id}`);
 	for (const channel of await discord.listGuildChannels(tenant.guildId))
-		console.log(`${channel.id}\t${channel.type}\t${channel.parentId ?? '-'}\t${channel.name ?? ''}`);
+		console.log(
+			`${channel.id}\t${channel.type}\t${channel.parentId ?? '-'}\t${channel.name ?? ''}`,
+		);
 }
