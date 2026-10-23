@@ -280,7 +280,8 @@ export class DiscordRest implements DiscordApi {
 			}
 			if (res.status === 429 && attempt < MAX_RATE_RETRIES) {
 				const wait = isRecord(parsed) ? parsed.retry_after : undefined;
-				const ms = typeof wait === 'number' ? Math.ceil(wait * 1000) : 1000;
+				// A negative or NaN value would credit the budget or poison the sum: clamp it to no wait.
+				const ms = typeof wait === 'number' ? Math.max(0, Math.ceil(wait * 1000) || 0) : 1000;
 				// Over the budget, fall through: the 429 below is thrown instead of slept.
 				if (waited + ms <= maxWaitMs) {
 					waited += ms;

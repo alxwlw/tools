@@ -323,6 +323,18 @@ describe('DiscordRest: ошибки и 429', () => {
 		expect(calls).toHaveLength(3);
 	});
 
+	test('interaction-вызов: отрицательный retry_after = ждать 0 и не пополняет бюджет', async () => {
+		const { calls, sleeps, rest } = stub([
+			{ status: 429, body: { retry_after: -100 } },
+			{ status: 429, body: { retry_after: 61 } },
+		]);
+		const err = await failure(rest.editOriginal(TOKEN, msg));
+		expect((err as DiscordApiError).status).toBe(429);
+		// Unclamped, -100 s would credit the budget and the 61 s wait would be slept.
+		expect(sleeps).toEqual([0]);
+		expect(calls).toHaveLength(2);
+	});
+
 	test('бот-вызов: длинный retry_after по-прежнему спится (бюджет только у interaction)', async () => {
 		const { sleeps, rest } = stub([
 			{ status: 429, body: { retry_after: 900 } },
