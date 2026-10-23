@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 
 import { type Config, describeTenants, loadConfig } from './config.ts';
@@ -20,7 +21,11 @@ const PRUNE_MS = 24 * 60 * MINUTE_MS;
 const KEEP_SEEN_MS = 7 * 24 * 60 * MINUTE_MS;
 /** Above MAX_PLANE_BODY, so an oversized delivery gets our 200 + log line instead of Bun's own 413. */
 const MAX_REQUEST_BODY = 8 * 1024 * 1024;
-/** Seconds Bun waits on an idle connection: a stalled body must not hold a request for ever. */
+/**
+ * Seconds Bun waits on an idle connection: a stalled body must not hold a request for ever.
+ * Measured on Bun 1.4.2: body bytes do not reset the timer, so even a slow drip is cut after
+ * about IDLE_TIMEOUT_S + 2 s; no separate body-read deadline is needed.
+ */
 const IDLE_TIMEOUT_S = 10;
 const DRAIN_MS = 10_000;
 
@@ -38,9 +43,17 @@ export type ServiceOptions = {
 	/** Tests: 0 picks a free port. */
 	listenPort?: number;
 	now?: () => number;
+	/** Shutdown wait for jobs in flight, ms (default 10 s). */
+	drainMs?: number;
 	/** Runs `tick` every `ms`; returns the canceller. Tests drive the ticks by hand. */
 	every?: (tick: () => void, ms: number) => () => void;
 };
+
+/** The production `every`: a real interval; the returned function cancels it. */
+export function intervalEvery(tick: () => void, ms: number): () => void {
+	const timer = setInterval(tick, ms);
+	return () => clearInterval(timer);
+}
 
 /** The error's class name is all a log line gets: messages of failed calls may quote payloads. */
 const errorName = (error: unknown): string => {
@@ -67,12 +80,7 @@ export function startService(
 		}
 	};
 	const now = options.now ?? Date.now;
-	const every =
-		options.every ??
-		((tick, ms) => {
-			const timer = setInterval(tick, ms);
-			return () => clearInterval(timer);
-		});
+	const every = options.every ?? intervalEvery;
 	const startedAt = now();
 	const store = new Store(config.dbPath);
 
@@ -131,14 +139,6 @@ export function startService(
 		projectsCached: (tenantId) => runtimes.get(tenantId)?.projectsCached() ?? null,
 		log,
 		now,
-		// A timer, not a microtask: the work must start after the type 5 response is written.
-		defer: (work) => {
-			setTimeout(() => {
-				work().catch((error: unknown) =>
-					log({ event: 'ix.defer_failed', level: 'error', error: errorName(error) }),
-				);
-			}, 0);
-		},
 	});
 	const handler = createHandler({
 		tenantsByWorkspace: new Map(config.tenants.map((t) => [t.workspaceId, t])),
@@ -210,7 +210,7 @@ export function startService(
 			await Promise.race([
 				queue.idle(),
 				new Promise<void>((resolve) => {
-					giveUp = setTimeout(resolve, DRAIN_MS);
+					giveUp = setTimeout(resolve, options.drainMs ?? DRAIN_MS);
 				}),
 			]);
 			clearTimeout(giveUp);
@@ -230,10 +230,19 @@ export function logUnhandled(sink: Log): (reason: unknown) => void {
 	};
 }
 
-function main(): void {
+/** Wires the process-level handlers: a stray rejection is logged, SIGTERM and SIGINT shut down. */
+export function installProcessHandlers(proc: EventEmitter, sink: Log, shutdown: () => void): void {
 	// A rejection nobody awaits must not kill the process.
-	process.on('unhandledRejection', logUnhandled(jsonLog()));
-	let service: Service;
+	proc.on('unhandledRejection', logUnhandled(sink));
+	proc.on('SIGTERM', shutdown);
+	proc.on('SIGINT', shutdown);
+}
+
+function main(): void {
+	let service: Service | undefined;
+	installProcessHandlers(process, jsonLog(), () => {
+		(service?.stop() ?? Promise.resolve()).catch(() => {}).finally(() => process.exit(0));
+	});
 	try {
 		service = startService(process.env);
 	} catch (error) {
@@ -241,14 +250,6 @@ function main(): void {
 		process.stderr.write(`${error instanceof Error ? error.message : 'startup failed'}\n`);
 		process.exit(1);
 	}
-	const shutdown = () => {
-		service
-			.stop()
-			.catch(() => {})
-			.finally(() => process.exit(0));
-	};
-	process.on('SIGTERM', shutdown);
-	process.on('SIGINT', shutdown);
 }
 
 if (import.meta.main) main();

@@ -1,9 +1,16 @@
 // The composition root: every module wired as in production, with Plane and Discord replaced at fetch level.
 import { createHmac } from 'node:crypto';
 import { connect } from 'node:net';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { afterEach, describe, expect, jest, test } from 'bun:test';
 
-import { logUnhandled, type Service, startService } from '../src/index.ts';
+import {
+	installProcessHandlers,
+	intervalEvery,
+	logUnhandled,
+	type Service,
+	startService,
+} from '../src/index.ts';
 import { CREATE_COMMAND } from '../src/discord/commands.ts';
 import { commandPayload, makeSigner, submitPayload } from './discord-harness.ts';
 import { fixture } from './fixtures.ts';
@@ -552,6 +559,86 @@ describe('startService: остановка', () => {
 		gate.resolve();
 		await stopping;
 		expect(messages(w)).toHaveLength(1);
+	});
+});
+
+describe('startService: срок остановки', () => {
+	test('задача висит: stop() с drainMs отпускает, порт закрыт, store закрыт', async () => {
+		const w = world();
+		const gate = Promise.withResolvers<void>();
+		w.behaviour.gate = gate.promise;
+		Object.assign(w.options, { drainMs: 20 });
+		const { service, url } = start(w);
+		running.pop();
+		await post(url(''), delivery('00000000-0000-4000-8000-0000000000a1'));
+		await w.reachedGate;
+		await service.stop();
+		await new Promise<void>((resolve, reject) => {
+			const socket = connect(service.port, '127.0.0.1');
+			socket.on('connect', () => {
+				socket.destroy();
+				reject(new Error('the port still accepts connections'));
+			});
+			socket.on('error', () => resolve());
+		});
+		// A closed store throws on use: the prune tick, called after stop, logs prune.failed.
+		w.ticks[2]!.tick();
+		expect(w.entries().find((e) => e.event === 'prune.failed')).toMatchObject({ level: 'error' });
+		gate.resolve();
+		await service.idle();
+	});
+});
+
+describe('startService: чистая остановка', () => {
+	test('очередь пуста: таймер срока снят, ничего не висит', async () => {
+		jest.useFakeTimers();
+		try {
+			const { service } = start();
+			running.pop();
+			await service.stop();
+			expect(jest.getTimerCount()).toBe(0);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+});
+
+describe('intervalEvery', () => {
+	test('тикает каждые ms, отмена останавливает', () => {
+		jest.useFakeTimers();
+		try {
+			let ticks = 0;
+			const cancel = intervalEvery(() => void ticks++, 5);
+			jest.advanceTimersByTime(4);
+			expect(ticks).toBe(0);
+			jest.advanceTimersByTime(6);
+			expect(ticks).toBe(2);
+			cancel();
+			jest.advanceTimersByTime(50);
+			expect(ticks).toBe(2);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+});
+
+describe('installProcessHandlers', () => {
+	test('rejection логируется, процесс жив; SIGTERM и SIGINT вызывают shutdown', () => {
+		const proc = new EventEmitter();
+		const lines: unknown[] = [];
+		let shutdowns = 0;
+		installProcessHandlers(
+			proc,
+			(entry) => lines.push(entry),
+			() => void shutdowns++,
+		);
+		proc.emit('unhandledRejection', new RangeError('x'));
+		expect(lines).toEqual([{ event: 'unhandled.rejection', level: 'error', error: 'RangeError' }]);
+		expect(shutdowns).toBe(0);
+		proc.emit('SIGTERM');
+		expect(shutdowns).toBe(1);
+		proc.emit('SIGINT');
+		expect(shutdowns).toBe(2);
 	});
 });
 
