@@ -45,7 +45,12 @@ const ENV = {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-type Discord = { method: string; path: string; body: Record<string, unknown> | null };
+type Discord = {
+	method: string;
+	path: string;
+	body: Record<string, unknown> | null;
+	authorization: string | null;
+};
 function world() {
 	const discord: Discord[] = [];
 	const planeHits: string[] = [];
@@ -67,6 +72,7 @@ function world() {
 				method: init.method ?? 'GET',
 				path,
 				body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
+				authorization: new Headers(init.headers).get('authorization'),
 			});
 			if (path === `/channels/${CHANNEL}` && init.method === 'GET')
 				return behaviour.channelStatus === 200
@@ -287,6 +293,57 @@ describe('startService', () => {
 		expect(res.status).toBe(200);
 		await service.idle();
 		expect(messages(w)).toHaveLength(1);
+	});
+});
+
+describe('startService: учётные данные и журнал', () => {
+	test('Discord: бот-токен в заголовке, id приложения в пути webhook; warm.ok с тенантом; config возвращается', async () => {
+		const { w, service, url } = start();
+		await w.until(() => w.entries().some((e) => e.event === 'warm.ok'));
+		expect(w.entries().find((e) => e.event === 'warm.ok')).toMatchObject({ tenant: 'acme' });
+		expect(service.config.tenants.map((t) => t.id)).toEqual(['acme']);
+		const opened = await ask(url(''), command(CHANNEL, '800000000000000010'));
+		await ask(
+			url(''),
+			submitPayload({
+				id: '800000000000000011',
+				guildId: GUILD,
+				customId: opened.body.data.custom_id as string,
+				texts: { title: 'Починить вход' },
+			}),
+		);
+		await w.until(() => w.entries().some((e) => e.event === 'ix.done'));
+		const sent = messages(w)[0]!;
+		expect(sent.authorization).toBe('Bot bot-token-value');
+		const hook = w.discord.find((c) => c.method === 'DELETE')!;
+		expect(hook.path).toBe(
+			'/webhooks/123456789012345678/tok-800000000000000011/messages/@original',
+		);
+		expect(hook.authorization).toBeNull();
+	});
+
+	test('событие по проекту без канала → notify.skip в журнале сервиса', async () => {
+		const { w, service, url } = start();
+		const body = structuredClone(fixture('plane-app-workitem-created').body) as {
+			data: { project: string };
+		};
+		body.data.project = '00000000-0000-4000-8000-0000000000ff';
+		const raw = JSON.stringify(body);
+		const req = Object.assign(
+			new Request('http://x/plane/webhook', {
+				method: 'POST',
+				body: raw,
+				headers: { 'x-plane-event': 'issue', 'x-plane-signature': sign(raw) },
+			}),
+			{ raw },
+		);
+		await post(url(''), req);
+		await service.idle();
+		expect(w.entries().find((e) => e.event === 'notify.skip')).toMatchObject({
+			tenant: 'acme',
+			reason: 'no_effect',
+		});
+		expect(messages(w)).toHaveLength(0);
 	});
 });
 
