@@ -678,6 +678,25 @@ describe('доставки через очередь', () => {
 		expect(queueLogs).toEqual([expect.objectContaining({ event: 'job.retry', attempt: 1 })]);
 	});
 
+	test('транспортный сбой (status 0) на openDm один раз → повтор, DM доставлен', async () => {
+		const { notify, discord, queue, queueLogs } = setupQueue([]);
+		let failed = false;
+		const open = discord.openDm.bind(discord);
+		discord.openDm = async (id) => {
+			if (!failed) {
+				failed = true;
+				throw new DiscordApiError(0, 'POST', '/users/@me/channels');
+			}
+			return open(id);
+		};
+		for (const d of await notify(created({ assignees: [BOB] }))) queue.push(d.label, d.run);
+		await queue.idle();
+		expect(failed).toBe(true);
+		expect(sent(discord)).toHaveLength(1);
+		expect(sent(discord)[0]?.[0]).toBe(`dm-${D_BOB}`);
+		expect(queueLogs).toEqual([expect.objectContaining({ event: 'job.retry', attempt: 1 })]);
+	});
+
 	test('метки доставок: id события и адресат, без названия и текста', async () => {
 		const { notify } = setupQueue([route(TEXT)]);
 		const labels = (await notify(created({ assignees: [BOB] }))).map((d) => d.label);
@@ -860,6 +879,74 @@ describe('createNotifier: agent.mention', () => {
 			reason: 'unknown_project',
 			eventKey: 'agent_run:r1',
 		});
+	});
+});
+
+describe('hiddenProjects: проект скрыт полностью', () => {
+	const hidden = (channels: ChannelRoute[]) =>
+		setup(channels, { ...tenantOf(channels), hiddenProjects: [PROJECT] });
+	const skipEntry = (eventKey: string) => ({
+		event: 'notify.skip',
+		level: undefined,
+		tenant: 'initech',
+		reason: 'hidden_project',
+		eventKey,
+	});
+
+	test('created: ни канала, ни DM, notify.skip hidden_project, запросов Plane нет', async () => {
+		const { notify, discord, plane, logs } = hidden([route(TEXT)]);
+		expect(
+			await notify(created({ assignees: [BOB], descriptionHtml: mentionHtml(ALICE) })),
+		).toEqual([]);
+		expect(discord.calls).toEqual([]);
+		expect(plane.moduleCalls).toEqual([]);
+		expect(logs).toEqual([skipEntry('issue.created:x')]);
+	});
+
+	test('updated: закрытие, новый исполнитель и упоминание — ничего', async () => {
+		const { notify, discord, logs } = hidden([route(TEXT)]);
+		expect(await notify(updated({ stateId: S_STARTED }, { stateId: S_DONE }))).toEqual([]);
+		expect(await notify(updated({ assignees: [] }, { assignees: [BOB] }))).toEqual([]);
+		expect(
+			await notify(updated({ descriptionHtml: null }, { descriptionHtml: mentionHtml(BOB) })),
+		).toEqual([]);
+		expect(discord.calls).toEqual([]);
+		expect(logs.map((l) => l.reason)).toEqual([
+			'hidden_project',
+			'hidden_project',
+			'hidden_project',
+		]);
+	});
+
+	test('comment.created с упоминанием: DM нет, getComment не вызывается', async () => {
+		const { notify, discord, logs } = hidden([]);
+		expect(await notify(comment(null))).toEqual([]);
+		expect(await notify(comment(mentionHtml(BOB)))).toEqual([]);
+		expect(discord.calls).toEqual([]);
+		expect(logs).toEqual([skipEntry('comment.created:c1'), skipEntry('comment.created:c1')]);
+	});
+
+	test('agent.mention: ни одного вызова Discord, run получает нейтральный ответ без каналов, лог без текстов', async () => {
+		const { notify, discord, plane, logs } = hidden([route(TEXT)]);
+		const deliveries = await notify(agentMention());
+		expect(deliveries).toHaveLength(1);
+		await runAll(deliveries);
+		expect(discord.calls).toEqual([]);
+		expect(plane.activities).toEqual([
+			{ runId: ID(300), body: 'Пересылка в Discord для этого проекта отключена' },
+		]);
+		expect(JSON.stringify(plane.activities)).not.toContain(TEXT);
+		expect(logs).toEqual([skipEntry('agent_run:r1')]);
+	});
+
+	test('другой проект того же тенанта не затронут', async () => {
+		const channels = [route(TEXT)];
+		const { notify, discord } = setup(channels, {
+			...tenantOf(channels),
+			hiddenProjects: [OTHER_PROJECT],
+		});
+		await runAll(await notify(created()));
+		expect(sent(discord).map(([c]) => c)).toEqual([TEXT]);
 	});
 });
 

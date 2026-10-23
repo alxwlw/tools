@@ -109,11 +109,14 @@ function describe(err: unknown): string {
 	}
 }
 
-/** true: an error with numeric `status` ≥ 500 or 429; a fetch TypeError; a TimeoutError/AbortError. */
+/**
+ * true: an error with numeric `status` 0 (a transport failure or timeout that rest.ts wrapped), ≥ 500 or 429;
+ * a fetch TypeError; a TimeoutError/AbortError.
+ */
 export function isRetryable(err: unknown): boolean {
 	if (err instanceof TypeError) return true;
 	if (typeof err !== 'object' || err === null) return false;
 	const { status, name } = err as { status?: unknown; name?: unknown };
-	if (typeof status === 'number') return status >= 500 || status === 429;
+	if (typeof status === 'number') return status === 0 || status >= 500 || status === 429;
 	return name === 'TimeoutError' || name === 'AbortError';
 }

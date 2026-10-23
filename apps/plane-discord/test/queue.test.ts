@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { DiscordApiError } from '../src/discord/rest.ts';
 import { isRetryable, SerialQueue, type QueueLog } from '../src/queue.ts';
 
 type Entry = Parameters<QueueLog>[0];
@@ -276,6 +277,26 @@ describe('SerialQueue: размер и ожидание', () => {
 		release();
 		await waiting;
 		expect(queue.size).toBe(0);
+	});
+});
+
+describe('транспортный сбой Discord (status 0)', () => {
+	test('DiscordApiError(0) — повторяемая', () => {
+		expect(isRetryable(new DiscordApiError(0, 'POST', '/x'))).toBe(true);
+	});
+
+	test('задача бросает DiscordApiError(0) один раз, затем успех — выполнена дважды, задержка 1000', async () => {
+		const { queue, logs, sleeps } = setup();
+		let calls = 0;
+		queue.push('blip', async () => {
+			calls++;
+			if (calls === 1) throw new DiscordApiError(0, 'POST', '/x');
+		});
+		await queue.idle();
+		expect(calls).toBe(2);
+		expect(sleeps).toEqual([1000]);
+		expect(logs).toHaveLength(1);
+		expect(logs[0]).toMatchObject({ event: 'job.retry', label: 'blip', attempt: 1 });
 	});
 });
 

@@ -46,6 +46,8 @@ const UNKNOWN_ACTOR = 'кто-то';
 const QUOTE_MAX = 1000;
 const NO_CHANNEL = 'Канал для проекта не настроен';
 const NO_PROJECT = 'Не удалось отправить в Discord: проект не найден в Plane';
+// Neutral on purpose: no channel names, no hint of what the tenant's map holds.
+const HIDDEN = 'Пересылка в Discord для этого проекта отключена';
 
 /** Module routes win; without one, the project's routes with moduleId null. Unique by channelId. */
 export function routesFor(
@@ -342,6 +344,9 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			label: `${event.eventKey}→run:${event.runId}`,
 			run: () => rt.plane.createRunActivity(event.runId, body),
 		});
+		// A hidden project is hidden entirely: nothing goes to Discord, the run still gets a short neutral answer.
+		if (rt.tenant.hiddenProjects.includes(event.projectId))
+			return (skip(event, 'hidden_project'), [answer(HIDDEN)]);
 		const channels = await channelsFor(rt, event.projectId, event.workItemId, 'mention');
 		if (channels.length === 0) return [answer(NO_CHANNEL)];
 		const project = (await rt.projects()).find((p) => p.id === event.projectId);
@@ -385,6 +390,10 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 	return async (event) => {
 		const rt = deps.runtimes.get(event.tenant);
 		if (!rt) return (skip(event, 'unknown_tenant', 'error'), []);
+		// Hidden projects (the owner's decision 2026-10-23): no topics, no DMs, no mention forwarding.
+		const projectId = 'item' in event ? event.item.projectId : event.projectId;
+		if (event.kind !== 'agent.mention' && rt.tenant.hiddenProjects.includes(projectId))
+			return (skip(event, 'hidden_project'), []);
 		switch (event.kind) {
 			case 'workitem.created':
 				return onCreated(rt, event);
