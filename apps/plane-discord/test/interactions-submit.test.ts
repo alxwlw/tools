@@ -170,7 +170,9 @@ describe('createInteractionHandler: отправка формы «создать
 		expect(
 			(fresh.discord.callsOf('editOriginal')[0]?.[1] as { content: string }).content,
 		).toContain('Уже есть:');
-		expect(fresh.store.getDiscordItem('initech', MSG)?.workItemId).toBe([...w.plane.items.keys()][0]!);
+		expect(fresh.store.getDiscordItem('initech', MSG)?.workItemId).toBe(
+			[...w.plane.items.keys()][0]!,
+		);
 	});
 
 	test('задача из store удалена в Plane (404) → создаётся заново', async () => {

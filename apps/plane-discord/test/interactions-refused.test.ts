@@ -74,7 +74,13 @@ describe('createInteractionHandler: ix.refused', () => {
 			const res = await w.ask(c.payload(id));
 			expect(res.body.type).toBe(4);
 			expect(w.logs).toEqual([
-				{ event: 'ix.refused', level: 'warn', tenant: 'initech', interaction: id, reason: c.reason },
+				{
+					event: 'ix.refused',
+					level: 'warn',
+					tenant: 'initech',
+					interaction: id,
+					reason: c.reason,
+				},
 			]);
 			expect(JSON.stringify(w.logs)).not.toContain(SECRET_TEXT);
 		});

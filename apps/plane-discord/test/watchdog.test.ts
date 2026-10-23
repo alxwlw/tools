@@ -94,7 +94,9 @@ describe('checkSilence', () => {
 	});
 
 	test('serviceChannelId null → только лог', async () => {
-		const { store, check, discord, logs } = setup([tenantOf('initech', { serviceChannelId: null })]);
+		const { store, check, discord, logs } = setup([
+			tenantOf('initech', { serviceChannelId: null }),
+		]);
 		store.touchEvent('initech', 0);
 		await check(80 * HOUR);
 		expect(discord.calls).toEqual([]);
