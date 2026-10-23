@@ -6,6 +6,7 @@ import type { PlaneEvent } from '../src/plane/webhook.ts';
 import { createHandler, MAX_PLANE_BODY } from '../src/server.ts';
 import { Store } from '../src/store.ts';
 import { fixture } from './fixtures.ts';
+import { configOf } from './config-fixture.ts';
 
 const WORKSPACE = '00000000-0000-4000-8000-000000000002';
 const SECRET = 'test-secret';
@@ -405,6 +406,44 @@ describe('прочие маршруты', () => {
 		expect((await get('/nope')).status).toBe(404);
 		expect((await get('/plane/webhook/')).status).toBe(404);
 		expect(logs).toEqual([]);
+	});
+});
+
+describe('маршруты установки приложения', () => {
+	const build = (withConfig: boolean) => {
+		const logs: LogEntry[] = [];
+		const handler = createHandler({
+			tenantsByWorkspace: new Map(),
+			store: new Store(':memory:'),
+			enqueue: () => {},
+			config: withConfig ? configOf() : undefined,
+			log: (e) => logs.push(e),
+		});
+		return { handler, logs };
+	};
+
+	test('GET /plane/setup и /plane/oauth/callback доходят до своих обработчиков', async () => {
+		const { handler, logs } = build(true);
+		const setup = await handler(new Request('http://x/plane/setup?tenant=acme'));
+		expect(setup.status).toBe(302);
+		expect(setup.headers.get('location')).toContain('/auth/o/authorize-app/?client_id=');
+		const missing = await handler(new Request('http://x/plane/setup?tenant=nobody'));
+		expect(missing.status).toBe(404);
+		const callback = await handler(
+			new Request('http://x/plane/oauth/callback?app_installation_id=inst-1'),
+		);
+		expect(callback.status).toBe(200);
+		expect(await callback.text()).toBe('app_installation_id=inst-1\n');
+		expect(logs).toEqual([{ event: 'plane.installed', appInstallationId: 'inst-1' }]);
+	});
+
+	test('не GET → 405; без config маршруты не существуют → 404', async () => {
+		const { handler } = build(true);
+		for (const path of ['/plane/setup?tenant=acme', '/plane/oauth/callback?app_installation_id=i'])
+			expect((await handler(new Request(`http://x${path}`, { method: 'POST' }))).status).toBe(405);
+		const bare = build(false).handler;
+		for (const path of ['/plane/setup?tenant=acme', '/plane/oauth/callback?app_installation_id=i'])
+			expect((await bare(new Request(`http://x${path}`))).status).toBe(404);
 	});
 });
 

@@ -1,5 +1,6 @@
-import type { Tenant } from './config.ts';
+import type { Config, Tenant } from './config.ts';
 import type { Log } from './log.ts';
+import { oauthCallback, setupRedirect } from './plane/setup.ts';
 import {
 	BadDelivery,
 	deliveryWorkspace,
@@ -17,6 +18,8 @@ export type ServerDeps = {
 	enqueue: (event: PlaneEvent) => void;
 	/** POST /discord/interactions; absent → 404. Built by createInteractionHandler, which does its own signature check. */
 	interactions?: (req: Request) => Promise<Response>;
+	/** GET /plane/setup and /plane/oauth/callback; absent → 404. */
+	config?: Config;
 	log: Log;
 	now?: () => number;
 };
@@ -109,6 +112,14 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 	return async (req) => {
 		const path = new URL(req.url).pathname;
 		if (path === '/healthz') return ok();
+		if (
+			deps.config !== undefined &&
+			(path === '/plane/setup' || path === '/plane/oauth/callback')
+		) {
+			if (req.method !== 'GET') return new Response('method not allowed', { status: 405 });
+			const url = new URL(req.url);
+			return path === '/plane/setup' ? setupRedirect(deps.config, url) : oauthCallback(url, log);
+		}
 		const interactions = path === '/discord/interactions' ? deps.interactions : undefined;
 		if (path !== '/plane/webhook' && interactions === undefined)
 			return new Response('not found', { status: 404 });

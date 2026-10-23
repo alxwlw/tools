@@ -26,8 +26,9 @@ export type TenantRuntime = {
 	tenant: Tenant;
 	plane: PlaneApi;
 	users: UserMap;
-	projects: () => Promise<ProjectSummary[]>;
-	states: (projectId: string) => Promise<StateSummary[]>;
+	/** `refresh: true` bypasses a cached answer (the caller missed an id: a project or state created after the load). */
+	projects: (opts?: { refresh?: boolean }) => Promise<ProjectSummary[]>;
+	states: (projectId: string, opts?: { refresh?: boolean }) => Promise<StateSummary[]>;
 	members: () => Promise<MemberSummary[]>;
 };
 export type Delivery = { label: string; run: () => Promise<void> };
@@ -48,6 +49,15 @@ const NO_CHANNEL = 'Канал для проекта не настроен';
 const NO_PROJECT = 'Не удалось отправить в Discord: проект не найден в Plane';
 // Neutral on purpose: no channel names, no hint of what the tenant's map holds.
 const HIDDEN = 'Пересылка в Discord для этого проекта отключена';
+
+/** A project missing from the cached list may be new: ask again, past the cache, before giving up. */
+async function findProject(
+	rt: TenantRuntime,
+	projectId: string,
+): Promise<ProjectSummary | undefined> {
+	const hit = (await rt.projects()).find((p) => p.id === projectId);
+	return hit ?? (await rt.projects({ refresh: true })).find((p) => p.id === projectId);
+}
 
 /** Module routes win; without one, the project's routes with moduleId null. Unique by channelId. */
 export function routesFor(
@@ -218,7 +228,7 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			skip(event, 'no_effect');
 			return [];
 		}
-		const project = (await rt.projects()).find((p) => p.id === item.projectId);
+		const project = await findProject(rt, item.projectId);
 		if (!project) {
 			skip(event, 'unknown_project', 'error');
 			return [];
@@ -296,7 +306,9 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		// The parser sets exactly one of the three `previous` keys; none of them means the state field changed
 		// (old_value null → no previous state). Only a state change can close the item.
 		if (previous.assignees === undefined && previous.descriptionHtml === undefined) {
-			const states = await rt.states(item.projectId);
+			let states = await rt.states(item.projectId);
+			if (!states.some((s) => s.id === item.stateId))
+				states = await rt.states(item.projectId, { refresh: true });
 			const now = states.find((s) => s.id === item.stateId);
 			if (!now) return (skip(event, 'unknown_state', 'error'), []);
 			if (now.group === 'completed' || now.group === 'cancelled') {
@@ -349,7 +361,7 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			return (skip(event, 'hidden_project'), [answer(HIDDEN)]);
 		const channels = await channelsFor(rt, event.projectId, event.workItemId, 'mention');
 		if (channels.length === 0) return [answer(NO_CHANNEL)];
-		const project = (await rt.projects()).find((p) => p.id === event.projectId);
+		const project = await findProject(rt, event.projectId);
 		if (!project) return (skip(event, 'unknown_project', 'error'), [answer(NO_PROJECT)]);
 		const item = await rt.plane.getWorkItem(event.projectId, event.workItemId);
 		const key = workItemKey(project.identifier, item.sequenceId);
