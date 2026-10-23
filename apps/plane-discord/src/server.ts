@@ -15,6 +15,8 @@ export type ServerDeps = {
 	tenantsByWorkspace: ReadonlyMap<string, Tenant>;
 	store: Store;
 	enqueue: (event: PlaneEvent) => void;
+	/** POST /discord/interactions; absent → 404. Built by createInteractionHandler, which does its own signature check. */
+	interactions?: (req: Request) => Promise<Response>;
 	log: Log;
 	now?: () => number;
 };
@@ -22,7 +24,7 @@ export type ServerDeps = {
 const ok = () => new Response('ok', { status: 200 });
 
 /** Reads at most MAX_PLANE_BODY bytes; null when the body is larger (the stream is cancelled). */
-async function readBounded(req: Request): Promise<Uint8Array | null> {
+export async function readBounded(req: Request): Promise<Uint8Array | null> {
 	const declared = Number(req.headers.get('content-length'));
 	if (Number.isFinite(declared) && declared > MAX_PLANE_BODY) return null;
 	if (!req.body) return new Uint8Array();
@@ -107,8 +109,19 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 	return async (req) => {
 		const path = new URL(req.url).pathname;
 		if (path === '/healthz') return ok();
-		if (path !== '/plane/webhook') return new Response('not found', { status: 404 });
+		const interactions = path === '/discord/interactions' ? deps.interactions : undefined;
+		if (path !== '/plane/webhook' && interactions === undefined)
+			return new Response('not found', { status: 404 });
 		if (req.method !== 'POST') return new Response('method not allowed', { status: 405 });
+		if (interactions !== undefined) {
+			try {
+				return await interactions(req);
+			} catch {
+				// Discord needs a verdict, not a stack; the handler logs its own failures.
+				log({ event: 'ix.rejected', level: 'error', reason: 'internal' });
+				return new Response('internal error', { status: 500 });
+			}
+		}
 		try {
 			return await webhook(req);
 		} catch {
