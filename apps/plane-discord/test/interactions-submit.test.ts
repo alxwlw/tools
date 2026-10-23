@@ -403,15 +403,17 @@ describe('createInteractionHandler: отправка формы «создать
 		expect((await submitCreate(w, last.customId, { title: 'X' })).body.type).toBe(5);
 	});
 
-	test('просроченные формы вытесняются при открытии новой', async () => {
+	test('просроченная форма не принимается, когда после неё открыли новую; новая принимается', async () => {
 		const w = await setup();
 		const old = await open(w);
 		w.advance(15 * 60_000 + 1);
-		await open(w);
-		// A fresh form is accepted; the stale one is gone either way.
+		const fresh = await open(w);
+		// Dropping an expired form from the map is not observable: it is always the oldest, so a full
+		// map evicts it first anyway. What a user sees is that only the fresh form is accepted.
 		expect((await submitCreate(w, old.customId, { title: 'X' })).body.data.content).toBe(
 			'Форма устарела, вызови команду ещё раз.',
 		);
+		expect((await submitCreate(w, fresh.customId, { title: 'X' })).body.type).toBe(5);
 	});
 
 	test('без defer в зависимостях работа всё равно выполняется (прод: fire and log)', async () => {
@@ -419,8 +421,41 @@ describe('createInteractionHandler: отправка формы «создать
 		const { customId } = await open(w);
 		const res = await submitCreate(w, customId, { title: 'Починить вход' });
 		expect(res.body.type).toBe(5);
-		for (let i = 0; i < 200 && w.discord.callsOf('deleteOriginal').length === 0; i++)
-			await Promise.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(w.plane.createdItems).toHaveLength(1);
+	});
+
+	test('без defer работа стартует после того, как ответ type 5 отдан, не раньше', async () => {
+		const w = await setup({ withDefer: false });
+		const { customId } = await open(w);
+		const calls = w.planeCalls.length;
+		const res = await submitCreate(w, customId, { title: 'Починить вход' });
+		expect(res.body.type).toBe(5);
+		expect(w.planeCalls.length).toBe(calls);
+		expect(w.discord.callsOf('editOriginal')).toEqual([]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(w.planeCalls.length).toBeGreaterThan(calls);
+	});
+
+	test('задача из store в скрытом проекте: ключ, ссылка и название не раскрываются, второй задачи нет', async () => {
+		const w = await setup();
+		const made = await w.plane.createWorkItem(P_HIDDEN, {
+			name: 'Секретная задача',
+			description_html: '',
+			external_id: MSG,
+			external_source: 'discord',
+		});
+		w.store.putDiscordItem('initech', MSG, P_HIDDEN, made.id);
+		const { customId } = await open(w);
+		expect((await submitCreate(w, customId, { title: 'Починить вход' })).body.type).toBe(5);
+		await w.settle();
+		expect(
+			w.discord.callsOf('editOriginal').map((c) => (c[1] as { content: string }).content),
+		).toEqual(['Задача не найдена.']);
+		const sent = JSON.stringify([...w.discord.calls]);
+		expect(sent).not.toContain('ZEN-1');
+		expect(sent).not.toContain('Секретная');
+		expect(w.discord.callsOf('sendMessage')).toEqual([]);
+		expect(w.plane.createdItems.map((c) => c.projectId)).toEqual([P_HIDDEN]);
 	});
 });

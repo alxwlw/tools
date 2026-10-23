@@ -70,6 +70,7 @@ const TEXT = {
 	noProjects: 'Нет проектов, в которые можно создать задачу.',
 	hidden: 'Для этого проекта создание задач из Discord отключено.',
 	expired: 'Форма устарела, вызови команду ещё раз.',
+	itemMissing: 'Задача не найдена.',
 	internal: 'Внутренняя ошибка, повтори через минуту.',
 } as const;
 
@@ -184,8 +185,13 @@ export function createInteractionHandler(
 	const defer =
 		deps.defer ??
 		((work) => {
-			// The work reports its own failures; a rejection here would be an unhandled one.
-			work().catch(() => {});
+			// A timer, not a microtask: microtasks queued while the handler runs still go ahead of the
+			// caller's continuation that writes the type 5 response, and an edit that overtakes the
+			// initial callback can be answered 404. A timer fires after those continuations.
+			setTimeout(() => {
+				// The work reports its own failures; a rejection here would be an unhandled one.
+				work().catch(() => {});
+			}, 0);
 		});
 	// Logging is best-effort: a throwing sink must not turn an interaction into a 5xx.
 	const log: Log = (entry) => {
@@ -203,6 +209,17 @@ export function createInteractionHandler(
 			forms.delete(key);
 		}
 		forms.set(id, context);
+	}
+
+	// A signed request refused with an ephemeral answer: ids and a reason, never a text.
+	function refuse(
+		tenantId: string | undefined,
+		interaction: string,
+		reason: string,
+		text: string,
+	): Response {
+		log({ event: 'ix.refused', level: 'warn', tenant: tenantId, interaction, reason });
+		return ephemeral(text);
 	}
 
 	const edit = (token: string, content: string) => deps.discord.editOriginal(token, { content });
@@ -263,6 +280,9 @@ export function createInteractionHandler(
 		let item: WorkItem | null = null;
 		let created = false;
 		const known = deps.store.getDiscordItem(tenant.id, ctx.messageId);
+		// A project hidden after the item was made answers like a missing item: no key, link or name,
+		// and no second item in another project.
+		if (known && isHidden(rt, known.projectId)) return edit(token, TEXT.itemMissing);
 		if (known) {
 			try {
 				item = await rt.plane.getWorkItem(known.projectId, known.workItemId);
@@ -364,7 +384,7 @@ export function createInteractionHandler(
 			ctx.tenantId !== rt.tenant.id ||
 			ctx.kind !== match[1]
 		)
-			return ephemeral(TEXT.expired);
+			return refuse(rt.tenant.id, id, 'expired_form', TEXT.expired);
 		forms.delete(match[2] as string);
 		const fields = collectFields(own(data, 'components'));
 		const started = now();
@@ -395,21 +415,22 @@ export function createInteractionHandler(
 		return json({ type: REPLY.DEFERRED, data: { flags: FLAG_EPHEMERAL } });
 	}
 
-	function command(rt: TenantRuntime, ix: Rec, data: Rec | null): Response {
+	function command(rt: TenantRuntime, ix: Rec, id: string, data: Rec | null): Response {
 		const tenant = rt.tenant;
 		const name = own(data, 'name');
 		const kind = name === CREATE_COMMAND ? 'create' : name === APPEND_COMMAND ? 'append' : null;
 		if (data === null || data.type !== MESSAGE_COMMAND || kind === null)
-			return ephemeral(TEXT.unknownCommand);
+			return refuse(tenant.id, id, 'unknown_command', TEXT.unknownCommand);
 		const targetId = snowflake(data.target_id);
 		const messages = rec(own(rec(data.resolved), 'messages'));
 		const message = targetId === null ? null : rec(own(messages, targetId));
 		const messageId = snowflake(message?.id);
-		if (message === null || messageId === null) return ephemeral(TEXT.noMessage);
+		if (message === null || messageId === null)
+			return refuse(tenant.id, id, 'no_message', TEXT.noMessage);
 
 		const channel = rec(ix.channel);
 		const channelId = snowflake(channel?.id) ?? snowflake(ix.channel_id);
-		if (channelId === null) return ephemeral(TEXT.noChannel);
+		if (channelId === null) return refuse(tenant.id, id, 'no_channel', TEXT.noChannel);
 		const isThread =
 			channel?.type === CHANNEL.PUBLIC_THREAD || channel?.type === CHANNEL.PRIVATE_THREAD;
 		const routeId = (isThread ? snowflake(channel.parent_id) : null) ?? channelId;
@@ -417,15 +438,16 @@ export function createInteractionHandler(
 
 		let offered: ProjectSummary[] = [];
 		if (mapped) {
-			if (kind === 'create' && isHidden(rt, mapped.projectId)) return ephemeral(TEXT.hidden);
+			if (kind === 'create' && isHidden(rt, mapped.projectId))
+				return refuse(tenant.id, id, 'hidden_project', TEXT.hidden);
 		} else if (kind === 'create') {
 			const cached = deps.projectsCached(tenant.id);
-			if (cached === null) return ephemeral(TEXT.coldCache);
+			if (cached === null) return refuse(tenant.id, id, 'cold_cache', TEXT.coldCache);
 			offered = cached
 				.filter((p) => !isHidden(rt, p.id))
 				.sort((a, b) => a.identifier.localeCompare(b.identifier, 'en'))
 				.slice(0, SELECT_MAX);
-			if (offered.length === 0) return ephemeral(TEXT.noProjects);
+			if (offered.length === 0) return refuse(tenant.id, id, 'no_projects', TEXT.noProjects);
 		}
 
 		const content = typeof message.content === 'string' ? message.content : '';
@@ -565,9 +587,9 @@ export function createInteractionHandler(
 				return ephemeral(TEXT.notConfigured);
 			}
 			const data = rec(ix.data);
-			if (ix.type === TYPE.COMMAND) return command(rt, ix, data);
+			if (ix.type === TYPE.COMMAND) return command(rt, ix, id, data);
 			if (ix.type === TYPE.MODAL_SUBMIT) return submit(rt, ix, id, data);
-			return ephemeral(TEXT.unknownCommand);
+			return refuse(rt.tenant.id, id, 'unknown_command', TEXT.unknownCommand);
 		} catch {
 			log({ event: 'ix.failed', level: 'error', interaction: id, error: 'handler' });
 			return ephemeral(TEXT.internal);
