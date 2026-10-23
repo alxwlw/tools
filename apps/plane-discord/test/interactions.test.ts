@@ -1184,10 +1184,14 @@ describe('createInteractionHandler: враждебный ввод', () => {
 		w.store.claim = () => {
 			throw new Error('db locked');
 		};
-		const res = await w.ask({ type: 2, id: w.ids.next(), guild_id: GUILD });
+		const id = w.ids.next();
+		const res = await w.ask({ type: 2, id, guild_id: GUILD });
 		expect(res.status).toBe(200);
 		expect(res.body.data.content).toBe('Внутренняя ошибка, повтори через минуту.');
-		expect(w.logs.find((l) => l.event === 'ix.failed')).toMatchObject({ error: 'handler' });
+		expect(w.logs.find((l) => l.event === 'ix.failed')).toMatchObject({
+			error: 'handler',
+			interaction: id,
+		});
 	});
 });
 
@@ -1487,6 +1491,49 @@ describe('createInteractionHandler: ветви, которые легко пот
 		const html = w.plane.createdComments[0]!.comment.comment_html;
 		expect(html).toContain('entity_identifier="plane-user-1"');
 		expect(html).toContain('и bob&lt;b&gt;</p></blockquote>');
+	});
+});
+
+describe('createInteractionHandler: границы', () => {
+	test('1000 открытых форм живы, на 1001-й самая старая забывается', async () => {
+		const w = await setup();
+		const first = await open(w);
+		for (let i = 1; i < 1000; i++) await open(w);
+		expect((await submitCreate(w, first.customId, { title: 'T' })).body.type).toBe(5);
+
+		const x = await setup();
+		const old = await open(x);
+		for (let i = 1; i < 1000; i++) await open(x);
+		await open(x);
+		expect((await submitCreate(x, old.customId, { title: 'T' })).body.data.content).toBe(
+			'Форма устарела, вызови команду ещё раз.',
+		);
+	});
+
+	test('упомянутых запоминается 50, имя — 80 символов, имя файла — 200', async () => {
+		const w = await setup();
+		const id = (n: number) => String(300_000_000_000_000_000n + BigInt(n));
+		const mentions = Array.from({ length: 51 }, (_, n) => ({
+			id: id(n),
+			username: `user${n}`,
+			global_name: null,
+		}));
+		const { customId } = await open(w, {
+			message: msg({
+				author: { id: AUTHOR, username: 'я'.repeat(81), global_name: null },
+				attachments: [{ url: 'https://cdn.example.com/f', filename: 'ф'.repeat(201) }],
+				mentions,
+			}),
+		});
+		await submitCreate(w, customId, {
+			title: 'T',
+			description: `<@${id(49)}> <@${id(50)}>`,
+		});
+		await w.settle();
+		const html = w.plane.createdItems[0]!.item.description_html;
+		expect(html).toContain('<p>user49 пользователь</p>');
+		expect(html).toContain(`автор: ${'я'.repeat(79)}…</p>`);
+		expect(html).toContain(`>${'ф'.repeat(199)}…</a>`);
 	});
 });
 
