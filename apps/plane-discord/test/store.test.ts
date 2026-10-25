@@ -181,6 +181,22 @@ describe('Store: треды и задачи', () => {
 	});
 });
 
+describe('Store: setThreadProject', () => {
+	test('заполняет только пустой project_id своего треда', () => {
+		const store = new Store(':memory:');
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-1', null);
+		store.putThread('acme', 'item-2', 'chan-1', 'thread-2', null);
+		store.putThread('acme', 'item-3', 'chan-1', 'thread-3', 'proj-3');
+		store.setThreadProject('thread-1', 'proj-1');
+		store.setThreadProject('thread-3', 'proj-other');
+		expect(store.findByThread('thread-1')?.projectId).toBe('proj-1');
+		expect(store.findByThread('thread-2')?.projectId).toBeNull();
+		expect(store.findByThread('thread-3')?.projectId).toBe('proj-3');
+		store.setThreadProject('no-such-thread', 'proj-1');
+		expect(store.findByThread('no-such-thread')).toBeNull();
+	});
+});
+
 describe('Store: webhooks', () => {
 	test('putWebhook/getWebhook/isOwnWebhook; повтор по каналу заменяет вебхук', () => {
 		const store = new Store(':memory:');

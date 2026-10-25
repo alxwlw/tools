@@ -172,7 +172,11 @@ export function startService(
 	const gateway = (options.gateway ?? ((opts) => new Gateway(opts)))({
 		token: config.discord.botToken,
 		intents: INTENTS.GUILDS | INTENTS.GUILD_MESSAGES | INTENTS.MESSAGE_CONTENT,
-		onMessage: (message) => queue.push(`sync:${message.id}`, () => threadSync(message)),
+		onMessage: (message) => {
+			// Most guild messages are not in a bound thread: keep them out of the queue shared with Plane deliveries.
+			if (store.findByThread(message.channelId) === null) return;
+			queue.push(`sync:${message.id}`, () => threadSync(message));
+		},
 		log,
 	});
 

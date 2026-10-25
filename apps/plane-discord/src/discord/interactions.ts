@@ -15,6 +15,7 @@ import {
 	describe,
 	ephemeral,
 	failedEntry,
+	FILENAME_MAX,
 	FLAG_EPHEMERAL,
 	isHidden,
 	isThreadType,
@@ -63,7 +64,6 @@ const OPTION_LABEL_MAX = 100;
 const ATTACHMENTS_MAX = 10;
 const MENTIONS_MAX = 50;
 const NAME_MAX = 80;
-const FILENAME_MAX = 200;
 const FORM_TTL_MS = 15 * 60_000;
 const FORMS_MAX = 1000;
 const FIELDS_MAX = 20;

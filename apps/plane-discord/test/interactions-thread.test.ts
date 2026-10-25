@@ -193,6 +193,60 @@ describe('/plane-link', () => {
 		]);
 	});
 
+	test('/plane-link → бот входит в тред перед привязкой (в приватном треде тоже)', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		let boundAtJoin: unknown = 'not called';
+		const join = w.discord.joinThread.bind(w.discord);
+		w.discord.joinThread = async (id) => {
+			boundAtJoin = w.store.findByThread(id);
+			return join(id);
+		};
+		await link(w, 'LAB-40', threadChannel(THREAD, 12));
+		await w.settle();
+		expect(boundAtJoin).toBeNull();
+		expect(w.discord.callsOf('joinThread')).toEqual([[THREAD]]);
+		expect(w.store.findByThread(THREAD)?.workItemId).toBe('w40');
+	});
+
+	test('/plane-link: join отказан → связи нет, ephemeral с просьбой добавить бота', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set('joinThread', new DiscordApiError(403, 'PUT', '/channels/:id', 50001));
+		await link(w, 'LAB-40', threadChannel(THREAD, 12));
+		await w.settle();
+		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(w.discord.callsOf('editOriginal')).toEqual([]);
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([['tok-900000000000000001']]);
+		expect(w.discord.callsOf('followup')).toEqual([
+			[
+				'tok-900000000000000001',
+				{ content: 'Не могу войти в тред: добавь @Plane в тред и повтори.', ephemeral: true },
+			],
+		]);
+		expect(w.logs.find((l) => l.event === 'ix.join_failed')).toMatchObject({
+			level: 'warn',
+			status: 403,
+			code: 50001,
+		});
+		expect(w.logs.filter((l) => l.event === 'ix.done').map((l) => l.result)).toEqual([
+			'join_failed',
+		]);
+	});
+
+	test('/plane-link: сбой join не от Discord API → связи нет, ix.failed', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.joinThread = async () => {
+			throw new Error('boom');
+		};
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(w.logs.some((l) => l.event === 'ix.failed')).toBe(true);
+		expect(w.logs.some((l) => l.event === 'ix.join_failed')).toBe(false);
+	});
+
 	test('тот же ключ в уже привязанном треде → снова «привязан»', async () => {
 		const w = await setup();
 		seed(w, { id: 'w40', seq: 40 });

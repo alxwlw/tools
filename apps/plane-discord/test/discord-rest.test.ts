@@ -232,6 +232,14 @@ describe('DiscordRest: ответы', () => {
 		expect(calls[0]?.url).toBe(`${API}/users/@me/channels`);
 	});
 
+	test('joinThread: PUT /channels/{id}/thread-members/@me без тела', async () => {
+		const { calls, rest } = stub([{ status: 204 }]);
+		await rest.joinThread('t1');
+		expect(calls[0]?.url).toBe(`${API}/channels/t1/thread-members/@me`);
+		expect(calls[0]?.method).toBe('PUT');
+		expect(calls[0]?.body).toBeUndefined();
+	});
+
 	test('ответ без id / не массив / без type — ошибка разбора', async () => {
 		const empty = stub([{ status: 200, body: { id: '' } }]);
 		expect(String(await failure(empty.rest.sendMessage('c', msg)))).toContain('"id"');

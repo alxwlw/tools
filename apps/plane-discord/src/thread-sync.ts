@@ -65,11 +65,11 @@ export function createThreadSync(deps: {
 				log({ event: 'sync.unresolved', level: 'warn', ...ids, item: link.workItemId });
 				return;
 			}
-			// Same primary key and thread id, so this only fills in the project; threads rows are never deleted.
-			store.putThread(link.tenant, link.workItemId, link.channelId, message.channelId, projectId);
+			// Only the missing column: a /plane-link that rebound the thread while Plane was asked must survive.
+			store.setThreadProject(message.channelId, projectId);
 		}
 		if (isHidden(rt, projectId)) {
-			// Discord text must not reach Plane (and so SLU) from a hidden project.
+			// Discord text must not reach Plane (and so the AI side) from a hidden project.
 			log({ event: 'sync.skipped', ...ids, reason: 'hidden' });
 			return;
 		}

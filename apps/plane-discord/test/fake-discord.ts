@@ -86,6 +86,10 @@ export class FakeDiscord implements DiscordApi {
 		return threadId;
 	}
 
+	async joinThread(threadId: string): Promise<void> {
+		this.#enter('joinThread', threadId);
+	}
+
 	async openDm(userId: string): Promise<string> {
 		this.#enter('openDm', userId);
 		return `dm-${userId}`;

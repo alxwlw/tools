@@ -1,5 +1,5 @@
 // Pieces shared by the interaction handler and the slash commands: payload parsing, reply shapes, error texts.
-import { esc, link } from '../html.ts';
+import { esc, link, truncate } from '../html.ts';
 import type { Log } from '../log.ts';
 import type { TenantRuntime } from '../notify.ts';
 import { PlaneApiError } from '../plane/client.ts';
@@ -9,6 +9,7 @@ import { CHANNEL, DiscordApiError } from './rest.ts';
 export const REPLY = { PONG: 1, MESSAGE: 4, DEFERRED: 5, MODAL: 9 } as const;
 export const FLAG_EPHEMERAL = 64;
 export const KEY_MAX = 20;
+export const FILENAME_MAX = 200;
 export const KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
 const SNOWFLAKE = /^\d{1,20}$/;
 
@@ -88,7 +89,7 @@ export const itemLink = (planeUrl: string, rt: TenantRuntime, key: string): stri
 /** `<ul>` of attachment links for a Plane comment; a non-http(s) URL is dropped. */
 export const attachmentsHtml = (files: readonly { url: string; filename: string }[]): string => {
 	const items = files.flatMap((f) => {
-		const a = link(f.url, f.filename);
+		const a = link(f.url, truncate(f.filename === '' ? 'файл' : f.filename, FILENAME_MAX));
 		return a === null ? [] : [`<li>${a}</li>`];
 	});
 	return items.length === 0 ? '' : `<ul>${items.join('')}</ul>`;

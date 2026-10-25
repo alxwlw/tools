@@ -290,6 +290,42 @@ describe('createThreadSync', () => {
 		]);
 	});
 
+	test('строка без project_id: /plane-link перепривязал тред, пока шёл обход → привязка не откатывается', async () => {
+		const Y = '222222222222222235';
+		const w = setup({ projectId: null });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const original = w.plane.getWorkItem.bind(w.plane);
+		w.plane.getWorkItem = async (projectId, id) => {
+			await gate;
+			return original(projectId, id);
+		};
+		const running = w.sync(message());
+		await Promise.resolve();
+		// Same item, same parent channel, another thread: the primary key matches, thread_id changes.
+		w.store.putThread('initech', ITEM, PARENT, Y, P_ENG);
+		release();
+		await running;
+		expect(w.store.findByThread(Y)).toMatchObject({ workItemId: ITEM, projectId: P_ENG });
+		expect(w.store.findByThread(THREAD)).toBeNull();
+	});
+
+	test('имя вложения: пустое → «файл», длинное → 200 символов', async () => {
+		const w = setup();
+		await w.sync(
+			message({
+				content: '',
+				attachments: [
+					{ url: 'https://cdn.example.com/x', filename: '' },
+					{ url: 'https://cdn.example.com/y', filename: 'ы'.repeat(300) },
+				],
+			}),
+		);
+		const html = w.plane.createdComments[0]!.comment.comment_html;
+		expect(html).toContain('<a href="https://cdn.example.com/x">файл</a>');
+		expect(html).toContain(`<a href="https://cdn.example.com/y">${'ы'.repeat(199)}…</a>`);
+	});
+
 	test('задача скрытого проекта → пропуск без текста в логе', async () => {
 		const w = setup({ projectId: P_HIDDEN, itemProject: P_HIDDEN });
 		await w.sync(message({ content: SECRET_TEXT }));

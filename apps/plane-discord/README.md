@@ -23,6 +23,7 @@ synced back to threads):
   channel, the bot opens a thread on its public reply and binds it to the item (a forum post from 1a is
   already bound). `/plane-link KEY` binds the thread it is typed in; a thread holds one work item.
   Binding a thread to a hidden project's item is refused like an unknown key.
+  `/plane-link` makes the bot join the thread; in a private thread @Plane must be added first.
   A message in a bound thread becomes a Plane comment `Name (Discord): …` with a link to the message
   (`external_source=discord`, `external_id=<message id>`; a repeat adds nothing). The bot's own messages,
   its webhooks' messages and system messages are skipped; edits and deletions are not synced. This needs the

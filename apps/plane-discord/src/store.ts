@@ -86,6 +86,13 @@ export class Store {
 			.run(tenant, workItemId, channelId, threadId, projectId);
 	}
 
+	/** Fills in the project of a row written before `project_id` existed; touches nothing else, so a concurrent rebinding survives. */
+	setThreadProject(threadId: string, projectId: string): void {
+		this.#db
+			.query('UPDATE threads SET project_id = ? WHERE thread_id = ? AND project_id IS NULL')
+			.run(projectId, threadId);
+	}
+
 	/** The work item a thread is bound to; `projectId` is null on rows written before it was recorded. */
 	findByThread(threadId: string): {
 		tenant: string;

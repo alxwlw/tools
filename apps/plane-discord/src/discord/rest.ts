@@ -54,6 +54,8 @@ export interface DiscordApi {
 	sendMessage(channelId: string, message: OutMessage): Promise<{ id: string }>;
 	/** Opens a public thread on a message of a text or announcement channel; returns the thread id. */
 	startThreadFromMessage(channelId: string, messageId: string, name: string): Promise<string>;
+	/** The bot joins a thread (idempotent): a private thread's messages reach only its members. */
+	joinThread(threadId: string): Promise<void>;
 	openDm(userId: string): Promise<string>;
 	editOriginal(interactionToken: string, message: OutMessage): Promise<void>;
 	deleteOriginal(interactionToken: string): Promise<void>;
@@ -233,6 +235,10 @@ export class DiscordRest implements DiscordApi {
 			{ name: truncate(name, POST_NAME_MAX), auto_archive_duration: THREAD_ARCHIVE_MINUTES },
 		);
 		return str(res, 'id');
+	}
+
+	async joinThread(threadId: string): Promise<void> {
+		await this.#bot('PUT', `/channels/${encodeURIComponent(threadId)}/thread-members/@me`);
 	}
 
 	async openDm(userId: string): Promise<string> {
