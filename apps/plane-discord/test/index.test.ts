@@ -18,10 +18,14 @@ import { fixture } from './fixtures.ts';
 const signer = await makeSigner();
 const WORKSPACE = '00000000-0000-4000-8000-000000000002';
 const PROJECT = '00000000-0000-4000-8000-000000000007';
+const BACKLOG = '00000000-0000-4000-8000-000000000004';
+const DONE = '00000000-0000-4000-8000-000000000009';
 const SECRET = 'test-secret';
 const CHANNEL = '333333333333333333';
 const SERVICE = '222222222222222222';
 const GUILD = '111111111111111111';
+const DM_USER = '444444444444444444';
+const ASSIGNEE = '00000000-0000-4000-8000-000000000014';
 
 const TENANTS = JSON.stringify({
 	tenants: [
@@ -34,7 +38,7 @@ const TENANTS = JSON.stringify({
 			serviceChannelId: SERVICE,
 			silenceHours: 72,
 			channels: [{ channelId: CHANNEL, projectId: PROJECT }],
-			users: [],
+			users: [{ plane: ASSIGNEE, discord: DM_USER }],
 		},
 	],
 });
@@ -92,6 +96,7 @@ function world() {
 				}
 				return json({ id: 'm1' });
 			}
+			if (path === '/users/@me/channels' && init.method === 'POST') return json({ id: 'dm1' });
 			if (init.method === 'DELETE') return new Response(null, { status: 204 });
 			return json({}, 404);
 		}
@@ -121,6 +126,14 @@ function world() {
 				state: 's1',
 				priority: 'none',
 				assignees: [],
+			});
+		if (pathname.endsWith('/states/'))
+			return json({
+				results: [
+					{ id: BACKLOG, name: 'Backlog', group: 'backlog' },
+					{ id: DONE, name: 'Done', group: 'completed' },
+				],
+				next_page_results: false,
 			});
 		if (pathname.endsWith('/members/'))
 			return json({
@@ -203,6 +216,28 @@ function delivery(id: string): Request & { raw: string } {
 		{ raw },
 	);
 }
+/** A signed delivery: the captured fixture `name` after `edit`. */
+function signed(name: string, edit: (b: any) => void): Request & { raw: string } {
+	const body = structuredClone(fixture(name).body) as any;
+	edit(body);
+	const raw = JSON.stringify(body);
+	return Object.assign(
+		new Request('http://x/plane/webhook', {
+			method: 'POST',
+			body: raw,
+			headers: { 'x-plane-event': 'issue', 'x-plane-signature': sign(raw) },
+		}),
+		{ raw },
+	);
+}
+/** The "human" twin of a state change, the only delivery the REST API produces. */
+const humanState = (b: any) => {
+	b.activity.field = 'state';
+	b.activity.old_value = 'Backlog';
+	b.activity.new_value = 'Done';
+	b.activity.old_identifier = BACKLOG;
+	b.activity.new_identifier = DONE;
+};
 const post = (base: string, req: Request & { raw: string }) =>
 	fetch(`${base}/plane/webhook`, { method: 'POST', body: req.raw, headers: req.headers });
 const messages = (w: ReturnType<typeof world>, channel = CHANNEL) =>
@@ -216,7 +251,7 @@ describe('startService', () => {
 		expect(await res.text()).toBe('ok');
 		const listening = w.entries().find((e) => e.event === 'listening');
 		expect(listening).toMatchObject({
-			tenants: [{ id: 'acme', channels: 1, users: 0 }],
+			tenants: [{ id: 'acme', channels: 1, users: 1 }],
 		});
 		expect(typeof listening?.port).toBe('number');
 		for (const secret of ['client-secret-value', 'bot-token-value', SECRET])
@@ -239,6 +274,53 @@ describe('startService', () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.body?.content).toContain('**LAB-57**');
 		expect(w.entries().some((e) => e.event === 'plane.accepted')).toBe(true);
+	});
+
+	test('правка через REST API: одна человеческая доставка state → «Задача закрыта» один раз', async () => {
+		const { w, service, url } = start();
+		const res = await post(url(''), signed('plane-app-workitem-state-done', humanState));
+		expect(res.status).toBe(200);
+		await service.idle();
+		const sent = messages(w);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.body?.content).toContain('Задача закрыта');
+	});
+
+	test('правка через UI: машинный state_id и человеческий state → «Задача закрыта» один раз', async () => {
+		const { w, service, url } = start();
+		await post(
+			url(''),
+			signed('plane-app-workitem-state-done', () => {}),
+		);
+		await post(url(''), signed('plane-app-workitem-state-done', humanState));
+		await service.idle();
+		const sent = messages(w);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.body?.content).toContain('Задача закрыта');
+	});
+
+	test('правка через REST API: assignees добавлен → один DM назначенному', async () => {
+		const { w, service, url } = start();
+		const res = await post(
+			url(''),
+			signed('plane-app-workitem-assigned', (b) => {
+				b.data.assignees = [{ id: ASSIGNEE }];
+				b.activity.field = 'assignees';
+				b.activity.old_value = '';
+				b.activity.new_value = 'User5';
+				b.activity.old_identifier = null;
+				b.activity.new_identifier = ASSIGNEE;
+			}),
+		);
+		expect(res.status).toBe(200);
+		await service.idle();
+		const dms = w.discord.filter((c) => c.method === 'POST' && c.path === '/channels/dm1/messages');
+		expect(dms).toHaveLength(1);
+		expect(dms[0]?.body?.content).toContain('Тебя назначили');
+		expect(messages(w)).toHaveLength(0);
+		expect(w.discord.find((c) => c.path === '/users/@me/channels')?.body).toEqual({
+			recipient_id: DM_USER,
+		});
 	});
 
 	test('тип канала запоминается: два события — один GET /channels', async () => {
