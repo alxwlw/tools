@@ -41,7 +41,7 @@ function seed(w: World, assignees: string[] = []) {
 }
 
 describe('/plane KEY', () => {
-	test('/plane opp-40 → публичный deferred (без flags 64), затем editOriginal с карточкой', async () => {
+	test('/plane lab-40 → публичный deferred (без flags 64), затем editOriginal с карточкой', async () => {
 		const w = await setup();
 		seed(w);
 		const res = await slash(w, ' lab-40 ');

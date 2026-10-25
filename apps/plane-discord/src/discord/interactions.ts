@@ -180,6 +180,19 @@ function describe(error: unknown): string {
 	return 'внутренняя ошибка';
 }
 
+/** The `ix.failed` log entry of a deferred job: ids, the error class and an upstream status, never a text. */
+function failedEntry(base: Record<string, string>, error: unknown, ms: number): Parameters<Log>[0] {
+	return {
+		event: 'ix.failed',
+		level: 'error',
+		...base,
+		error: error instanceof Error ? error.name : 'unknown',
+		status:
+			error instanceof PlaneApiError || error instanceof DiscordApiError ? error.status : undefined,
+		ms,
+	};
+}
+
 export function createInteractionHandler(
 	deps: InteractionDeps,
 ): (req: Request) => Promise<Response> {
@@ -432,18 +445,7 @@ export function createInteractionHandler(
 				const missing = error instanceof Failure;
 				// Missing and hidden keys share one outcome, as they share one answer.
 				if (missing) log({ event: 'ix.done', ...base, result: 'not_found', ms: now() - started });
-				else
-					log({
-						event: 'ix.failed',
-						level: 'error',
-						...base,
-						error: error instanceof Error ? error.name : 'unknown',
-						status:
-							error instanceof PlaneApiError || error instanceof DiscordApiError
-								? error.status
-								: undefined,
-						ms: now() - started,
-					});
+				else log(failedEntry(base, error, now() - started));
 				// The placeholder is public; the explanation is not.
 				try {
 					await deps.discord.deleteOriginal(token);
@@ -486,17 +488,7 @@ export function createInteractionHandler(
 				await (ctx.kind === 'create' ? runCreate : runAppend)(rt, ctx, fields, token);
 				log({ event: 'ix.done', ...base, ms: now() - started });
 			} catch (error) {
-				log({
-					event: 'ix.failed',
-					level: 'error',
-					...base,
-					error: error instanceof Error ? error.name : 'unknown',
-					status:
-						error instanceof PlaneApiError || error instanceof DiscordApiError
-							? error.status
-							: undefined,
-					ms: now() - started,
-				});
+				log(failedEntry(base, error, now() - started));
 				try {
 					await edit(token, `Не получилось: ${describe(error)}.`);
 				} catch {
