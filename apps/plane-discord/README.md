@@ -4,7 +4,8 @@ A [Bun](https://bun.sh) service that bridges [Plane](https://plane.so) and Disco
 tenants (a Discord server plus a Plane workspace each). It has no runtime dependencies and keeps its
 state in one SQLite file.
 
-Phases 1 and 2 (this version):
+Phases 1 to 3 (this version; thread messages are not yet synced to Plane, and comments are not yet
+synced back):
 
 - **1a, Plane to a channel.** A work item is created, closed or cancelled, or the bot is mentioned in a
   comment: a message goes to the Discord channel mapped to the project (and optionally a module). A

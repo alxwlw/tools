@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { DiscordApiError } from '../src/discord/rest.ts';
 import { chatInputPayload, commandPayload } from './discord-harness.ts';
 import {
+	field,
 	FORUM,
 	GUILD,
 	MAPPED,
@@ -140,6 +141,18 @@ describe('тред из ответа бота (1c)', () => {
 		await submitCreate(w, again.customId, { title: 'T' });
 		await w.settle();
 		expect(w.discord.callsOf('startThreadFromMessage')).toHaveLength(1);
+	});
+});
+
+describe('«Создать задачу» в треде', () => {
+	test('тред типа 10, 11, 12 маршрутизируется по родителю: проект из маппинга, без select', async () => {
+		for (const type of [10, 11, 12]) {
+			const w = await setup();
+			const { body } = await open(w, { channel: threadChannel(THREAD, type) });
+			expect(body.type).toBe(9);
+			expect(field(body, 'project')).toBeUndefined();
+			expect(field(body, 'title')).toBeDefined();
+		}
 	});
 });
 
@@ -285,6 +298,8 @@ describe('/plane-link', () => {
 				{ content: 'Тред уже привязан к другой задаче.', ephemeral: true },
 			],
 		]);
+		// a NULL project id is never sent to Plane
+		expect(w.planeCalls).not.toContain('getWorkItem');
 	});
 
 	test('другая задача из скрытого проекта или недоступная → текст без ключа', async () => {
@@ -368,6 +383,54 @@ describe('/plane-link', () => {
 		);
 		expect(res.body.data.content).toBe('Неизвестная команда.');
 		expect(w.planeCalls).toEqual([]);
+	});
+
+	test('editOriginal упал после привязки → связь остаётся, ephemeral «Тред привязан», ix.done linked', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set(
+			'editOriginal',
+			new DiscordApiError(503, 'PATCH', '/webhooks/:app/:token/messages/@original'),
+		);
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.store.findByThread(THREAD)?.workItemId).toBe('w40');
+		expect(w.discord.callsOf('followup')).toEqual([
+			[
+				'tok-900000000000000001',
+				{
+					content:
+						'Тред привязан к [`LAB-40` «Починить вход»](<https://plane.example.com/example-ws/browse/LAB-40/>).',
+					ephemeral: true,
+				},
+			],
+		]);
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([]);
+		expect(w.logs).toContainEqual({
+			event: 'ix.confirm_failed',
+			level: 'warn',
+			tenant: 'initech',
+			interaction: '900000000000000001',
+			kind: 'link',
+			status: 503,
+			code: null,
+		});
+		expect(w.logs.filter((l) => l.event === 'ix.done').map((l) => l.result)).toEqual(['linked']);
+		expect(w.logs.map((l) => l.event)).not.toContain('ix.failed');
+	});
+
+	test('editOriginal и followup упали → связь и ix.done linked всё равно записаны', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set('editOriginal', new DiscordApiError(0, 'PATCH', '/x'));
+		w.discord.failures.set('followup', new DiscordApiError(0, 'POST', '/x'));
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.store.findByThread(THREAD)?.workItemId).toBe('w40');
+		expect(w.logs.map((l) => l.event)).toEqual(
+			expect.arrayContaining(['ix.confirm_failed', 'ix.reply_failed', 'ix.done']),
+		);
+		expect(w.logs.filter((l) => l.event === 'ix.done').map((l) => l.result)).toEqual(['linked']);
 	});
 
 	test('ошибка Plane → «Не получилось», публичная заглушка удалена, лог ix.failed', async () => {
