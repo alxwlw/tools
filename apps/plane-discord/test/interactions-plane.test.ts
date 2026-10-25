@@ -320,6 +320,12 @@ describe('/plane KEY', () => {
 		const w = await setup();
 		seed(w, ['plane-user-2', 'plane-user-3']);
 		let calls = 0;
+		const refreshes: (boolean | undefined)[] = [];
+		const known = w.rt.states;
+		w.rt.states = async (p, opts) => {
+			refreshes.push(opts?.refresh);
+			return known(p, opts);
+		};
 		w.rt.members = async () => {
 			calls += 1;
 			return w.plane.members;
@@ -327,6 +333,8 @@ describe('/plane KEY', () => {
 		await slash(w, 'LAB-40');
 		await w.settle();
 		expect(calls).toBe(1);
+		// The state is known: no second, refreshing, request.
+		expect(refreshes).toEqual([undefined]);
 	});
 
 	test('markdown в имени состояния и исполнителя приходит в поля экранированным', async () => {
