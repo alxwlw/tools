@@ -26,6 +26,14 @@ const threadChannel = (id: string, type = 11, parentId = MAPPED) => ({
 	parent_id: parentId,
 });
 
+const refusals = (w: World) =>
+	w.logs
+		.filter((l) => l.event === 'ix.refused')
+		.map((l) => {
+			expect(l.tenant).toBe('initech');
+			return { interaction: l.interaction, reason: l.reason };
+		});
+
 const link = (w: World, key: unknown, channel: Record<string, unknown> = threadChannel(THREAD)) =>
 	w.ask(
 		chatInputPayload({
@@ -204,6 +212,7 @@ describe('/plane-link', () => {
 		await w.settle();
 		expect(w.planeCalls).toEqual([]);
 		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(refusals(w).map((r) => r.reason)).toEqual(['not_thread', 'not_thread', 'not_thread']);
 	});
 
 	test('/plane-link неверный ключ → сразу ephemeral, ни одного вызова Plane', async () => {
@@ -216,6 +225,7 @@ describe('/plane-link', () => {
 		}
 		await w.settle();
 		expect(w.planeCalls).toEqual([]);
+		expect(refusals(w).map((r) => r.reason)).toEqual(Array(5).fill('bad_key'));
 	});
 
 	test('/plane-link ключ скрытого проекта → как несуществующий', async () => {
@@ -297,10 +307,18 @@ describe('/plane-link', () => {
 		const w = await setup();
 		seed(w, { id: 'w40', seq: 40 });
 		await link(w, 'LAB-40', threadChannel(OTHER_THREAD, 12));
-		await link(w, 'LAB-40', { type: 11, parent_id: MAPPED });
+		const bare = chatInputPayload({
+			id: w.ids.next(),
+			guildId: GUILD,
+			name: 'plane-link',
+			channel: { type: 11, parent_id: MAPPED },
+			options: [{ name: 'key', type: 3, value: 'LAB-40' }],
+		});
+		await w.ask({ ...bare, channel_id: THREAD });
 		await w.settle();
-		expect(w.store.findByThread(OTHER_THREAD)?.channelId).toBe(MAPPED);
-		expect(w.discord.callsOf('editOriginal')).toHaveLength(1);
+		// the second thread took the link over: same item, same parent channel
+		expect(w.store.findByThread(THREAD)?.channelId).toBe(MAPPED);
+		expect(w.store.findByThread(OTHER_THREAD)).toBeNull();
 	});
 
 	test('тред без id или без parent_id → ephemeral «Не удалось определить канал.», Plane не тронут', async () => {
@@ -313,6 +331,25 @@ describe('/plane-link', () => {
 			expect(res.body.data.content).toBe('Не удалось определить канал.');
 		}
 		await w.settle();
+		expect(w.planeCalls).toEqual([]);
+		expect(refusals(w)).toEqual([
+			{ interaction: '900000000000000001', reason: 'no_channel' },
+			{ interaction: '900000000000000002', reason: 'no_channel' },
+		]);
+	});
+
+	test('нет токена interaction → ephemeral «Не удалось разобрать запрос Discord.»', async () => {
+		const w = await setup();
+		const payload = chatInputPayload({
+			id: w.ids.next(),
+			guildId: GUILD,
+			name: 'plane-link',
+			channel: threadChannel(THREAD),
+			options: [{ name: 'key', type: 3, value: 'LAB-40' }],
+		});
+		const res = await w.ask({ ...payload, token: undefined });
+		expect(res.body.data.content).toBe('Не удалось разобрать запрос Discord.');
+		expect(refusals(w)).toEqual([{ interaction: '900000000000000001', reason: 'no_token' }]);
 		expect(w.planeCalls).toEqual([]);
 	});
 
@@ -338,12 +375,20 @@ describe('/plane-link', () => {
 		};
 		await link(w, 'LAB-40');
 		await w.settle();
-		expect(w.discord.callsOf('deleteOriginal')).toHaveLength(1);
-		expect(w.discord.callsOf('followup')[0]?.[1]).toEqual({
-			content: 'Не получилось: внутренняя ошибка.',
-			ephemeral: true,
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([['tok-900000000000000001']]);
+		expect(w.discord.callsOf('followup')).toEqual([
+			['tok-900000000000000001', { content: 'Не получилось: внутренняя ошибка.', ephemeral: true }],
+		]);
+		expect(w.logs).toContainEqual({
+			event: 'ix.failed',
+			level: 'error',
+			tenant: 'initech',
+			interaction: '900000000000000001',
+			kind: 'link',
+			error: 'Error',
+			status: undefined,
+			ms: 0,
 		});
-		expect(w.logs.map((l) => l.event)).toContain('ix.failed');
 		expect(w.store.findByThread(THREAD)).toBeNull();
 	});
 });
