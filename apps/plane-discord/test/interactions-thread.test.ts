@@ -307,6 +307,8 @@ describe('/plane-link', () => {
 		const w = await setup();
 		seed(w, { id: 'w40', seq: 40 });
 		await link(w, 'LAB-40', threadChannel(OTHER_THREAD, 12));
+		await w.settle();
+		expect(w.store.findByThread(OTHER_THREAD)?.channelId).toBe(MAPPED);
 		const bare = chatInputPayload({
 			id: w.ids.next(),
 			guildId: GUILD,
