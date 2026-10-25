@@ -165,6 +165,21 @@ async function probe(c: Conn, n: number) {
 		await c.takeOp(1);
 	}
 }
+/** Records every setTimeout delay until restore() is called. */
+function spyTimeouts() {
+	const delays: number[] = [];
+	const real = globalThis.setTimeout;
+	globalThis.setTimeout = ((fn: () => void, ms?: number, ...args: unknown[]) => {
+		delays.push(ms ?? 0);
+		return real(fn, ms, ...args);
+	}) as typeof setTimeout;
+	return {
+		delays,
+		restore: () => {
+			globalThis.setTimeout = real;
+		},
+	};
+}
 const heartbeats = (c: Conn) => c.received.filter((f) => f.op === 1).length;
 
 const READY = (resume: string, s = 1): Frame => ({
@@ -221,12 +236,7 @@ describe('Gateway', () => {
 	});
 
 	test('heartbeat перевзводится на interval', async () => {
-		const delays: number[] = [];
-		const realSetTimeout = globalThis.setTimeout;
-		globalThis.setTimeout = ((fn: () => void, ms?: number, ...args: unknown[]) => {
-			delays.push(ms ?? 0);
-			return realSetTimeout(fn, ms, ...args);
-		}) as typeof setTimeout;
+		const spy = spyTimeouts();
 		try {
 			const { server } = run({ heartbeatInterval: 60_000 }, { random: () => 0 });
 			const c = await server.conn(0);
@@ -234,10 +244,10 @@ describe('Gateway', () => {
 			await c.takeOp(1);
 			// The server ACKed the first heartbeat; the next tick is armed for the full interval.
 			await probe(c, 1);
-			expect(delays.filter((d) => d === 60_000)).toEqual([60_000]);
+			expect(spy.delays.filter((d) => d === 60_000)).toEqual([60_000]);
 			expect(heartbeats(c)).toBe(2);
 		} finally {
-			globalThis.setTimeout = realSetTimeout;
+			spy.restore();
 		}
 	});
 
@@ -246,22 +256,27 @@ describe('Gateway', () => {
 	});
 
 	test('первый heartbeat — через interval × random()', async () => {
-		let draws = 0;
-		const { server } = run(
-			{ heartbeatInterval: 60_000 },
-			{
-				random: () => {
-					draws++;
-					return 0.5;
+		const spy = spyTimeouts();
+		try {
+			let draws = 0;
+			const { server } = run(
+				{ heartbeatInterval: 60_000 },
+				{
+					random: () => {
+						draws++;
+						return 0.5;
+					},
 				},
-			},
-		);
-		const c = await server.conn(0);
-		await c.takeOp(2);
-		expect(draws).toBe(1);
-		await probe(c, 20);
-		// Half of 60 s has not passed: only the 20 requested heartbeats arrived.
-		expect(heartbeats(c)).toBe(20);
+			);
+			const c = await server.conn(0);
+			await c.takeOp(2);
+			expect(draws).toBe(1);
+			// The first tick is armed for half of the interval, and no other timer uses that delay.
+			expect(spy.delays.filter((d) => d === 30_000)).toEqual([30_000]);
+			expect(heartbeats(c)).toBe(0);
+		} finally {
+			spy.restore();
+		}
 	});
 
 	test('MESSAGE_CREATE → onMessage с полями; seq запоминается', async () => {
@@ -511,6 +526,8 @@ describe('Gateway', () => {
 		expect(identify.d.token).toBe(TOKEN);
 		expect(c1.received.filter((f) => f.op === 6)).toEqual([]);
 		expect(c1.path).toBe('/?v=10&encoding=json');
+		// The new session has no sequence number yet.
+		expect((await c1.takeOp(1)).d).toBeNull();
 		expect(sleeps).toEqual([1000]);
 		expect(logs.some((l) => l.event === 'gateway.fatal')).toBe(false);
 	});
@@ -630,6 +647,18 @@ describe('Gateway', () => {
 		]);
 	});
 
+	test('READY с resume_gateway_url не ws(s) → bad_ready, следующее подключение на базовый url', async () => {
+		const { server, logs } = run();
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.send(READY('https://gateway.example.com/', 1));
+		c0.send({ op: 7 });
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(2)).d.token).toBe(TOKEN);
+		expect(c1.path).toBe('/?v=10&encoding=json');
+		expect(logs.filter((l) => l.event === 'gateway.bad_ready')).toHaveLength(1);
+	});
+
 	test('op 7 при сбое создания сокета → connect_failed и повтор после паузы', async () => {
 		const { server, logs, sleeps } = run({}, { failConstruct: [2] });
 		const c0 = await server.conn(0);
@@ -656,6 +685,47 @@ describe('Gateway', () => {
 		expect((await c1.takeOp(6)).d).toEqual({ token: TOKEN, session_id: 'sess-1', seq: 3 });
 		expect(logs.some((l) => l.event === 'gateway.connect_failed')).toBe(true);
 		expect(sleeps[0]).toBe(1000);
+	});
+
+	test('op 9 true при сбое создания сокета → connect_failed и RESUME на следующем', async () => {
+		const { server, logs, sleeps } = run({}, { failConstruct: [2] });
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.send(READY(server.resumeBase, 3));
+		c0.send({ op: 9, d: true });
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(6)).d).toEqual({ token: TOKEN, session_id: 'sess-1', seq: 3 });
+		expect(logs.filter((l) => l.event === 'gateway.connect_failed')).toHaveLength(1);
+		expect(sleeps).toEqual([1000]);
+	});
+
+	test('start() при сбое создания сокета не бросает: connect_failed и повтор', async () => {
+		const { server, logs, sleeps, constructed } = run({}, { failConstruct: [1] });
+		const c0 = await server.conn(0);
+		expect((await c0.takeOp(2)).d.token).toBe(TOKEN);
+		expect(constructed()).toBe(2);
+		expect(logs.filter((l) => l.event === 'gateway.connect_failed')).toHaveLength(1);
+		expect(sleeps).toEqual([1000]);
+	});
+
+	test('stop(); start() во время backoff: после паузы второго подключения нет', async () => {
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const { server, gateway, constructed, logged } = run({}, { sleep: () => gate });
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.close(4000);
+		await logged('gateway.reconnect');
+		await gateway.stop();
+		gateway.start();
+		await server.conn(1);
+		release();
+		await gate;
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(constructed()).toBe(2);
 	});
 
 	test('сбой создания сокета после close → connect_failed, backoff 1 с, 2 с, третье подключение', async () => {

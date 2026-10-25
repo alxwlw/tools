@@ -40,6 +40,12 @@ type Frame = { op: number; d?: unknown; s?: number | null; t?: string | null };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
+/** True for an absolute ws:/wss: URL: anything else makes `new WebSocket` throw on every retry. */
+const isWebSocketUrl = (v: string): boolean => {
+	if (!URL.canParse(v)) return false;
+	const { protocol } = new URL(v);
+	return protocol === 'wss:' || protocol === 'ws:';
+};
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
 /** Parses a MESSAGE_CREATE payload at the boundary; the list holds the required fields that are missing. */
@@ -302,7 +308,7 @@ export class Gateway {
 				const d = isRecord(frame.d) ? frame.d : {};
 				this.sessionId = str(d.session_id);
 				this.resumeUrl = str(d.resume_gateway_url);
-				if (this.resumeUrl !== null && !URL.canParse(this.resumeUrl)) {
+				if (this.resumeUrl !== null && !isWebSocketUrl(this.resumeUrl)) {
 					// A session we cannot resume to is no session: the next connect re-identifies.
 					this.log({ event: 'gateway.bad_ready', level: 'warn' });
 					this.clearSession();
