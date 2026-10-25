@@ -756,6 +756,40 @@ describe('Gateway', () => {
 		expect(sleeps[0]).toBe(1000);
 	});
 
+	test('READY с wss resume_gateway_url → без bad_ready, op 7 подключается к нему с v=10', () => {
+		const urls: string[] = [];
+		const listeners: Record<string, (ev: unknown) => void>[] = [];
+		class Recording {
+			readyState = 1;
+			constructor(url: string) {
+				urls.push(url);
+				listeners.push({});
+			}
+			addEventListener(type: string, fn: (ev: unknown) => void) {
+				(listeners.at(-1) as Record<string, (ev: unknown) => void>)[type] = fn;
+			}
+			send() {}
+			close() {}
+		}
+		const logs: LogEntry[] = [];
+		const gateway = new Gateway({
+			token: TOKEN,
+			intents: 0,
+			url: 'ws://127.0.0.1:1/',
+			onMessage: () => {},
+			log: (e) => logs.push(e),
+			WebSocketImpl: Recording as unknown as typeof WebSocket,
+		});
+		gateway.start();
+		const deliver = (frame: Frame) => listeners[0]?.message?.({ data: JSON.stringify(frame) });
+		deliver({ op: 10, d: { heartbeat_interval: 60_000 } });
+		deliver(READY('wss://gateway.example.com', 1));
+		deliver({ op: 7 });
+		expect(logs.some((l) => l.event === 'gateway.bad_ready')).toBe(false);
+		expect(urls).toEqual(['ws://127.0.0.1:1/', 'wss://gateway.example.com/?v=10&encoding=json']);
+		void gateway.stop();
+	});
+
 	test('адрес по умолчанию — wss://gateway.discord.gg/?v=10&encoding=json', () => {
 		const urls: string[] = [];
 		class Recording {
