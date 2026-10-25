@@ -78,13 +78,15 @@ export function chatInputPayload(opts: {
 	guildId: string;
 	name: string;
 	options?: unknown[];
+	/** The interaction's channel object; defaults to a text channel. */
+	channel?: Record<string, unknown>;
 }): Record<string, unknown> {
 	return {
 		type: 2,
 		id: opts.id,
 		token: `tok-${opts.id}`,
 		guild_id: opts.guildId,
-		channel: { id: '222222222222222221', type: 0 },
+		channel: opts.channel ?? { id: '222222222222222221', type: 0 },
 		data: { type: 1, name: opts.name, options: opts.options ?? [] },
 	};
 }

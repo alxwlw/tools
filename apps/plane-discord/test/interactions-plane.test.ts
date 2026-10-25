@@ -357,11 +357,27 @@ describe('/plane KEY', () => {
 			['Создать задачу в Plane', 3],
 			['Добавить в задачу', 3],
 			['plane', 1],
+			['plane-link', 1],
 		]);
 		expect(defs[2] as unknown).toEqual({
 			name: 'plane',
 			type: 1,
 			description: 'Карточка задачи Plane',
+			options: [
+				{ name: 'key', type: 3, description: 'Ключ задачи, например LAB-40', required: true },
+			],
+			contexts: [0],
+			integration_types: [0],
+		});
+	});
+
+	test('commandDefinitions: плюс plane-link с обязательной опцией key, только гильдия', () => {
+		const defs = commandDefinitions();
+		expect(defs).toHaveLength(4);
+		expect(defs[3] as unknown).toEqual({
+			name: 'plane-link',
+			type: 1,
+			description: 'Привязать тред к задаче Plane',
 			options: [
 				{ name: 'key', type: 3, description: 'Ключ задачи, например LAB-40', required: true },
 			],

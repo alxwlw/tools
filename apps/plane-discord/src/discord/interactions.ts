@@ -1,4 +1,5 @@
-// Discord HTTP interactions: «message → work item», «add to work item» (design §3 «1c») and `/plane KEY` (phase 2).
+// Discord HTTP interactions: «message → work item», «add to work item» (design §3 «1c»), `/plane KEY` (phase 2)
+// and `/plane-link KEY` (phase 3).
 // Order of every request: signature over the raw bytes, then parse, then claim, then dispatch. A modal must open
 // within 3 s (primary response, cache only); a form submit gets a deferred ephemeral reply and the work runs after it.
 import { workItemCard } from '../card.ts';
@@ -15,7 +16,13 @@ import {
 	workItemKey,
 	workItemUrl,
 } from '../text.ts';
-import { APPEND_COMMAND, CREATE_COMMAND, PLANE_COMMAND, PLANE_KEY_OPTION } from './commands.ts';
+import {
+	APPEND_COMMAND,
+	CREATE_COMMAND,
+	PLANE_COMMAND,
+	PLANE_KEY_OPTION,
+	PLANE_LINK_COMMAND,
+} from './commands.ts';
 import { CHANNEL, type DiscordApi, DiscordApiError } from './rest.ts';
 import { verifyDiscordRequest } from './verify.ts';
 
@@ -74,6 +81,8 @@ const TEXT = {
 	hidden: 'Для этого проекта создание задач из Discord отключено.',
 	expired: 'Форма устарела, вызови команду ещё раз.',
 	itemMissing: 'Задача не найдена.',
+	notThread: 'Команда работает в треде.',
+	badKey: 'Нужен ключ вида LAB-40.',
 	internal: 'Внутренняя ошибка, повтори через минуту.',
 } as const;
 
@@ -96,6 +105,8 @@ type FormContext = {
 	guildId: string;
 	/** Where the message lives (a thread itself, not its forum): the public reply goes here. */
 	channelId: string;
+	/** `channel.type` of the command payload; null when absent. A thread opens on the reply only in a text or announcement channel. */
+	channelType: number | null;
 	/** The mapped project of the routing channel; null when the form asks for one. */
 	projectId: string | null;
 	/** Project ids the select offered: a submitted value outside it is refused. */
@@ -335,8 +346,9 @@ export function createInteractionHandler(
 		const target = `${itemLink(rt, key)} «${mdLabel(item.name)}»`;
 		if (!created) return edit(token, `Уже есть: ${target}`);
 
+		let reply: { id: string };
 		try {
-			await deps.discord.sendMessage(ctx.channelId, {
+			reply = await deps.discord.sendMessage(ctx.channelId, {
 				content: `→ [\`${key}\` «${mdLabel(item.name)}»](<${workItemUrl(deps.planeUrl, tenant.workspace, key)}>)`,
 				replyTo: ctx.messageId,
 			});
@@ -344,6 +356,26 @@ export function createInteractionHandler(
 			if (!(error instanceof DiscordApiError)) throw error;
 			const reason = error.status === 403 ? 'нет прав писать в канал' : describe(error);
 			return edit(token, `Задача создана: ${target} — ${reason}.`);
+		}
+		if (ctx.channelType === CHANNEL.TEXT || ctx.channelType === CHANNEL.ANNOUNCEMENT) {
+			try {
+				const threadId = await deps.discord.startThreadFromMessage(
+					ctx.channelId,
+					reply.id,
+					`${key} ${item.name}`,
+				);
+				deps.store.putThread(tenant.id, item.id, ctx.channelId, threadId, item.projectId);
+			} catch (error) {
+				if (!(error instanceof DiscordApiError)) throw error;
+				// The item and the public reply stand; only the thread is missing.
+				log({
+					event: 'ix.thread_failed',
+					level: 'warn',
+					tenant: tenant.id,
+					status: error.status,
+					code: error.code,
+				});
+			}
 		}
 		try {
 			await deps.discord.deleteOriginal(token);
@@ -426,6 +458,24 @@ export function createInteractionHandler(
 		await deps.discord.editOriginal(token, { content: '', embeds: [card] });
 	}
 
+	/** The public placeholder is withdrawn; the explanation is private. */
+	async function withdraw(
+		token: string,
+		base: Record<string, string>,
+		text: string,
+	): Promise<void> {
+		try {
+			await deps.discord.deleteOriginal(token);
+		} catch {
+			log({ event: 'ix.cleanup_failed', level: 'warn', ...base });
+		}
+		try {
+			await deps.discord.followup(token, { content: text, ephemeral: true });
+		} catch {
+			log({ event: 'ix.reply_failed', level: 'error', ...base });
+		}
+	}
+
 	function plane(rt: TenantRuntime, ix: Rec, id: string, data: Rec): Response {
 		const options = Array.isArray(data.options) ? data.options : [];
 		const option = options.map(rec).find((o) => own(o, 'name') === PLANE_KEY_OPTION);
@@ -446,23 +496,99 @@ export function createInteractionHandler(
 				// Missing and hidden keys share one outcome, as they share one answer.
 				if (missing) log({ event: 'ix.done', ...base, result: 'not_found', ms: now() - started });
 				else log(failedEntry(base, error, now() - started));
-				// The placeholder is public; the explanation is not.
-				try {
-					await deps.discord.deleteOriginal(token);
-				} catch {
-					log({ event: 'ix.cleanup_failed', level: 'warn', ...base });
-				}
-				try {
-					await deps.discord.followup(token, {
-						content: missing ? `${error.message}.` : `Не получилось: ${describe(error)}.`,
-						ephemeral: true,
-					});
-				} catch {
-					log({ event: 'ix.reply_failed', level: 'error', ...base });
-				}
+				await withdraw(
+					token,
+					base,
+					missing ? `${error.message}.` : `Не получилось: ${describe(error)}.`,
+				);
 			}
 		});
 		// No ephemeral flag: the card is for the whole channel.
+		return json({ type: REPLY.DEFERRED });
+	}
+
+	/** The key of the work item a thread is already bound to, or null when it cannot be told safely. */
+	async function boundKey(
+		rt: TenantRuntime,
+		bound: { projectId: string | null; workItemId: string },
+	): Promise<string | null> {
+		// A hidden project's key is not shown, even in a private reply.
+		if (bound.projectId === null || isHidden(rt, bound.projectId)) return null;
+		try {
+			const other = await rt.plane.getWorkItem(bound.projectId, bound.workItemId);
+			return await keyOf(rt, other.projectId, other.sequenceId);
+		} catch {
+			return null;
+		}
+	}
+
+	/** `/plane-link KEY`: binds the thread to a work item; a refusal is private, the confirmation public. */
+	async function runLink(
+		rt: TenantRuntime,
+		key: string,
+		thread: { id: string; parentId: string },
+		token: string,
+		base: Record<string, string>,
+	): Promise<string> {
+		const item = await rt.plane.getWorkItemByKey(key);
+		// A hidden project answers like a missing one: its keys are not confirmed from Discord.
+		if (item === null || isHidden(rt, item.projectId)) {
+			await withdraw(token, base, `Задача ${key} не найдена.`);
+			return 'not_found';
+		}
+		const bound = deps.store.findByThread(thread.id);
+		if (bound !== null && bound.workItemId !== item.id) {
+			const otherKey = await boundKey(rt, bound);
+			await withdraw(
+				token,
+				base,
+				otherKey === null
+					? 'Тред уже привязан к другой задаче.'
+					: `Тред уже привязан к ${otherKey}.`,
+			);
+			return 'already_linked';
+		}
+		deps.store.putThread(rt.tenant.id, item.id, thread.parentId, thread.id, item.projectId);
+		await edit(
+			token,
+			`Тред привязан к [\`${key}\` «${mdLabel(item.name)}»](<${workItemUrl(deps.planeUrl, rt.tenant.workspace, key)}>).`,
+		);
+		return 'linked';
+	}
+
+	function link(rt: TenantRuntime, ix: Rec, id: string, data: Rec): Response {
+		const channel = rec(ix.channel);
+		const type = channel?.type;
+		const threadId = snowflake(channel?.id) ?? snowflake(ix.channel_id);
+		const parentId = snowflake(channel?.parent_id);
+		if (
+			type !== CHANNEL.ANNOUNCEMENT_THREAD &&
+			type !== CHANNEL.PUBLIC_THREAD &&
+			type !== CHANNEL.PRIVATE_THREAD
+		)
+			return refuse(rt.tenant.id, id, 'not_thread', TEXT.notThread);
+		if (threadId === null || parentId === null)
+			return refuse(rt.tenant.id, id, 'no_channel', TEXT.noChannel);
+		const options = Array.isArray(data.options) ? data.options : [];
+		const option = options.map(rec).find((o) => own(o, 'name') === PLANE_KEY_OPTION);
+		const raw = own(option ?? null, 'value');
+		const key = (typeof raw === 'string' ? raw : '').trim().toUpperCase();
+		const token = str(ix.token);
+		if (key.length > KEY_MAX || !KEY_RE.test(key))
+			return refuse(rt.tenant.id, id, 'bad_key', TEXT.badKey);
+		if (token === null) return refuse(rt.tenant.id, id, 'no_token', TEXT.broken);
+		const started = now();
+		defer(async () => {
+			const base = { tenant: rt.tenant.id, interaction: id, kind: 'link' };
+			try {
+				const result = await runLink(rt, key, { id: threadId, parentId }, token, base);
+				log({ event: 'ix.done', ...base, result, ms: now() - started });
+			} catch (error) {
+				log(failedEntry(base, error, now() - started));
+				await withdraw(token, base, `Не получилось: ${describe(error)}.`);
+			}
+		});
+		// No ephemeral flag: the confirmation is for the whole thread.
 		return json({ type: REPLY.DEFERRED });
 	}
 
@@ -504,6 +630,8 @@ export function createInteractionHandler(
 		const name = own(data, 'name');
 		if (data !== null && data.type === CHAT_INPUT_COMMAND && name === PLANE_COMMAND)
 			return plane(rt, ix, id, data);
+		if (data !== null && data.type === CHAT_INPUT_COMMAND && name === PLANE_LINK_COMMAND)
+			return link(rt, ix, id, data);
 		const kind = name === CREATE_COMMAND ? 'create' : name === APPEND_COMMAND ? 'append' : null;
 		if (data === null || data.type !== MESSAGE_COMMAND || kind === null)
 			return refuse(tenant.id, id, 'unknown_command', TEXT.unknownCommand);
@@ -561,6 +689,7 @@ export function createInteractionHandler(
 			tenantId: tenant.id,
 			guildId: tenant.guildId,
 			channelId,
+			channelType: typeof channel?.type === 'number' ? channel.type : null,
 			projectId: mapped?.projectId ?? null,
 			offered: new Set(offered.map((p) => p.id)),
 			messageId,

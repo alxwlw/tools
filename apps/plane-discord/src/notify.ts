@@ -162,7 +162,7 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		}
 		// No nonce here: Discord's forum-post endpoint does not take one, so a timed-out create may repeat (see rest.ts).
 		const post = await deps.discord.createForumPost(channelId, `${key} ${item.name}`, message);
-		deps.store.putThread(rt.tenant.id, item.id, channelId, post.threadId);
+		deps.store.putThread(rt.tenant.id, item.id, channelId, post.threadId, item.projectId);
 	}
 
 	function channelDelivery(

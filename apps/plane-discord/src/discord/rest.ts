@@ -31,6 +31,7 @@ export type ChannelInfo = {
 export const CHANNEL = {
 	TEXT: 0,
 	ANNOUNCEMENT: 5,
+	ANNOUNCEMENT_THREAD: 10,
 	PUBLIC_THREAD: 11,
 	PRIVATE_THREAD: 12,
 	FORUM: 15,
@@ -51,6 +52,8 @@ export interface DiscordApi {
 		message: OutMessage,
 	): Promise<{ threadId: string; messageId: string }>;
 	sendMessage(channelId: string, message: OutMessage): Promise<{ id: string }>;
+	/** Opens a public thread on a message of a text or announcement channel; returns the thread id. */
+	startThreadFromMessage(channelId: string, messageId: string, name: string): Promise<string>;
 	openDm(userId: string): Promise<string>;
 	editOriginal(interactionToken: string, message: OutMessage): Promise<void>;
 	deleteOriginal(interactionToken: string): Promise<void>;
@@ -87,6 +90,7 @@ const MAX_RATE_RETRIES = 3;
 const INTERACTION_MAX_WAIT_MS = 60_000;
 const FLAG_EPHEMERAL = 64;
 const NONCE_MAX = 25;
+const THREAD_ARCHIVE_MINUTES = 10080;
 
 /**
  * A stable nonce for one delivery job: the same label gives the same nonce across the queue's retries, different
@@ -216,6 +220,19 @@ export class DiscordRest implements DiscordApi {
 				: { nonce: message.nonce.slice(0, NONCE_MAX), enforce_nonce: true }),
 		});
 		return { id: str(res, 'id') };
+	}
+
+	async startThreadFromMessage(
+		channelId: string,
+		messageId: string,
+		name: string,
+	): Promise<string> {
+		const res = await this.#bot(
+			'POST',
+			`/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
+			{ name: truncate(name, POST_NAME_MAX), auto_archive_duration: THREAD_ARCHIVE_MINUTES },
+		);
+		return str(res, 'id');
 	}
 
 	async openDm(userId: string): Promise<string> {

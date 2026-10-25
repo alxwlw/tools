@@ -67,6 +67,25 @@ export class FakeDiscord implements DiscordApi {
 		return { id: this.#id() };
 	}
 
+	async startThreadFromMessage(
+		channelId: string,
+		messageId: string,
+		name: string,
+	): Promise<string> {
+		this.#enter('startThreadFromMessage', channelId, messageId, name);
+		const threadId = this.#id();
+		const parent = this.channels.get(channelId);
+		this.channels.set(threadId, {
+			id: threadId,
+			type:
+				parent?.type === CHANNEL.ANNOUNCEMENT ? CHANNEL.ANNOUNCEMENT_THREAD : CHANNEL.PUBLIC_THREAD,
+			parentId: channelId,
+			guildId: parent?.guildId ?? null,
+			name,
+		});
+		return threadId;
+	}
+
 	async openDm(userId: string): Promise<string> {
 		this.#enter('openDm', userId);
 		return `dm-${userId}`;

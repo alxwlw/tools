@@ -15,9 +15,14 @@ export class Store {
 				work_item_id TEXT NOT NULL,
 				channel_id TEXT NOT NULL,
 				thread_id TEXT NOT NULL UNIQUE,
+				project_id TEXT,
 				PRIMARY KEY (tenant, work_item_id, channel_id)
 			)`,
 		);
+		// Phase 1-2 databases have no project_id; their rows keep NULL until a thread binding rewrites them.
+		const columns = this.#db.query<{ name: string }, []>('PRAGMA table_info(threads)').all();
+		if (!columns.some((c) => c.name === 'project_id'))
+			this.#db.run('ALTER TABLE threads ADD COLUMN project_id TEXT');
 		this.#db.run(
 			`CREATE TABLE IF NOT EXISTS discord_items (
 				tenant TEXT NOT NULL,
@@ -57,14 +62,55 @@ export class Store {
 		return row?.thread_id ?? null;
 	}
 
-	/** Upsert: a recreated forum post replaces the old thread id. */
-	putThread(tenant: string, workItemId: string, channelId: string, threadId: string): void {
+	/** Upsert: a recreated forum post (or a re-linked thread) replaces the old thread id. */
+	putThread(
+		tenant: string,
+		workItemId: string,
+		channelId: string,
+		threadId: string,
+		projectId: string | null,
+	): void {
 		this.#db
 			.query(
-				`INSERT INTO threads (tenant, work_item_id, channel_id, thread_id) VALUES (?, ?, ?, ?)
-				ON CONFLICT (tenant, work_item_id, channel_id) DO UPDATE SET thread_id = excluded.thread_id`,
+				`INSERT INTO threads (tenant, work_item_id, channel_id, thread_id, project_id) VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT (tenant, work_item_id, channel_id) DO UPDATE SET
+					thread_id = excluded.thread_id, project_id = excluded.project_id`,
 			)
-			.run(tenant, workItemId, channelId, threadId);
+			.run(tenant, workItemId, channelId, threadId, projectId);
+	}
+
+	/** The work item a thread is bound to; `projectId` is null on rows written before it was recorded. */
+	findByThread(threadId: string): {
+		tenant: string;
+		projectId: string | null;
+		workItemId: string;
+		channelId: string;
+	} | null {
+		const row = this.#db
+			.query<
+				{ tenant: string; project_id: string | null; work_item_id: string; channel_id: string },
+				[string]
+			>('SELECT tenant, project_id, work_item_id, channel_id FROM threads WHERE thread_id = ?')
+			.get(threadId);
+		return row
+			? {
+					tenant: row.tenant,
+					projectId: row.project_id,
+					workItemId: row.work_item_id,
+					channelId: row.channel_id,
+				}
+			: null;
+	}
+
+	/** Every thread bound to a work item, one per channel. */
+	threadsOfItem(tenant: string, workItemId: string): { channelId: string; threadId: string }[] {
+		return this.#db
+			.query<{ channel_id: string; thread_id: string }, [string, string]>(
+				`SELECT channel_id, thread_id FROM threads WHERE tenant = ? AND work_item_id = ?
+				ORDER BY channel_id, thread_id`,
+			)
+			.all(tenant, workItemId)
+			.map((r) => ({ channelId: r.channel_id, threadId: r.thread_id }));
 	}
 
 	getDiscordItem(

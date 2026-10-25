@@ -32,12 +32,12 @@ describe('Store', () => {
 
 	test('thread: put/get по (tenant, item, channel); другой канал → null', () => {
 		const store = new Store(':memory:');
-		store.putThread('acme', 'item-1', 'chan-1', 'thread-1');
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-1', 'proj-1');
 		expect(store.getThread('acme', 'item-1', 'chan-1')).toBe('thread-1');
 		expect(store.getThread('acme', 'item-1', 'chan-2')).toBeNull();
 		expect(store.getThread('other', 'item-1', 'chan-1')).toBeNull();
 		expect(store.getThread('acme', 'item-2', 'chan-1')).toBeNull();
-		store.putThread('acme', 'item-1', 'chan-1', 'thread-2');
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-2', 'proj-1');
 		expect(store.getThread('acme', 'item-1', 'chan-1')).toBe('thread-2');
 	});
 
@@ -83,7 +83,7 @@ describe('Store', () => {
 		const path = join(dir, 'state.sqlite');
 		const first = new Store(path);
 		first.claim('k', 1000);
-		first.putThread('acme', 'item-1', 'chan-1', 'thread-1');
+		first.putThread('acme', 'item-1', 'chan-1', 'thread-1', 'proj-1');
 		first.putDiscordItem('acme', 'msg-1', 'proj-1', 'item-1');
 		first.touchEvent('acme', 42);
 		first.close();
@@ -119,5 +119,64 @@ describe('Store', () => {
 			probe.query<{ journal_mode: string }, []>('PRAGMA journal_mode').get()?.journal_mode,
 		).toBe('wal');
 		probe.close();
+	});
+});
+
+describe('Store: треды и задачи', () => {
+	test('findByThread находит и пост форума из 1a; threadsOfItem — все треды задачи', () => {
+		const store = new Store(':memory:');
+		store.putThread('acme', 'item-1', 'chan-2', 'thread-b', 'proj-1');
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-a', 'proj-1');
+		store.putThread('acme', 'item-2', 'chan-1', 'thread-c', null);
+		store.putThread('other', 'item-1', 'chan-1', 'thread-d', 'proj-9');
+		expect(store.findByThread('thread-a')).toEqual({
+			tenant: 'acme',
+			projectId: 'proj-1',
+			workItemId: 'item-1',
+			channelId: 'chan-1',
+		});
+		expect(store.findByThread('thread-c')?.projectId).toBeNull();
+		expect(store.findByThread('nope')).toBeNull();
+		expect(store.threadsOfItem('acme', 'item-1')).toEqual([
+			{ channelId: 'chan-1', threadId: 'thread-a' },
+			{ channelId: 'chan-2', threadId: 'thread-b' },
+		]);
+		expect(store.threadsOfItem('acme', 'item-9')).toEqual([]);
+	});
+
+	test('upsert по (tenant, item, channel) заменяет и thread_id, и project_id', () => {
+		const store = new Store(':memory:');
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-a', null);
+		store.putThread('acme', 'item-1', 'chan-1', 'thread-b', 'proj-1');
+		expect(store.findByThread('thread-a')).toBeNull();
+		expect(store.findByThread('thread-b')?.projectId).toBe('proj-1');
+	});
+
+	test('миграция: старая таблица threads без project_id получает колонку, строки целы', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-discord-store-'));
+		dirs.push(dir);
+		const path = join(dir, 'state.sqlite');
+		const old = new Database(path, { create: true });
+		old.run(
+			`CREATE TABLE threads (
+				tenant TEXT NOT NULL,
+				work_item_id TEXT NOT NULL,
+				channel_id TEXT NOT NULL,
+				thread_id TEXT NOT NULL UNIQUE,
+				PRIMARY KEY (tenant, work_item_id, channel_id)
+			)`,
+		);
+		old.run("INSERT INTO threads VALUES ('acme', 'item-1', 'chan-1', 'thread-1')");
+		old.close();
+		const store = new Store(path);
+		expect(store.getThread('acme', 'item-1', 'chan-1')).toBe('thread-1');
+		expect(store.findByThread('thread-1')?.projectId).toBeNull();
+		store.putThread('acme', 'item-2', 'chan-1', 'thread-2', 'proj-1');
+		expect(store.findByThread('thread-2')?.projectId).toBe('proj-1');
+		store.close();
+		// A second open finds the column and does not try to add it again.
+		const again = new Store(path);
+		expect(again.findByThread('thread-2')?.projectId).toBe('proj-1');
+		again.close();
 	});
 });

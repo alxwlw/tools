@@ -18,6 +18,10 @@ Phases 1 and 2 (this version):
 - **2, `/plane KEY`.** A slash command that answers in the channel with a public card of the work item
   (title, state, assignees, priority, link). A malformed key, an unknown key and a key of a hidden
   project get a private (ephemeral) reply; the last two look the same.
+- **3, thread binding.** When `Создать задачу в Plane` creates a work item in a text or announcement
+  channel, the bot opens a thread on its public reply and binds it to the item (a forum post from 1a is
+  already bound). `/plane-link KEY` binds the thread it is typed in; a thread holds one work item.
+  Binding a thread to a hidden project's item is refused like an unknown key.
 
 Hidden projects (`hiddenProjects`) are hidden completely: no channel topics, no DMs, no modal, no
 forwarded mentions.

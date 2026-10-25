@@ -167,6 +167,33 @@ describe('DiscordRest: сообщения', () => {
 	});
 });
 
+describe('DiscordRest: тред на сообщении', () => {
+	test('startThreadFromMessage: POST /channels/{c}/messages/{m}/threads, имя до 100, архив 7 дней, id треда', async () => {
+		const { calls, rest } = stub([{ status: 201, body: { id: 't7' } }]);
+		const id = await rest.startThreadFromMessage('c1', 'm1', '😀'.repeat(150));
+		expect(id).toBe('t7');
+		expect(calls[0]?.method).toBe('POST');
+		expect(calls[0]?.url).toBe(`${API}/channels/c1/messages/m1/threads`);
+		expect(calls[0]?.headers.Authorization).toBe('Bot BOTSECRET');
+		expect(calls[0]?.body).toEqual({ name: `${'😀'.repeat(99)}…`, auto_archive_duration: 10080 });
+	});
+
+	test('startThreadFromMessage: ответ без id → ошибка; 403 → DiscordApiError со статусом и кодом', async () => {
+		const empty = stub([{ status: 201, body: {} }]);
+		expect(String(await failure(empty.rest.startThreadFromMessage('c1', 'm1', 'n')))).toContain(
+			'no string field "id"',
+		);
+		const denied = stub([{ status: 403, body: { code: 50013, message: 'Missing Permissions' } }]);
+		const err = await failure(denied.rest.startThreadFromMessage('c1', 'm1', 'n'));
+		expect(err).toBeInstanceOf(DiscordApiError);
+		expect([(err as DiscordApiError).status, (err as DiscordApiError).code]).toEqual([403, 50013]);
+	});
+
+	test('CHANNEL.ANNOUNCEMENT_THREAD = 10', () => {
+		expect(CHANNEL.ANNOUNCEMENT_THREAD).toBe(10);
+	});
+});
+
 describe('DiscordRest: ответы', () => {
 	test('createForumPost: id поста и id первого сообщения', async () => {
 		const { rest } = stub([{ status: 200, body: { id: 't1', message: { id: 'm9' } } }]);
@@ -280,6 +307,9 @@ describe('DiscordRest: маршруты и авторизация', () => {
 		expect(await urls((r) => r.listGuildChannels(ID), [])).toBe(`${API}/guilds/${E}/channels`);
 		expect(await urls((r) => r.createForumPost(ID, 'n', msg), { id: 't' })).toBe(
 			`${API}/channels/${E}/threads`,
+		);
+		expect(await urls((r) => r.startThreadFromMessage(ID, ID, 'n'), { id: 't' })).toBe(
+			`${API}/channels/${E}/messages/${E}/threads`,
 		);
 		expect(await urls((r) => r.sendMessage(ID, msg), { id: 'm' })).toBe(
 			`${API}/channels/${E}/messages`,
