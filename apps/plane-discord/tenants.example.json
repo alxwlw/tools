@@ -1,0 +1,27 @@
+{
+	"tenants": [
+		{
+			"id": "acme",
+			"guildId": "111111111111111111",
+			"workspace": "example-ws",
+			"workspaceId": "00000000-0000-4000-8000-000000000001",
+			"plane": {
+				"clientId": "example-client-id",
+				"appInstallationId": "00000000-0000-4000-8000-000000000002"
+			},
+			"serviceChannelId": "222222222222222222",
+			"silenceHours": 72,
+			"hiddenProjects": [],
+			"channels": [
+				{
+					"channelId": "333333333333333333",
+					"projectId": "00000000-0000-4000-8000-000000000003",
+					"moduleId": null
+				}
+			],
+			"users": [
+				{ "plane": "00000000-0000-4000-8000-000000000004", "discord": "444444444444444444" }
+			]
+		}
+	]
+}

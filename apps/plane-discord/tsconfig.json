@@ -1,0 +1,4 @@
+{
+	"extends": "@alxwlw/tsconfig/bun.json",
+	"include": ["src", "test", "scripts"]
+}

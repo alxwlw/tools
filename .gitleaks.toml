@@ -16,3 +16,30 @@ paths = [
   '''apps/plane-hooks/test/server\.test\.ts''',
 ]
 regexes = ['''a1b2c3d4e5f60718''']
+
+# Fake Discord application id in the plane-discord image smoke run and tests
+# (discord-client-id rule). Path AND exact value, as above.
+[[allowlists]]
+description = "fake Discord application id in plane-discord workflow and tests"
+condition = "AND"
+paths = [
+  '''\.github/workflows/plane-discord-image\.yml''',
+  '''apps/plane-discord/test/index\.test\.ts''',
+  '''apps/plane-discord/test/index-process\.test\.ts''',
+]
+regexes = ['''^123456789012345678$''']
+
+# The list of required env names in plane-discord's config: the
+# discord-client-secret rule reads the next name as a secret.
+[[allowlists]]
+description = "env name list in plane-discord config"
+condition = "AND"
+paths = ['''apps/plane-discord/src/config\.ts''']
+regexes = ['''^PLANE_DISCORD_DISCORD_PUBLIC_KEY$''']
+
+# Fake OAuth access tokens returned by the fake Plane in the probe tests.
+[[allowlists]]
+description = "fake access tokens in plane-discord probe tests"
+condition = "AND"
+paths = ['''apps/plane-discord/test/probe-plane-app\.test\.ts''']
+regexes = ['''^(abcdef123456|tok123456789)$''']
