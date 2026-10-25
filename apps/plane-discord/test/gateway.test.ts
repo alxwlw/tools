@@ -9,6 +9,8 @@ type Frame = { op: number; d?: any; s?: number | null; t?: string | null };
 /** Server side of one client connection: frames received, frames to send. */
 class Conn {
 	readonly frames: Frame[] = [];
+	/** Every frame ever received, consumed or not. */
+	readonly received: Frame[] = [];
 	closeCode: number | null = null;
 	/** Resolves with the close code once the client side closed the socket. */
 	readonly closed: Promise<number>;
@@ -23,6 +25,7 @@ class Conn {
 		});
 	}
 	push(frame: Frame) {
+		this.received.push(frame);
 		const i = this.waiters.findIndex((w) => w.match(frame));
 		if (i >= 0) this.waiters.splice(i, 1)[0]?.resolve(frame);
 		else this.frames.push(frame);
@@ -103,7 +106,13 @@ function fakeGateway(opts: { heartbeatInterval?: number; ack?: boolean } = {}) {
 
 function setup(
 	server: ReturnType<typeof fakeGateway>,
-	over: { random?: () => number; sleep?: (ms: number) => Promise<void> } = {},
+	over: {
+		random?: () => number;
+		sleep?: (ms: number) => Promise<void>;
+		url?: string;
+		/** 1-based construction numbers whose `new WebSocket` throws. */
+		failConstruct?: number[];
+	} = {},
 ) {
 	const logs: LogEntry[] = [];
 	const messages: GatewayMessage[] = [];
@@ -112,14 +121,15 @@ function setup(
 	let constructed = 0;
 	class CountingWebSocket extends WebSocket {
 		constructor(url: string | URL) {
-			super(url);
 			constructed++;
+			if (over.failConstruct?.includes(constructed)) throw new Error('construct failed');
+			super(url);
 		}
 	}
 	const gateway = new Gateway({
 		token: TOKEN,
 		intents: INTENTS.GUILDS | INTENTS.GUILD_MESSAGES | INTENTS.MESSAGE_CONTENT,
-		url: server.url,
+		url: over.url ?? server.url,
 		onMessage: (m) => messages.push(m),
 		log: (e) => {
 			logs.push(e);
@@ -130,6 +140,8 @@ function setup(
 			over.sleep ??
 			(async (ms) => {
 				sleeps.push(ms);
+				// A mutant that reconnects in a loop must fail the test, not hang the file.
+				if (sleeps.length > 20) throw new Error('sleep storm');
 			}),
 		WebSocketImpl: CountingWebSocket as typeof WebSocket,
 	});
@@ -145,6 +157,15 @@ function setup(
 				: new Promise<void>((resolve) => logWaiters.push({ event, resolve })),
 	};
 }
+
+/** n round trips: the server asks for a heartbeat and waits for the reply. */
+async function probe(c: Conn, n: number) {
+	for (let i = 0; i < n; i++) {
+		c.send({ op: 1 });
+		await c.takeOp(1);
+	}
+}
+const heartbeats = (c: Conn) => c.received.filter((f) => f.op === 1).length;
 
 const READY = (resume: string, s = 1): Frame => ({
 	op: 0,
@@ -199,6 +220,31 @@ describe('Gateway', () => {
 		expect(second.d).toBeNull();
 	});
 
+	test('heartbeat перевзводится на interval', async () => {
+		const delays: number[] = [];
+		const realSetTimeout = globalThis.setTimeout;
+		globalThis.setTimeout = ((fn: () => void, ms?: number, ...args: unknown[]) => {
+			delays.push(ms ?? 0);
+			return realSetTimeout(fn, ms, ...args);
+		}) as typeof setTimeout;
+		try {
+			const { server } = run({ heartbeatInterval: 60_000 }, { random: () => 0 });
+			const c = await server.conn(0);
+			await c.takeOp(2);
+			await c.takeOp(1);
+			// The server ACKed the first heartbeat; the next tick is armed for the full interval.
+			await probe(c, 1);
+			expect(delays.filter((d) => d === 60_000)).toEqual([60_000]);
+			expect(heartbeats(c)).toBe(2);
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+		}
+	});
+
+	test('INTENTS — значения из Discord API', () => {
+		expect(INTENTS).toEqual({ GUILDS: 1, GUILD_MESSAGES: 512, MESSAGE_CONTENT: 32768 });
+	});
+
 	test('первый heartbeat — через interval × random()', async () => {
 		let draws = 0;
 		const { server } = run(
@@ -213,8 +259,9 @@ describe('Gateway', () => {
 		const c = await server.conn(0);
 		await c.takeOp(2);
 		expect(draws).toBe(1);
-		// Half of 60 s has not passed: no heartbeat yet, and nothing was reported.
-		expect(c.frames.filter((f) => f.op === 1)).toEqual([]);
+		await probe(c, 20);
+		// Half of 60 s has not passed: only the 20 requested heartbeats arrived.
+		expect(heartbeats(c)).toBe(20);
 	});
 
 	test('MESSAGE_CREATE → onMessage с полями; seq запоминается', async () => {
@@ -452,12 +499,19 @@ describe('Gateway', () => {
 		expect(sleeps).toEqual([1000]);
 	});
 
-	test('close 4009 (сессия истекла) не фатален', async () => {
-		const { server, logs } = run();
+	test.each([4007, 4009])('close %d → backoff и новый IDENTIFY', async (code) => {
+		const { server, sleeps, logs } = run();
 		const c0 = await server.conn(0);
 		await c0.takeOp(2);
-		c0.close(4009);
-		await server.conn(1);
+		c0.send(READY(server.resumeBase, 5));
+		c0.send(messageCreate(6, validMessage));
+		c0.close(code);
+		const c1 = await server.conn(1);
+		const identify = await c1.takeOp(2);
+		expect(identify.d.token).toBe(TOKEN);
+		expect(c1.received.filter((f) => f.op === 6)).toEqual([]);
+		expect(c1.path).toBe('/?v=10&encoding=json');
+		expect(sleeps).toEqual([1000]);
 		expect(logs.some((l) => l.event === 'gateway.fatal')).toBe(false);
 	});
 
@@ -522,15 +576,134 @@ describe('Gateway', () => {
 	});
 
 	test('stop() гасит таймер heartbeat', async () => {
-		const { server, gateway } = run({ heartbeatInterval: 10 });
+		const { server, gateway, constructed, logs } = run({ heartbeatInterval: 30, ack: false });
 		const c = await server.conn(0);
 		await c.takeOp(2);
 		await c.takeOp(1);
 		await gateway.stop();
-		const before = c.frames.length;
-		// A close frame ends the server side; after that no heartbeat can arrive.
 		await c.closed;
-		expect(c.frames.length).toBe(before);
+		// Negative check: a live tick would find no ACK and reconnect within one interval; wait three.
+		await Bun.sleep(100);
+		expect(constructed()).toBe(1);
+		expect(logs.some((l) => l.event === 'gateway.reconnect')).toBe(false);
+	});
+
+	test('сбой sleep → gateway.sleep_failed и никаких новых подключений', async () => {
+		const { server, logs, constructed, logged } = run(
+			{},
+			{
+				sleep: () => Promise.reject(new Error('sleep broken')),
+			},
+		);
+		const c = await server.conn(0);
+		await c.takeOp(2);
+		c.close(4000);
+		await logged('gateway.sleep_failed');
+		expect(logs.find((l) => l.event === 'gateway.sleep_failed')).toEqual({
+			event: 'gateway.sleep_failed',
+			level: 'error',
+		});
+		expect(constructed()).toBe(1);
+	});
+
+	test('после stop() start() подключается заново', async () => {
+		const { server, gateway } = run();
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		await gateway.stop();
+		gateway.start();
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(2)).d.token).toBe(TOKEN);
+	});
+
+	test('READY с битым resume_gateway_url → gateway.bad_ready, op 7 даёт новый IDENTIFY', async () => {
+		const { server, logs } = run();
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.send(READY('not a url', 1));
+		c0.send({ op: 7 });
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(2)).d.token).toBe(TOKEN);
+		expect(c1.path).toBe('/?v=10&encoding=json');
+		expect(logs.filter((l) => l.event === 'gateway.bad_ready')).toEqual([
+			{ event: 'gateway.bad_ready', level: 'warn' },
+		]);
+	});
+
+	test('op 7 при сбое создания сокета → connect_failed и повтор после паузы', async () => {
+		const { server, logs, sleeps } = run({}, { failConstruct: [2] });
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.send(READY(server.resumeBase, 3));
+		c0.send({ op: 7 });
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(6)).d).toEqual({ token: TOKEN, session_id: 'sess-1', seq: 3 });
+		expect(logs.filter((l) => l.event === 'gateway.connect_failed')).toEqual([
+			{ event: 'gateway.connect_failed', level: 'warn' },
+		]);
+		expect(sleeps).toEqual([1000]);
+	});
+
+	test('нет ACK при сбое создания сокета → connect_failed и повтор после паузы', async () => {
+		const { server, logs, sleeps } = run(
+			{ heartbeatInterval: 30, ack: false },
+			{ failConstruct: [2] },
+		);
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.send(READY(server.resumeBase, 3));
+		const c1 = await server.conn(1);
+		expect((await c1.takeOp(6)).d).toEqual({ token: TOKEN, session_id: 'sess-1', seq: 3 });
+		expect(logs.some((l) => l.event === 'gateway.connect_failed')).toBe(true);
+		expect(sleeps[0]).toBe(1000);
+	});
+
+	test('сбой создания сокета после close → connect_failed, backoff 1 с, 2 с, третье подключение', async () => {
+		const { server, logs, sleeps, constructed } = run({}, { failConstruct: [2] });
+		const c0 = await server.conn(0);
+		await c0.takeOp(2);
+		c0.close(4000);
+		const c2 = await server.conn(1);
+		await c2.takeOp(2);
+		expect(constructed()).toBe(3);
+		expect(logs.filter((l) => l.event === 'gateway.connect_failed')).toEqual([
+			{ event: 'gateway.connect_failed', level: 'warn' },
+		]);
+		expect(sleeps).toEqual([1000, 2000]);
+	});
+
+	test('отказ в соединении → socket_error, затем reconnect с кодом 1006 и backoff 1 с', async () => {
+		const server = fakeGateway();
+		const { gateway, logs, sleeps, logged } = setup(server, { url: 'ws://127.0.0.1:1/' });
+		running = { gateway, server };
+		gateway.start();
+		await logged('gateway.reconnect');
+		expect(logs.map((l) => l.event).slice(0, 2)).toEqual([
+			'gateway.socket_error',
+			'gateway.reconnect',
+		]);
+		expect(logs[1]).toMatchObject({ code: 1006, reason: 'close', delay_ms: 1000 });
+		expect(sleeps[0]).toBe(1000);
+	});
+
+	test('адрес по умолчанию — wss://gateway.discord.gg/?v=10&encoding=json', () => {
+		const urls: string[] = [];
+		class Recording {
+			constructor(url: string) {
+				urls.push(url);
+			}
+			addEventListener() {}
+			close() {}
+		}
+		const gateway = new Gateway({
+			token: TOKEN,
+			intents: 0,
+			onMessage: () => {},
+			log: () => {},
+			WebSocketImpl: Recording as unknown as typeof WebSocket,
+		});
+		gateway.start();
+		expect(urls).toEqual(['wss://gateway.discord.gg/?v=10&encoding=json']);
 	});
 
 	test('токен не попадает в лог', async () => {

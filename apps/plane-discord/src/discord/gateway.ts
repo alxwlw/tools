@@ -23,6 +23,9 @@ const INVALID_SESSION_JITTER_MS = 4000;
 /** Not 1000/1001: Discord keeps the session resumable when we drop the socket with another code. */
 const DROP_CODE = 4000;
 
+/** Close codes after which Discord wants a brand-new session: reconnect with IDENTIFY, never RESUME. */
+const NEW_SESSION_CLOSE: ReadonlySet<number> = new Set([4007, 4009]);
+
 /** Close codes after which a reconnect cannot help; the text goes to the log, never the server's reason. */
 const FATAL_CLOSE: ReadonlyMap<number, string> = new Map([
 	[4004, 'токен бота отклонён Discord'],
@@ -126,7 +129,7 @@ export class Gateway {
 	start(): void {
 		if (!this.stopped) return;
 		this.stopped = false;
-		this.connect();
+		this.tryConnect();
 	}
 
 	stop(): Promise<void> {
@@ -150,6 +153,33 @@ export class Gateway {
 		ws.addEventListener('close', (ev) => {
 			if (gen === this.gen) this.onClose(ev.code);
 		});
+	}
+
+	/** connect() that never throws (bad URL, constructor failure): logs and retries after the backoff. */
+	private tryConnect(): void {
+		try {
+			this.connect();
+		} catch {
+			this.ws = null;
+			this.log({ event: 'gateway.connect_failed', level: 'warn' });
+			this.retryAfterBackoff();
+		}
+	}
+
+	private nextBackoff(): number {
+		const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** this.attempt);
+		this.attempt++;
+		return delay;
+	}
+
+	private retryAfterBackoff(): void {
+		void this.reconnectAfter(this.nextBackoff());
+	}
+
+	private clearSession(): void {
+		this.sessionId = null;
+		this.resumeUrl = null;
+		this.seq = null;
 	}
 
 	private withParams(base: string): string {
@@ -200,7 +230,7 @@ export class Gateway {
 			case 7:
 				this.log({ event: 'gateway.reconnect', reason: 'op7' });
 				this.drop(DROP_CODE);
-				this.connect();
+				this.tryConnect();
 				return;
 			case 9:
 				this.onInvalidSession(frame.d === true);
@@ -239,7 +269,7 @@ export class Gateway {
 			// Zombie connection: no ACK for the previous heartbeat. Drop it and resume.
 			this.log({ event: 'gateway.reconnect', reason: 'no_ack' });
 			this.drop(DROP_CODE);
-			this.connect();
+			this.tryConnect();
 			return;
 		}
 		this.acked = false;
@@ -255,12 +285,10 @@ export class Gateway {
 		if (resumable) {
 			this.log({ event: 'gateway.reconnect', reason: 'op9_resume' });
 			this.drop(DROP_CODE);
-			this.connect();
+			this.tryConnect();
 			return;
 		}
-		this.sessionId = null;
-		this.resumeUrl = null;
-		this.seq = null;
+		this.clearSession();
 		const pause = INVALID_SESSION_PAUSE_MS + this.random() * INVALID_SESSION_JITTER_MS;
 		this.log({ event: 'gateway.reconnect', reason: 'op9_identify', delay_ms: pause });
 		this.drop(1000);
@@ -274,6 +302,11 @@ export class Gateway {
 				const d = isRecord(frame.d) ? frame.d : {};
 				this.sessionId = str(d.session_id);
 				this.resumeUrl = str(d.resume_gateway_url);
+				if (this.resumeUrl !== null && !URL.canParse(this.resumeUrl)) {
+					// A session we cannot resume to is no session: the next connect re-identifies.
+					this.log({ event: 'gateway.bad_ready', level: 'warn' });
+					this.clearSession();
+				}
 				this.attempt = 0;
 				this.log({ event: 'gateway.ready' });
 				return;
@@ -311,8 +344,8 @@ export class Gateway {
 			return;
 		}
 		this.drop(1000);
-		const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** this.attempt);
-		this.attempt++;
+		if (NEW_SESSION_CLOSE.has(code)) this.clearSession();
+		const delay = this.nextBackoff();
 		this.log({ event: 'gateway.reconnect', reason: 'close', code, delay_ms: delay });
 		void this.reconnectAfter(delay);
 	}
@@ -321,14 +354,12 @@ export class Gateway {
 		const token = ++this.gen;
 		try {
 			await this.sleep(ms);
-			if (this.stopped || token !== this.gen) return;
-			this.connect();
 		} catch {
-			if (this.stopped || token !== this.gen) return;
-			this.log({ event: 'gateway.connect_failed', level: 'warn' });
-			const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** this.attempt);
-			this.attempt++;
-			void this.reconnectAfter(delay);
+			// A broken sleep cannot pace retries; give up rather than spin.
+			this.log({ event: 'gateway.sleep_failed', level: 'error' });
+			return;
 		}
+		if (this.stopped || token !== this.gen) return;
+		this.tryConnect();
 	}
 }
