@@ -97,8 +97,8 @@ export async function setup(
 		plane: countedPlane,
 		users: userMap(t.users),
 		projects: async () => plane.projects,
-		states: async () => [],
-		members: async () => [],
+		states: async (projectId) => plane.states.get(projectId) ?? [],
+		members: async () => plane.members,
 	};
 	const rt2: TenantRuntime = {
 		...rt,

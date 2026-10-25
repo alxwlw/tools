@@ -72,6 +72,23 @@ export function commandPayload(opts: {
 	};
 }
 
+/** A slash-command interaction (type 2, data.type 1) with string options. */
+export function chatInputPayload(opts: {
+	id: string;
+	guildId: string;
+	name: string;
+	options?: unknown[];
+}): Record<string, unknown> {
+	return {
+		type: 2,
+		id: opts.id,
+		token: `tok-${opts.id}`,
+		guild_id: opts.guildId,
+		channel: { id: '222222222222222221', type: 0 },
+		data: { type: 1, name: opts.name, options: opts.options ?? [] },
+	};
+}
+
 /** A modal submit (type 5): text inputs and selects wrapped in Label components, as Discord sends them. */
 export function submitPayload(opts: {
 	id: string;
