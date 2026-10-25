@@ -1,23 +1,8 @@
 // The composition root: every module wired as in production, with Plane and Discord replaced at fetch level.
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { connect } from 'node:net';
-import { EventEmitter } from 'node:events';
-import { afterEach, describe, expect, jest, test } from 'bun:test';
 
-import {
-	installProcessHandlers,
-	intervalEvery,
-	logUnhandled,
-	type Service,
-	type ServiceOptions,
-	startService,
-} from '../src/index.ts';
-import { CREATE_COMMAND } from '../src/discord/commands.ts';
-import { commandPayload, makeSigner, submitPayload } from './discord-harness.ts';
-import { Store } from '../src/store.ts';
+import { type Service, type ServiceOptions, startService } from '../src/index.ts';
+import { makeSigner } from './discord-harness.ts';
 import { fixture } from './fixtures.ts';
 
 export const signer = await makeSigner();

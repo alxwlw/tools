@@ -23,7 +23,7 @@ import {
 	snowflake,
 	str,
 } from './ix-common.ts';
-import { DiscordApiError } from './rest.ts';
+import { DISCORD_ERR, DiscordApiError } from './rest.ts';
 
 const UNKNOWN_ASSIGNEE = 'кто-то';
 const TEXT = {
@@ -168,6 +168,32 @@ export function createSlashCommands(env: SlashEnv): {
 			await withdraw(token, base, `Задача ${key} не найдена.`);
 			return 'not_found';
 		}
+		// A private thread's messages reach only its members, and a slash command does not make the bot one.
+		// Joined before the already-bound check: no await may sit between that check and putThread.
+		try {
+			await deps.discord.joinThread(thread.id);
+		} catch (error) {
+			if (!(error instanceof DiscordApiError)) throw error;
+			log({
+				event: 'ix.join_failed',
+				level: 'warn',
+				...base,
+				status: error.status,
+				code: error.code,
+			});
+			const noAccess =
+				error.status === 403 ||
+				error.code === DISCORD_ERR.MISSING_ACCESS ||
+				error.code === DISCORD_ERR.UNKNOWN_CHANNEL;
+			await withdraw(
+				token,
+				base,
+				noAccess
+					? 'Не могу войти в тред: добавь @Plane в тред и повтори.'
+					: `Не получилось: ${describe(error)}.`,
+			);
+			return 'join_failed';
+		}
 		const bound = deps.store.findByThread(thread.id);
 		if (bound !== null && bound.workItemId !== item.id) {
 			const otherKey = await boundKey(rt, bound);
@@ -179,21 +205,6 @@ export function createSlashCommands(env: SlashEnv): {
 					: `Тред уже привязан к ${otherKey}.`,
 			);
 			return 'already_linked';
-		}
-		// A private thread's messages reach only its members, and a slash command does not make the bot one.
-		try {
-			await deps.discord.joinThread(thread.id);
-		} catch (error) {
-			if (!(error instanceof DiscordApiError)) throw error;
-			log({
-				event: 'ix.join_failed',
-				level: 'warn',
-				...base,
-				status: error.status,
-				code: error.code ?? undefined,
-			});
-			await withdraw(token, base, 'Не могу войти в тред: добавь @Plane в тред и повтори.');
-			return 'join_failed';
 		}
 		deps.store.putThread(rt.tenant.id, item.id, thread.parentId, thread.id, item.projectId);
 		const text = `Тред привязан к [\`${key}\` «${mdLabel(item.name)}»](<${workItemUrl(deps.planeUrl, rt.tenant.workspace, key)}>).`;

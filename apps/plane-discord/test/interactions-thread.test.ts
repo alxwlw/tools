@@ -234,6 +234,77 @@ describe('/plane-link', () => {
 		]);
 	});
 
+	test('/plane-link: join 503 → «Не получилось…», связи нет', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set('joinThread', new DiscordApiError(503, 'PUT', '/channels/:id'));
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(w.discord.callsOf('followup')).toEqual([
+			[
+				'tok-900000000000000001',
+				{ content: 'Не получилось: Discord ответил 503.', ephemeral: true },
+			],
+		]);
+		expect(w.logs.find((l) => l.event === 'ix.join_failed')).toMatchObject({
+			status: 503,
+			code: null,
+		});
+	});
+
+	test('/plane-link: join отказан только статусом 403 или только кодом 50001 → просьба добавить бота', async () => {
+		for (const error of [
+			new DiscordApiError(403, 'PUT', '/channels/:id'),
+			new DiscordApiError(400, 'PUT', '/channels/:id', 50001),
+		]) {
+			const w = await setup();
+			seed(w, { id: 'w40', seq: 40 });
+			w.discord.failures.set('joinThread', error);
+			await link(w, 'LAB-40');
+			await w.settle();
+			expect(w.discord.callsOf('followup')[0]?.[1]).toMatchObject({
+				content: 'Не могу войти в тред: добавь @Plane в тред и повтори.',
+			});
+		}
+	});
+
+	test('/plane-link: join отказан кодом 10003 → просьба добавить бота', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set('joinThread', new DiscordApiError(404, 'PUT', '/channels/:id', 10003));
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.discord.callsOf('followup')[0]?.[1]).toMatchObject({
+			content: 'Не могу войти в тред: добавь @Plane в тред и повтори.',
+		});
+	});
+
+	test('/plane-link: две команды с разными ключами в одном треде, пока идёт join → вторая получает «уже привязан»', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		seed(w, { id: 'w41', seq: 41, name: 'Другое' });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		let arrived = 0;
+		let bothIn: () => void = () => {};
+		const both = new Promise<void>((resolve) => (bothIn = resolve));
+		w.discord.joinThread = async () => {
+			if (++arrived === 2) bothIn();
+			await gate;
+		};
+		await link(w, 'LAB-40');
+		await link(w, 'LAB-41');
+		await both;
+		release();
+		await w.settle();
+		expect(w.store.findByThread(THREAD)?.workItemId).toBe('w40');
+		expect(w.discord.callsOf('followup')).toEqual([
+			['tok-900000000000000002', { content: 'Тред уже привязан к LAB-40.', ephemeral: true }],
+		]);
+		expect(w.logs.some((l) => l.event === 'ix.failed')).toBe(false);
+	});
+
 	test('/plane-link: сбой join не от Discord API → связи нет, ix.failed', async () => {
 		const w = await setup();
 		seed(w, { id: 'w40', seq: 40 });
