@@ -1,199 +1,46 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { ChannelRoute, Tenant } from '../src/config.ts';
-import { CHANNEL, DISCORD_ERR, DiscordApiError, type OutMessage } from '../src/discord/rest.ts';
-import type { LogEntry } from '../src/log.ts';
-import { createNotifier, type Delivery, routesFor, type TenantRuntime } from '../src/notify.ts';
-import type { PlaneEvent, WorkItemSnapshot } from '../src/plane/webhook.ts';
+import type { ChannelRoute } from '../src/config.ts';
+import { DISCORD_ERR, DiscordApiError, type OutMessage } from '../src/discord/rest.ts';
+import { type Delivery, routesFor } from '../src/notify.ts';
 import { SerialQueue } from '../src/queue.ts';
-import { Store } from '../src/store.ts';
-import { userMap } from '../src/text.ts';
 import { FakeDiscord } from './fake-discord.ts';
-import { FakePlane } from './fake-plane.ts';
-
-const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-// Plane side
-const PROJECT = ID(1);
-const OTHER_PROJECT = ID(2);
-const ITEM = ID(100);
-const MOD_A = ID(21);
-const MOD_B = ID(22);
-const ALICE = ID(10);
-const BOB = ID(11);
-const CAROL = ID(12); // in Plane, not in the user table
-const BOT = ID(13);
-const S_STARTED = ID(31);
-const S_DONE = ID(32);
-const S_DONE_2 = ID(33);
-const S_CANCEL = ID(34);
-const S_BACKLOG = ID(35);
-// Discord side
-const D_ALICE = '110000000000000001';
-const D_BOB = '110000000000000002';
-const D_BOT = '110000000000000003';
-const GUILD = '120000000000000001';
-const FORUM = '130000000000000001';
-const TEXT = '130000000000000002';
-const ANNOUNCE = '130000000000000003';
-const FORUM_2 = '130000000000000004';
-const VOICE = '130000000000000005';
-const PLANE_URL = 'https://plane.example.com';
-const LINK = `[Открыть в Plane](<${PLANE_URL}/example-ws/browse/LAB-41/>)`;
-
-const route = (channelId: string, over: Partial<ChannelRoute> = {}): ChannelRoute => ({
-	channelId,
-	projectId: PROJECT,
-	moduleId: null,
-	events: ['created', 'closed', 'mention'],
-	...over,
-});
-const tenantOf = (channels: ChannelRoute[], id = 'initech'): Tenant => ({
-	id,
-	guildId: GUILD,
-	workspace: 'example-ws',
-	workspaceId: ID(900),
-	auth: { clientId: 'client', clientSecret: 'secret', appInstallationId: ID(901) },
-	webhookSecret: 'hook',
-	serviceChannelId: null,
-	silenceHours: 72,
-	hiddenProjects: [],
-	channels,
-	users: [
-		{ plane: ALICE, discord: D_ALICE },
-		{ plane: BOB, discord: D_BOB },
-	],
-});
-const mentionTag = (id: string, node = 'n') =>
-	`<mention-component id="${node}" entity_identifier="${id}" entity_name="user_mention"></mention-component>`;
-const mentionHtml = (...ids: string[]) =>
-	`<p>${ids.map((id, i) => mentionTag(id, `n${i}`)).join(' ')} привет</p>`;
-const snapshot = (over: Partial<WorkItemSnapshot> = {}): WorkItemSnapshot => ({
-	id: ITEM,
-	projectId: PROJECT,
-	sequenceId: 41,
-	name: 'Название',
-	stateId: S_STARTED,
-	assignees: [],
-	descriptionHtml: null,
-	...over,
-});
-
-class SpyPlane extends FakePlane {
-	moduleCalls: Array<readonly string[]> = [];
-	override async getWorkItemModules(p: string, w: string, ids: readonly string[]) {
-		this.moduleCalls.push(ids);
-		return super.getWorkItemModules(p, w, ids);
-	}
-}
-
-function setup(channels: ChannelRoute[] = [route(FORUM)], tenant: Tenant = tenantOf(channels)) {
-	const plane = new SpyPlane();
-	plane.botId = BOT;
-	plane.projects = [{ id: PROJECT, identifier: 'LAB', name: 'Lab' }];
-	plane.states.set(PROJECT, [
-		{ id: S_STARTED, name: 'In Progress', group: 'started' },
-		{ id: S_DONE, name: 'Done', group: 'completed' },
-		{ id: S_DONE_2, name: 'Released', group: 'completed' },
-		{ id: S_CANCEL, name: 'Cancelled', group: 'cancelled' },
-		{ id: S_BACKLOG, name: 'Backlog', group: 'backlog' },
-	]);
-	plane.members = [
-		{ id: ALICE, displayName: 'Alice' },
-		{ id: BOB, displayName: 'Bob' },
-		{ id: CAROL, displayName: 'Carol' },
-	];
-	plane.items.set(ITEM, {
-		id: ITEM,
-		projectId: PROJECT,
-		sequenceId: 41,
-		name: 'Название',
-		stateId: S_STARTED,
-		assignees: [],
-		priority: 'none',
-		descriptionHtml: null,
-	});
-	const discord = new FakeDiscord();
-	for (const [id, type] of [
-		[FORUM, CHANNEL.FORUM],
-		[FORUM_2, CHANNEL.MEDIA],
-		[TEXT, CHANNEL.TEXT],
-		[ANNOUNCE, CHANNEL.ANNOUNCEMENT],
-		[VOICE, 2],
-	] as const)
-		discord.channels.set(id, { id, type, parentId: null, guildId: GUILD, name: 'c' });
-	return build(plane, discord, tenant);
-}
-
-function build(plane: SpyPlane, discord: FakeDiscord, tenant: Tenant) {
-	const store = new Store(':memory:');
-	const logs: LogEntry[] = [];
-	const runtime: TenantRuntime = {
-		tenant,
-		plane,
-		users: userMap(tenant.users),
-		projects: () => plane.listProjects(),
-		states: (projectId) => plane.listStates(projectId),
-		members: () => plane.listMembers(),
-	};
-	const notify = createNotifier({
-		runtimes: new Map([[tenant.id, runtime]]),
-		discord,
-		store,
-		planeUrl: PLANE_URL,
-		// not a recorded Discord call: tests count calls
-		channelType: async (id) => {
-			const found = discord.channels.get(id);
-			if (!found) throw new Error('no channel');
-			return found.type;
-		},
-		log: (e) => logs.push(e),
-	});
-	return { plane, discord, store, logs, notify, tenant };
-}
-
-const runAll = async (deliveries: Delivery[]) => {
-	for (const d of deliveries) await d.run();
-};
-const created = (over: Partial<WorkItemSnapshot> = {}, actorId = CAROL): PlaneEvent => ({
-	kind: 'workitem.created',
-	tenant: 'initech',
-	eventKey: 'issue.created:x',
-	actorId,
-	item: snapshot(over),
-});
-const updated = (
-	previous: Extract<PlaneEvent, { kind: 'workitem.updated' }>['previous'],
-	over: Partial<WorkItemSnapshot> = {},
-	actorId = CAROL,
-): PlaneEvent => ({
-	kind: 'workitem.updated',
-	tenant: 'initech',
-	eventKey: 'issue.updated:x',
-	actorId,
-	item: snapshot(over),
-	previous,
-});
-const comment = (commentHtml: string | null, actorId = CAROL): PlaneEvent => ({
-	kind: 'comment.created',
-	tenant: 'initech',
-	eventKey: 'comment.created:c1',
-	actorId,
-	projectId: PROJECT,
-	workItemId: ITEM,
-	commentId: ID(200),
-	commentHtml,
-});
-const agentMention = (commentId: string | null = ID(200)): PlaneEvent => ({
-	kind: 'agent.mention',
-	tenant: 'initech',
-	eventKey: 'agent_run:r1',
-	projectId: PROJECT,
-	workItemId: ITEM,
-	commentId,
-	runId: ID(300),
-});
-const sent = (discord: FakeDiscord) =>
-	discord.callsOf('sendMessage') as Array<[string, OutMessage]>;
+import {
+	ALICE,
+	ANNOUNCE,
+	BOB,
+	BOT,
+	build,
+	CAROL,
+	comment,
+	created,
+	D_ALICE,
+	D_BOB,
+	D_BOT,
+	FORUM,
+	FORUM_2,
+	ID,
+	ITEM,
+	LINK,
+	mentionHtml,
+	MOD_A,
+	MOD_B,
+	OTHER_PROJECT,
+	PROJECT,
+	route,
+	runAll,
+	S_BACKLOG,
+	S_CANCEL,
+	S_DONE,
+	S_DONE_2,
+	S_STARTED,
+	sent,
+	setup,
+	tenantOf,
+	TEXT,
+	updated,
+	VOICE,
+} from './notify-world.ts';
 
 describe('createNotifier: workitem.created', () => {
 	test('created, канал-форум → пост «LAB-41 Название», связь в store; следующее событие по задаче — в тот же пост', async () => {
@@ -760,206 +607,5 @@ describe('ошибки не из Discord не принимаются за 404 и
 		discord.failures.set('openDm', foreign({ code: DISCORD_ERR.CANNOT_DM }) as DiscordApiError);
 		await expect((dm as Delivery).run()).rejects.toThrow('boom');
 		expect(logs.filter((e) => e.event === 'dm.closed')).toEqual([]);
-	});
-});
-
-describe('createNotifier: agent.mention', () => {
-	const setupMention = (channels: ChannelRoute[]) => {
-		const ctx = setup(channels);
-		ctx.plane.comments.push({
-			id: ID(200),
-			html: `<p>Привет, ${mentionTag(ALICE)} ${mentionTag(CAROL)} привет</p>`,
-			actorId: ALICE,
-			externalSource: null,
-			externalId: null,
-			projectId: PROJECT,
-			workItemId: ITEM,
-		});
-		return ctx;
-	};
-
-	test('agent.mention → каналы с mention, цитата из getComment, createRunActivity; без канала — ответ «канал не настроен»', async () => {
-		const { notify, discord, plane } = setupMention([
-			route(TEXT),
-			route(ANNOUNCE, { events: ['created'] }),
-		]);
-		await runAll(await notify(agentMention()));
-		expect(sent(discord)).toEqual([
-			[
-				TEXT,
-				{
-					content: `**LAB-41** Название\nУпомянули бота · <@${D_ALICE}>\n${LINK}\n> Привет, <@${D_ALICE}> @Carol привет`,
-				},
-			],
-		]);
-		expect(plane.activities).toEqual([{ runId: ID(300), body: `→ Discord: ${TEXT}` }]);
-
-		const none = setupMention([
-			route(TEXT, { events: ['created'] }),
-			route(FORUM, { projectId: OTHER_PROJECT }),
-		]);
-		await runAll(await none.notify(agentMention()));
-		expect(none.discord.calls).toEqual([]);
-		expect(none.plane.activities).toEqual([
-			{ runId: ID(300), body: 'Канал для проекта не настроен' },
-		]);
-	});
-
-	test('ответ run — после доставок в каналы и один на событие; в форум идёт постом', async () => {
-		const { notify, discord, plane } = setupMention([route(FORUM), route(TEXT)]);
-		const deliveries = await notify(agentMention());
-		expect(deliveries.map((d) => d.label)).toEqual([
-			`agent_run:r1→channel:${FORUM}`,
-			`agent_run:r1→channel:${TEXT}`,
-			`agent_run:r1→run:${ID(300)}`,
-		]);
-		expect(plane.activities).toEqual([]);
-		await runAll(deliveries);
-		expect(plane.activities).toEqual([{ runId: ID(300), body: `→ Discord: ${FORUM}, ${TEXT}` }]);
-		expect(discord.callsOf('createForumPost')).toHaveLength(1);
-	});
-
-	test('без commentId → сообщение без цитаты, getComment не нужен', async () => {
-		const { notify, discord } = setup([route(TEXT)]);
-		await runAll(await notify(agentMention(null)));
-		expect(sent(discord)[0]?.[1].content).toBe(
-			`**LAB-41** Название\nУпомянули бота · кто-то\n${LINK}`,
-		);
-	});
-
-	test('длинная цитата режется до 1000 символов и стоит после ссылки', async () => {
-		const { notify, discord, plane } = setupMention([route(TEXT)]);
-		plane.comments[0]!.html = `<p>${'я'.repeat(3000)}</p>`;
-		await runAll(await notify(agentMention()));
-		const lines = (sent(discord)[0]?.[1].content ?? '').split('\n');
-		expect(lines[3]).toBe(`> ${'я'.repeat(999)}…`);
-		expect(lines[2]).toBe(LINK);
-		expect(lines).toHaveLength(4);
-	});
-
-	test('в цитате упомянутый, которого нет ни в таблице, ни в members → «@кто-то»', async () => {
-		const { notify, discord, plane } = setupMention([route(TEXT)]);
-		plane.comments[0]!.html = `<p>${mentionTag(ID(99))}</p>`;
-		await runAll(await notify(agentMention()));
-		expect((sent(discord)[0]?.[1].content ?? '').split('\n')[3]).toBe('> @кто-то');
-	});
-
-	test('комментарий без текста → сообщение без цитаты', async () => {
-		const { notify, discord, plane } = setupMention([route(TEXT)]);
-		plane.comments[0]!.html = '<p></p>';
-		await runAll(await notify(agentMention()));
-		expect(sent(discord)[0]?.[1].content).toBe(
-			`**LAB-41** Название\nУпомянули бота · <@${D_ALICE}>\n${LINK}`,
-		);
-	});
-
-	test('многострочная цитата — каждая строка с «> »', async () => {
-		const { notify, discord, plane } = setupMention([route(TEXT)]);
-		plane.comments[0]!.html = '<p>первая</p><p>вторая</p>';
-		await runAll(await notify(agentMention()));
-		expect((sent(discord)[0]?.[1].content ?? '').split('\n').slice(3)).toEqual([
-			'> первая',
-			'> ',
-			'> вторая',
-		]);
-	});
-
-	test('проекта нет в списке Plane → run всё равно получает ответ', async () => {
-		const { notify, plane, discord, logs } = setupMention([route(TEXT)]);
-		plane.projects = [];
-		await runAll(await notify(agentMention()));
-		expect(discord.calls).toEqual([]);
-		expect(plane.activities).toEqual([
-			{ runId: ID(300), body: 'Не удалось отправить в Discord: проект не найден в Plane' },
-		]);
-		expect(logs).toContainEqual({
-			event: 'notify.skip',
-			level: 'error',
-			tenant: 'initech',
-			reason: 'unknown_project',
-			eventKey: 'agent_run:r1',
-		});
-	});
-});
-
-describe('hiddenProjects: проект скрыт полностью', () => {
-	const hidden = (channels: ChannelRoute[]) =>
-		setup(channels, { ...tenantOf(channels), hiddenProjects: [PROJECT] });
-	const skipEntry = (eventKey: string) => ({
-		event: 'notify.skip',
-		level: undefined,
-		tenant: 'initech',
-		reason: 'hidden_project',
-		eventKey,
-	});
-
-	test('created: ни канала, ни DM, notify.skip hidden_project, запросов Plane нет', async () => {
-		const { notify, discord, plane, logs } = hidden([route(TEXT)]);
-		expect(
-			await notify(created({ assignees: [BOB], descriptionHtml: mentionHtml(ALICE) })),
-		).toEqual([]);
-		expect(discord.calls).toEqual([]);
-		expect(plane.moduleCalls).toEqual([]);
-		expect(logs).toEqual([skipEntry('issue.created:x')]);
-	});
-
-	test('updated: закрытие, новый исполнитель и упоминание — ничего', async () => {
-		const { notify, discord, logs } = hidden([route(TEXT)]);
-		expect(await notify(updated({ stateId: S_STARTED }, { stateId: S_DONE }))).toEqual([]);
-		expect(await notify(updated({ assignees: [] }, { assignees: [BOB] }))).toEqual([]);
-		expect(
-			await notify(updated({ descriptionHtml: null }, { descriptionHtml: mentionHtml(BOB) })),
-		).toEqual([]);
-		expect(discord.calls).toEqual([]);
-		expect(logs.map((l) => l.reason)).toEqual([
-			'hidden_project',
-			'hidden_project',
-			'hidden_project',
-		]);
-	});
-
-	test('comment.created с упоминанием: DM нет, getComment не вызывается', async () => {
-		const { notify, discord, logs } = hidden([]);
-		expect(await notify(comment(null))).toEqual([]);
-		expect(await notify(comment(mentionHtml(BOB)))).toEqual([]);
-		expect(discord.calls).toEqual([]);
-		expect(logs).toEqual([skipEntry('comment.created:c1'), skipEntry('comment.created:c1')]);
-	});
-
-	test('agent.mention: ни одного вызова Discord, run получает нейтральный ответ без каналов, лог без текстов', async () => {
-		const { notify, discord, plane, logs } = hidden([route(TEXT)]);
-		const deliveries = await notify(agentMention());
-		expect(deliveries).toHaveLength(1);
-		await runAll(deliveries);
-		expect(discord.calls).toEqual([]);
-		expect(plane.activities).toEqual([
-			{ runId: ID(300), body: 'Пересылка в Discord для этого проекта отключена' },
-		]);
-		expect(JSON.stringify(plane.activities)).not.toContain(TEXT);
-		expect(logs).toEqual([skipEntry('agent_run:r1')]);
-	});
-
-	test('другой проект того же тенанта не затронут', async () => {
-		const channels = [route(TEXT)];
-		const { notify, discord } = setup(channels, {
-			...tenantOf(channels),
-			hiddenProjects: [OTHER_PROJECT],
-		});
-		await runAll(await notify(created()));
-		expect(sent(discord).map(([c]) => c)).toEqual([TEXT]);
-	});
-});
-
-describe('логи', () => {
-	test('ни одна запись не содержит названия задачи, текста описания и комментария', async () => {
-		const { notify, logs } = setup([route(VOICE), route(TEXT)]);
-		await runAll(
-			await notify(
-				created({ name: 'СЕКРЕТНОЕ-НАЗВАНИЕ', descriptionHtml: mentionHtml(BOB) }, ALICE),
-			),
-		);
-		await notify({ ...updated({ stateId: S_STARTED }, { stateId: ID(77) }), tenant: 'initech' });
-		expect(logs.length).toBeGreaterThan(0);
-		expect(JSON.stringify(logs)).not.toContain('СЕКРЕТНОЕ');
 	});
 });
