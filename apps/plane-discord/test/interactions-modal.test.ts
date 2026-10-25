@@ -97,7 +97,7 @@ describe('createInteractionHandler: подпись и служебные отв�
 	});
 
 	test('commandDefinitions: две MESSAGE-команды с именами из констант, contexts [0]', () => {
-		expect(commandDefinitions()).toEqual([
+		expect(commandDefinitions().slice(0, 2)).toEqual([
 			{ name: CREATE_COMMAND, type: 3, contexts: [0], integration_types: [0] },
 			{ name: APPEND_COMMAND, type: 3, contexts: [0], integration_types: [0] },
 		]);

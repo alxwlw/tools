@@ -1,6 +1,7 @@
-// Discord HTTP interactions: «message → work item» and «add to work item» (design §3 «1c»).
+// Discord HTTP interactions: «message → work item», «add to work item» (design §3 «1c») and `/plane KEY` (phase 2).
 // Order of every request: signature over the raw bytes, then parse, then claim, then dispatch. A modal must open
 // within 3 s (primary response, cache only); a form submit gets a deferred ephemeral reply and the work runs after it.
+import { workItemCard } from '../card.ts';
 import { esc, truncate } from '../html.ts';
 import type { Log } from '../log.ts';
 import type { TenantRuntime } from '../notify.ts';
@@ -14,7 +15,7 @@ import {
 	workItemKey,
 	workItemUrl,
 } from '../text.ts';
-import { APPEND_COMMAND, CREATE_COMMAND } from './commands.ts';
+import { APPEND_COMMAND, CREATE_COMMAND, PLANE_COMMAND, PLANE_KEY_OPTION } from './commands.ts';
 import { CHANNEL, type DiscordApi, DiscordApiError } from './rest.ts';
 import { verifyDiscordRequest } from './verify.ts';
 
@@ -36,7 +37,9 @@ export type InteractionDeps = {
 const TYPE = { PING: 1, COMMAND: 2, MODAL_SUBMIT: 5 } as const;
 const REPLY = { PONG: 1, MESSAGE: 4, DEFERRED: 5, MODAL: 9 } as const;
 const COMPONENT = { STRING_SELECT: 3, TEXT_INPUT: 4, LABEL: 18 } as const;
+const CHAT_INPUT_COMMAND = 1;
 const MESSAGE_COMMAND = 3;
+const UNKNOWN_ASSIGNEE = 'кто-то';
 const FLAG_EPHEMERAL = 64;
 
 const TITLE_MAX = 255;
@@ -372,6 +375,80 @@ export function createInteractionHandler(
 		await edit(token, `→ комментарий в ${where}`);
 	}
 
+	/** `/plane KEY`: the public card, or a private note after the public placeholder is withdrawn. */
+	async function runCard(rt: TenantRuntime, key: string, token: string): Promise<void> {
+		const item = await rt.plane.getWorkItemByKey(key);
+		// A hidden project answers like a missing one: a public card must not confirm its keys.
+		if (item === null || isHidden(rt, item.projectId))
+			throw new Failure(`Задача ${key} не найдена`);
+		const states = await rt.states(item.projectId);
+		const members = await rt.members();
+		const assignees = item.assignees.map((planeId) => {
+			const discordId = rt.users.toDiscord(planeId);
+			return discordId !== null
+				? `<@${discordId}>`
+				: (members.find((m) => m.id === planeId)?.displayName ?? '') || UNKNOWN_ASSIGNEE;
+		});
+		const card = workItemCard({
+			key,
+			url: workItemUrl(deps.planeUrl, rt.tenant.workspace, key),
+			name: item.name,
+			stateName: states.find((s) => s.id === item.stateId)?.name ?? null,
+			assignees,
+			priority: item.priority,
+		});
+		await deps.discord.editOriginal(token, { content: '', embeds: [card] });
+	}
+
+	function plane(rt: TenantRuntime, ix: Rec, id: string, data: Rec): Response {
+		const options = Array.isArray(data.options) ? data.options : [];
+		const option = options.map(rec).find((o) => own(o, 'name') === PLANE_KEY_OPTION);
+		const raw = own(option ?? null, 'value');
+		const key = (typeof raw === 'string' ? raw : '').trim().toUpperCase();
+		const token = str(ix.token);
+		if (key.length > KEY_MAX || !KEY_RE.test(key))
+			return refuse(rt.tenant.id, id, 'bad_key', 'Нужен ключ вида LAB-40.');
+		if (token === null) return refuse(rt.tenant.id, id, 'no_token', TEXT.broken);
+		const started = now();
+		defer(async () => {
+			const base = { tenant: rt.tenant.id, interaction: id, kind: 'card' };
+			try {
+				await runCard(rt, key, token);
+				log({ event: 'ix.done', ...base, ms: now() - started });
+			} catch (error) {
+				const missing = error instanceof Failure;
+				if (!missing)
+					log({
+						event: 'ix.failed',
+						level: 'error',
+						...base,
+						error: error instanceof Error ? error.name : 'unknown',
+						status:
+							error instanceof PlaneApiError || error instanceof DiscordApiError
+								? error.status
+								: undefined,
+						ms: now() - started,
+					});
+				// The placeholder is public; the explanation is not.
+				try {
+					await deps.discord.deleteOriginal(token);
+				} catch {
+					log({ event: 'ix.cleanup_failed', level: 'warn', ...base });
+				}
+				try {
+					await deps.discord.followup(token, {
+						content: missing ? `${error.message}.` : `Не получилось: ${describe(error)}.`,
+						ephemeral: true,
+					});
+				} catch {
+					log({ event: 'ix.reply_failed', level: 'error', ...base });
+				}
+			}
+		});
+		// No ephemeral flag: the card is for the whole channel.
+		return json({ type: REPLY.DEFERRED });
+	}
+
 	function submit(rt: TenantRuntime, ix: Rec, id: string, data: Rec | null): Response {
 		const match = CUSTOM_ID.exec(str(own(data, 'custom_id')) ?? '');
 		const token = str(ix.token);
@@ -418,6 +495,8 @@ export function createInteractionHandler(
 	function command(rt: TenantRuntime, ix: Rec, id: string, data: Rec | null): Response {
 		const tenant = rt.tenant;
 		const name = own(data, 'name');
+		if (data !== null && data.type === CHAT_INPUT_COMMAND && name === PLANE_COMMAND)
+			return plane(rt, ix, id, data);
 		const kind = name === CREATE_COMMAND ? 'create' : name === APPEND_COMMAND ? 'append' : null;
 		if (data === null || data.type !== MESSAGE_COMMAND || kind === null)
 			return refuse(tenant.id, id, 'unknown_command', TEXT.unknownCommand);
