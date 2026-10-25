@@ -375,25 +375,38 @@ export function createInteractionHandler(
 		await edit(token, `→ комментарий в ${where}`);
 	}
 
+	const mdState = (name: string | undefined): string | null =>
+		name === undefined ? null : mdLabel(name);
+
 	/** `/plane KEY`: the public card, or a private note after the public placeholder is withdrawn. */
 	async function runCard(rt: TenantRuntime, key: string, token: string): Promise<void> {
 		const item = await rt.plane.getWorkItemByKey(key);
 		// A hidden project answers like a missing one: a public card must not confirm its keys.
 		if (item === null || isHidden(rt, item.projectId))
 			throw new Failure(`Задача ${key} не найдена`);
-		const states = await rt.states(item.projectId);
-		const members = await rt.members();
-		const assignees = item.assignees.map((planeId) => {
+		let states = await rt.states(item.projectId);
+		// A state created after the cache was filled: ask again, as notify does.
+		if (!states.some((s) => s.id === item.stateId))
+			states = await rt.states(item.projectId, { refresh: true });
+		// Names are fetched only when somebody is not in the user table.
+		let members: Awaited<ReturnType<TenantRuntime['members']>> | null = null;
+		const assignees: string[] = [];
+		for (const planeId of item.assignees) {
 			const discordId = rt.users.toDiscord(planeId);
-			return discordId !== null
-				? `<@${discordId}>`
-				: (members.find((m) => m.id === planeId)?.displayName ?? '') || UNKNOWN_ASSIGNEE;
-		});
+			if (discordId !== null) {
+				assignees.push(`<@${discordId}>`);
+				continue;
+			}
+			members ??= await rt.members();
+			const name = members.find((m) => m.id === planeId)?.displayName ?? '';
+			// Discord renders markdown and masked links in embed field values.
+			assignees.push(name === '' ? UNKNOWN_ASSIGNEE : mdLabel(name));
+		}
 		const card = workItemCard({
 			key,
 			url: workItemUrl(deps.planeUrl, rt.tenant.workspace, key),
 			name: item.name,
-			stateName: states.find((s) => s.id === item.stateId)?.name ?? null,
+			stateName: mdState(states.find((s) => s.id === item.stateId)?.name),
 			assignees,
 			priority: item.priority,
 		});
@@ -417,7 +430,9 @@ export function createInteractionHandler(
 				log({ event: 'ix.done', ...base, ms: now() - started });
 			} catch (error) {
 				const missing = error instanceof Failure;
-				if (!missing)
+				// Missing and hidden keys share one outcome, as they share one answer.
+				if (missing) log({ event: 'ix.done', ...base, result: 'not_found', ms: now() - started });
+				else
 					log({
 						event: 'ix.failed',
 						level: 'error',

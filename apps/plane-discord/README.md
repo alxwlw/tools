@@ -4,7 +4,7 @@ A [Bun](https://bun.sh) service that bridges [Plane](https://plane.so) and Disco
 tenants (a Discord server plus a Plane workspace each). It has no runtime dependencies and keeps its
 state in one SQLite file.
 
-Phase 1 (this version):
+Phases 1 and 2 (this version):
 
 - **1a, Plane to a channel.** A work item is created, closed or cancelled, or the bot is mentioned in a
   comment: a message goes to the Discord channel mapped to the project (and optionally a module). A
@@ -15,6 +15,9 @@ Phase 1 (this version):
 - **1c, Discord to Plane.** The message commands `Создать задачу в Plane` (opens a modal, creates the
   work item with `external_source=discord`, `external_id=<message id>`, replies in the channel) and
   `Добавить в задачу` (adds a comment to a work item by key). Attachments go in as links.
+- **2, `/plane KEY`.** A slash command that answers in the channel with a public card of the work item
+  (title, state, assignees, priority, link). A malformed key, an unknown key and a key of a hidden
+  project get a private (ephemeral) reply; the last two look the same.
 
 Hidden projects (`hiddenProjects`) are hidden completely: no channel topics, no DMs, no modal, no
 forwarded mentions.

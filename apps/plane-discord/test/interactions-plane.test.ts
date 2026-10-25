@@ -248,6 +248,101 @@ describe('/plane KEY', () => {
 		expect(byEvent('ix.reply_failed')).toMatchObject({ level: 'error', kind: 'card' });
 	});
 
+	test('состояние, созданное после заполнения кэша → повтор с refresh', async () => {
+		const w = await setup();
+		seed(w);
+		w.plane.items.get('w40')!.stateId = 's-new';
+		const asked: (boolean | undefined)[] = [];
+		w.rt.states = async (_p, opts) => {
+			asked.push(opts?.refresh);
+			return opts?.refresh ? [{ id: 's-new', name: 'Ревью', group: 'started' }] : [];
+		};
+		await slash(w, 'LAB-40');
+		await w.settle();
+		const embed = (w.discord.callsOf('editOriginal')[0]?.[1] as { embeds: any[] }).embeds[0];
+		expect(embed.fields[0].value).toBe('Ревью');
+		expect(asked).toEqual([undefined, true]);
+	});
+
+	test('нет такого ключа и скрытый проект → ровно одна запись лога ix.done/not_found, без текстов', async () => {
+		const w = await setup();
+		w.plane.items.set('wz', {
+			id: 'wz',
+			projectId: P_HIDDEN,
+			sequenceId: 7,
+			name: 'Секретная задача',
+			stateId: 's',
+			assignees: [],
+			priority: 'none',
+			descriptionHtml: null,
+		});
+		await slash(w, 'LAB-99');
+		await slash(w, 'ZEN-7');
+		await w.settle();
+		expect(w.logs).toEqual([
+			{
+				event: 'ix.done',
+				tenant: 'initech',
+				interaction: '900000000000000001',
+				kind: 'card',
+				result: 'not_found',
+				ms: 0,
+			},
+			{
+				event: 'ix.done',
+				tenant: 'initech',
+				interaction: '900000000000000002',
+				kind: 'card',
+				result: 'not_found',
+				ms: 0,
+			},
+		]);
+	});
+
+	test('без исполнителей, которых нужно называть, members() не вызывается', async () => {
+		const w = await setup();
+		seed(w, ['plane-user-1']);
+		w.rt.members = async () => {
+			throw new PlaneApiError(503, 'GET', '/x');
+		};
+		await slash(w, 'LAB-40');
+		await w.settle();
+		const embed = (w.discord.callsOf('editOriginal')[0]?.[1] as { embeds: any[] }).embeds[0];
+		expect(embed.fields[1].value).toBe(`<@${LINKED}>`);
+		seed(w, []);
+		await slash(w, 'LAB-40');
+		await w.settle();
+		expect(w.discord.callsOf('editOriginal')).toHaveLength(2);
+		expect(w.discord.callsOf('followup')).toEqual([]);
+	});
+
+	test('members() запрашивается один раз на карточку, сколько бы ни было неизвестных исполнителей', async () => {
+		const w = await setup();
+		seed(w, ['plane-user-2', 'plane-user-3']);
+		let calls = 0;
+		w.rt.members = async () => {
+			calls += 1;
+			return w.plane.members;
+		};
+		await slash(w, 'LAB-40');
+		await w.settle();
+		expect(calls).toBe(1);
+	});
+
+	test('markdown в имени состояния и исполнителя приходит в поля экранированным', async () => {
+		const w = await setup();
+		seed(w, ['plane-user-2']);
+		w.plane.members = [{ id: 'plane-user-2', displayName: '**Мира** [x](https://example.com)' }];
+		w.plane.states.set(P_LAB, [
+			{ id: 's-doing', name: '[x](https://example.com) **жирно**', group: 'started' },
+		]);
+		await slash(w, 'LAB-40');
+		await w.settle();
+		const embed = (w.discord.callsOf('editOriginal')[0]?.[1] as { embeds: any[] }).embeds[0];
+		expect(embed.fields[0].value).toBe('\\[x\\](https://example.com) \\*\\*жирно\\*\\*');
+		expect(embed.fields[1].value).toBe('\\*\\*Мира\\*\\* \\[x\\](https://example.com)');
+	});
+
 	test('commandDefinitions: plane с обязательной опцией key; обе MESSAGE-команды на месте', () => {
 		const defs = commandDefinitions() as { name: string; type: number }[];
 		expect(defs.map((d) => [d.name, d.type])).toEqual([
