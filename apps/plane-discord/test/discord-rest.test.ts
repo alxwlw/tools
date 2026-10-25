@@ -501,3 +501,72 @@ describe('DiscordRest: ошибки и 429', () => {
 		expect(seen[0]?.init.signal?.aborted).toBe(false);
 	});
 });
+
+describe('DiscordRest: webhooks приложения', () => {
+	const WH_TOKEN = 'whtok.SECRET/x';
+
+	test('createWebhook: POST /channels/{id}/webhooks с именем, от имени бота; id и token из ответа', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'w1', token: 'wt1', extra: 1 } }]);
+		expect(await rest.createWebhook('c1', 'Plane')).toEqual({ id: 'w1', token: 'wt1' });
+		expect(calls[0]).toMatchObject({
+			url: `${API}/channels/c1/webhooks`,
+			method: 'POST',
+			body: { name: 'Plane' },
+		});
+		expect(calls[0]!.headers.Authorization).toBe('Bot BOTSECRET');
+	});
+
+	test('createWebhook: ответ без token → ошибка, а не пустая строка', async () => {
+		const { rest } = stub([{ status: 200, body: { id: 'w1' } }]);
+		expect(String(await failure(rest.createWebhook('c1', 'Plane')))).toContain('"token"');
+	});
+
+	test('executeWebhook: ?wait=true&thread_id=, без заголовка бота, username и avatar_url, allowed_mentions', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		const res = await rest.executeWebhook('w1', WH_TOKEN, 't1', {
+			content: 'привет @everyone',
+			username: 'Carol',
+			avatarUrl: 'https://cdn.example.com/c.png',
+		});
+		expect(res).toEqual({ id: 'm1' });
+		expect(calls[0]).toMatchObject({
+			url: `${API}/webhooks/w1/${encodeURIComponent(WH_TOKEN)}?wait=true&thread_id=t1`,
+			method: 'POST',
+			body: {
+				content: 'привет @everyone',
+				username: 'Carol',
+				avatar_url: 'https://cdn.example.com/c.png',
+				allowed_mentions: NO_PINGS,
+			},
+		});
+		expect(calls[0]!.headers.Authorization).toBeUndefined();
+	});
+
+	test('executeWebhook: без username и avatarUrl в теле их нет', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.executeWebhook('w1', WH_TOKEN, 't1', { content: 'x' });
+		expect(Object.keys(calls[0]!.body).sort()).toEqual(['allowed_mentions', 'content']);
+	});
+
+	test('executeWebhook: токен webhook маскируется в route ошибки (HTTP-ошибка и сбой транспорта)', async () => {
+		const { rest } = stub([{ status: 404, body: { code: DISCORD_ERR.UNKNOWN_WEBHOOK } }]);
+		const err = (await failure(rest.executeWebhook('w1', WH_TOKEN, 't1', msg))) as DiscordApiError;
+		expect(err).toBeInstanceOf(DiscordApiError);
+		expect([err.status, err.code]).toEqual([404, 10015]);
+		expect(err.route).toBe('/webhooks/w1/:token?wait=true&thread_id=t1');
+		expect(err.message).not.toContain('SECRET');
+
+		const broken = new DiscordRest({
+			botToken: 'BOTSECRET',
+			applicationId: 'app1',
+			fetch: async (url) => {
+				throw new Error(`boom ${String(url)}`);
+			},
+		});
+		const down = (await failure(
+			broken.executeWebhook('w1', WH_TOKEN, 't1', msg),
+		)) as DiscordApiError;
+		expect([down.status, down.route]).toEqual([0, '/webhooks/w1/:token?wait=true&thread_id=t1']);
+		expect(`${down.message}${down.stack}`).not.toContain('SECRET');
+	});
+});

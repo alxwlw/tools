@@ -15,11 +15,18 @@ export type DiscordCall = { method: keyof DiscordApi; args: unknown[] };
 export class FakeDiscord implements DiscordApi {
 	channels = new Map<string, ChannelInfo>();
 	failures = new Map<keyof DiscordApi, DiscordApiError>();
+	/** Like `failures`, but the entry is consumed by the first call: the retry succeeds. */
+	failOnce = new Map<keyof DiscordApi, DiscordApiError>();
 	calls: DiscordCall[] = [];
 	#seq = 0;
 
 	#enter(method: keyof DiscordApi, ...args: unknown[]): void {
 		this.calls.push({ method, args });
+		const once = this.failOnce.get(method);
+		if (once) {
+			this.failOnce.delete(method);
+			throw once;
+		}
 		const failure = this.failures.get(method);
 		if (failure) throw failure;
 	}
@@ -88,6 +95,22 @@ export class FakeDiscord implements DiscordApi {
 
 	async joinThread(threadId: string): Promise<void> {
 		this.#enter('joinThread', threadId);
+	}
+
+	async createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }> {
+		this.#enter('createWebhook', channelId, name);
+		const n = this.#id();
+		return { id: `wh-${n}`, token: `tok-${n}` };
+	}
+
+	async executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }> {
+		this.#enter('executeWebhook', webhookId, token, threadId, message);
+		return { id: this.#id() };
 	}
 
 	async openDm(userId: string): Promise<string> {

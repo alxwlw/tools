@@ -142,7 +142,7 @@ describe('createNotifier: workitem.created', () => {
 
 	test('автор с пустым именем в members → «кто-то»', async () => {
 		const { notify, plane, discord } = setup([route(TEXT)]);
-		plane.members.push({ id: ID(98), displayName: '' });
+		plane.members.push({ id: ID(98), displayName: '', avatarUrl: null });
 		await runAll(await notify(created({}, ID(98))));
 		expect(sent(discord)[0]?.[1].content.split('\n')[1]).toBe('Задача создана · кто-то');
 	});

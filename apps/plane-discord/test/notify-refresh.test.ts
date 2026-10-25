@@ -56,7 +56,7 @@ function world(opts: { staleProjects: ProjectSummary[]; freshProjects: ProjectSu
 		priority: 'none',
 		descriptionHtml: null,
 	});
-	plane.members = [{ id: ID(12), displayName: 'Carol' }];
+	plane.members = [{ id: ID(12), displayName: 'Carol', avatarUrl: null }];
 	const discord = new FakeDiscord();
 	discord.channels.set(TEXT, {
 		id: TEXT,

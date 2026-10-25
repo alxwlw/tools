@@ -97,7 +97,7 @@ describe('createRuntime: кэши', () => {
 
 	test('members: из кэша до TTL', async () => {
 		const w = world();
-		expect(await w.runtime.members()).toEqual([{ id: 'u1', displayName: 'Ann' }]);
+		expect(await w.runtime.members()).toEqual([{ id: 'u1', displayName: 'Ann', avatarUrl: null }]);
 		await w.runtime.members();
 		expect(w.count('/members/')).toBe(1);
 	});

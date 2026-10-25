@@ -3,7 +3,7 @@ import type { Fetch, PlaneAuth } from './auth.ts';
 
 export type ProjectSummary = { id: string; identifier: string; name: string };
 export type StateSummary = { id: string; name: string; group: string };
-export type MemberSummary = { id: string; displayName: string };
+export type MemberSummary = { id: string; displayName: string; avatarUrl: string | null };
 export type WorkItem = {
 	id: string;
 	projectId: string;
@@ -172,6 +172,7 @@ export class PlaneClient implements PlaneApi {
 		return (await this.#listAll('/members/')).map((row) => ({
 			id: field(row, 'id'),
 			displayName: field(row, 'display_name'),
+			avatarUrl: optString(row, 'avatar_url') ?? optString(row, 'avatar'),
 		}));
 	}
 

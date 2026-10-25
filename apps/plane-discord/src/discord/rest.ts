@@ -42,6 +42,7 @@ export const DISCORD_ERR = {
 	MISSING_ACCESS: 50001,
 	UNKNOWN_CHANNEL: 10003,
 	MISSING_PERMISSIONS: 50013,
+	UNKNOWN_WEBHOOK: 10015,
 } as const;
 
 export interface DiscordApi {
@@ -57,6 +58,15 @@ export interface DiscordApi {
 	startThreadFromMessage(channelId: string, messageId: string, name: string): Promise<string>;
 	/** The bot joins a thread (idempotent): a private thread's messages reach only its members. */
 	joinThread(threadId: string): Promise<void>;
+	/** Creates an application-owned webhook in a text, announcement or forum channel. */
+	createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }>;
+	/** Posts into a thread through a webhook, under the given name and avatar. */
+	executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }>;
 	openDm(userId: string): Promise<string>;
 	editOriginal(interactionToken: string, message: OutMessage): Promise<void>;
 	deleteOriginal(interactionToken: string): Promise<void>;
@@ -64,7 +74,7 @@ export interface DiscordApi {
 	bulkOverwriteGuildCommands(guildId: string, commands: readonly unknown[]): Promise<void>;
 }
 
-/** Carries status and Discord's JSON `code`, never the body; the interaction token is masked in `route`. */
+/** Carries status and Discord's JSON `code`, never the body; the interaction and webhook tokens are masked in `route`. */
 export class DiscordApiError extends Error {
 	override name = 'DiscordApiError';
 
@@ -240,6 +250,37 @@ export class DiscordRest implements DiscordApi {
 
 	async joinThread(threadId: string): Promise<void> {
 		await this.#bot('PUT', `/channels/${encodeURIComponent(threadId)}/thread-members/@me`);
+	}
+
+	async createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }> {
+		const res = await this.#bot('POST', `/channels/${encodeURIComponent(channelId)}/webhooks`, {
+			name,
+		});
+		return { id: str(res, 'id'), token: str(res, 'token') };
+	}
+
+	async executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }> {
+		const base = `/webhooks/${encodeURIComponent(webhookId)}`;
+		const query = `?wait=true&thread_id=${encodeURIComponent(threadId)}`;
+		const res = await this.#request(
+			'POST',
+			`${base}/${encodeURIComponent(token)}${query}`,
+			// The webhook token authenticates the call: it never reaches an error.
+			`${base}/:token${query}`,
+			false,
+			Number.POSITIVE_INFINITY,
+			{
+				...messageBody(message),
+				...(message.username === undefined ? {} : { username: message.username }),
+				...(message.avatarUrl === undefined ? {} : { avatar_url: message.avatarUrl }),
+			},
+		);
+		return { id: str(res, 'id') };
 	}
 
 	async openDm(userId: string): Promise<string> {

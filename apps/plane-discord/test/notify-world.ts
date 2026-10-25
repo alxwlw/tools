@@ -98,9 +98,9 @@ export function setup(
 		{ id: S_BACKLOG, name: 'Backlog', group: 'backlog' },
 	]);
 	plane.members = [
-		{ id: ALICE, displayName: 'Alice' },
-		{ id: BOB, displayName: 'Bob' },
-		{ id: CAROL, displayName: 'Carol' },
+		{ id: ALICE, displayName: 'Alice', avatarUrl: null },
+		{ id: BOB, displayName: 'Bob', avatarUrl: null },
+		{ id: CAROL, displayName: 'Carol', avatarUrl: null },
 	];
 	plane.items.set(ITEM, {
 		id: ITEM,

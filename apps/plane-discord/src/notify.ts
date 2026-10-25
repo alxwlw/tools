@@ -46,6 +46,11 @@ type Item = { id: string; projectId: string; sequenceId: number; name: string };
 
 const UNKNOWN_ACTOR = 'кто-то';
 const QUOTE_MAX = 1000;
+const WEBHOOK_NAME = 'Plane';
+// Discord refuses a webhook username that holds these (case-insensitive) and caps it at 80 characters.
+const USERNAME_BANNED = /discord|clyde/gi;
+const USERNAME_MAX = 80;
+const IN_THREAD = '→ Discord: в тред задачи';
 const NO_CHANNEL = 'Канал для проекта не настроен';
 const NO_PROJECT = 'Не удалось отправить в Discord: проект не найден в Plane';
 // Neutral on purpose: no channel names, no hint of what the tenant's map holds.
@@ -58,6 +63,22 @@ async function findProject(
 ): Promise<ProjectSummary | undefined> {
 	const hit = (await rt.projects()).find((p) => p.id === projectId);
 	return hit ?? (await rt.projects({ refresh: true })).find((p) => p.id === projectId);
+}
+
+/** The author's Plane name made acceptable as a webhook username; empty after cleaning → `Plane`. */
+export function webhookUsername(displayName: string | undefined): string {
+	const clean = (displayName ?? '').replace(USERNAME_BANNED, '').replace(/\s+/g, ' ').trim();
+	return clean === '' ? WEBHOOK_NAME : truncate(clean, USERNAME_MAX);
+}
+
+/** Only an absolute https URL is an avatar; a relative path or anything else leaves Discord's default. */
+export function webhookAvatar(avatarUrl: string | null | undefined): string | undefined {
+	if (!avatarUrl) return undefined;
+	try {
+		return new URL(avatarUrl).protocol === 'https:' ? avatarUrl : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Module routes win; without one, the project's routes with moduleId null. Unique by channelId. */
@@ -331,6 +352,73 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		return assemble(rt, event, item, event.actorId, what, channels, recipients);
 	}
 
+	/** One delivery per bound thread: the webhook of the thread's parent channel posts under the author's name. */
+	function threadDelivery(
+		rt: TenantRuntime,
+		event: PlaneEvent,
+		target: { channelId: string; threadId: string },
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Delivery {
+		const create = async () => {
+			const made = await deps.discord.createWebhook(target.channelId, WEBHOOK_NAME);
+			// Recorded at once: the echo of this webhook's own messages is skipped by `isOwnWebhook`.
+			deps.store.putWebhook(target.channelId, made.id, made.token);
+			return made;
+		};
+		return {
+			label: `${event.eventKey}→thread:${target.threadId}`,
+			run: async () => {
+				// Read at run time: an earlier delivery of another event may have created it since.
+				const hook = deps.store.getWebhook(target.channelId) ?? (await create());
+				try {
+					await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
+				} catch (err) {
+					if (
+						!(
+							err instanceof DiscordApiError &&
+							err.status === 404 &&
+							err.code === DISCORD_ERR.UNKNOWN_WEBHOOK
+						)
+					)
+						throw err;
+					deps.log({
+						event: 'notify.webhook_gone',
+						level: 'warn',
+						tenant: rt.tenant.id,
+						channel: target.channelId,
+					});
+					const fresh = await create();
+					await deps.discord.executeWebhook(fresh.id, fresh.token, target.threadId, message);
+				}
+			},
+		};
+	}
+
+	/** Comment → every bound thread of the item; empty text after the translation means no message. */
+	async function threadDeliveries(
+		rt: TenantRuntime,
+		event: Extract<PlaneEvent, { kind: 'comment.created' }>,
+		html: string,
+	): Promise<Delivery[]> {
+		const threads = deps.store.threadsOfItem(rt.tenant.id, event.workItemId);
+		if (threads.length === 0) return [];
+		const members = await rt.members();
+		const content = planeHtmlToDiscord(html, (id) => {
+			const discordId = rt.users.toDiscord(id);
+			if (discordId !== null) return `<@${discordId}>`;
+			return `@${members.find((m) => m.id === id)?.displayName || UNKNOWN_ACTOR}`;
+		}).trim();
+		if (content === '') return [];
+		const author = members.find((m) => m.id === event.actorId);
+		const avatarUrl = webhookAvatar(author?.avatarUrl);
+		const message = {
+			content,
+			username: webhookUsername(author?.displayName),
+			...(avatarUrl === undefined ? {} : { avatarUrl }),
+		};
+		return threads.map((t) => threadDelivery(rt, event, t, message));
+	}
+
 	async function onComment(
 		rt: TenantRuntime,
 		event: Extract<PlaneEvent, { kind: 'comment.created' }>,
@@ -348,10 +436,17 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			planeMentions(html),
 			'Тебя упомянули в комментарии',
 		);
-		// Comments never go to channels: a mention of the bot arrives as agent.mention.
-		if (recipients.size === 0) return (skip(event, 'no_effect'), []);
+		// Comments never go to channels: a mention of the bot arrives as agent.mention. Bound threads get them.
+		const inThreads = await threadDeliveries(rt, event, html);
+		if (recipients.size === 0) {
+			if (inThreads.length === 0) skip(event, 'no_effect');
+			return inThreads;
+		}
 		const item = await rt.plane.getWorkItem(event.projectId, event.workItemId);
-		return assemble(rt, event, item, event.actorId, null, [], recipients);
+		return [
+			...(await assemble(rt, event, item, event.actorId, null, [], recipients)),
+			...inThreads,
+		];
 	}
 
 	async function onMention(
@@ -366,8 +461,14 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		// A hidden project is hidden entirely: nothing goes to Discord, the run still gets a short neutral answer.
 		if (rt.tenant.hiddenProjects.includes(event.projectId))
 			return (skip(event, 'hidden_project'), [answer(HIDDEN)]);
-		const channels = await channelsFor(rt, event.projectId, event.workItemId, 'mention');
-		if (channels.length === 0) return [answer(NO_CHANNEL)];
+		// A channel where the item has a bound thread is covered by the thread sync: sending here would duplicate.
+		const threaded = new Set(
+			deps.store.threadsOfItem(rt.tenant.id, event.workItemId).map((t) => t.channelId),
+		);
+		const routed = await channelsFor(rt, event.projectId, event.workItemId, 'mention');
+		if (routed.length === 0) return [answer(NO_CHANNEL)];
+		const channels = routed.filter((r) => !threaded.has(r.channelId));
+		if (channels.length === 0) return [answer(IN_THREAD)];
 		const project = await findProject(rt, event.projectId);
 		if (!project) return (skip(event, 'unknown_project', 'error'), [answer(NO_PROJECT)]);
 		const item = await rt.plane.getWorkItem(event.projectId, event.workItemId);

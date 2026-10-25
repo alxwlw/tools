@@ -279,11 +279,29 @@ describe('PlaneClient: чтение', () => {
 		const { calls, client } = stub([
 			{ status: 200, body: [{ id: 'p1', identifier: 'LAB', name: 'Ops', extra: 1 }] },
 			{ status: 200, body: { results: [{ id: 's1', name: 'Done', group: 'completed' }] } },
-			{ status: 200, body: [{ id: 'u1', display_name: 'ann', is_bot: false }] },
+			{
+				status: 200,
+				body: [
+					{ id: 'u1', display_name: 'ann', is_bot: false },
+					{
+						id: 'u2',
+						display_name: 'bo',
+						avatar_url: 'https://cdn.example.com/a.png',
+						avatar: 'x',
+					},
+					{ id: 'u3', display_name: 'cy', avatar: '/media/c.png' },
+					{ id: 'u4', display_name: 'di', avatar_url: null },
+				],
+			},
 		]);
 		expect(await client.listProjects()).toEqual([{ id: 'p1', identifier: 'LAB', name: 'Ops' }]);
 		expect(await client.listStates('p1')).toEqual([{ id: 's1', name: 'Done', group: 'completed' }]);
-		expect(await client.listMembers()).toEqual([{ id: 'u1', displayName: 'ann' }]);
+		expect(await client.listMembers()).toEqual([
+			{ id: 'u1', displayName: 'ann', avatarUrl: null },
+			{ id: 'u2', displayName: 'bo', avatarUrl: 'https://cdn.example.com/a.png' },
+			{ id: 'u3', displayName: 'cy', avatarUrl: '/media/c.png' },
+			{ id: 'u4', displayName: 'di', avatarUrl: null },
+		]);
 		expect(calls[1]?.url).toBe(`${ROOT}/projects/p1/states/?per_page=100`);
 		expect(calls[2]?.url).toBe(`${ROOT}/members/?per_page=100`);
 	});
