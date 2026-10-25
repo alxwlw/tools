@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { DiscordApiError } from '../src/discord/rest.ts';
-import { chatInputPayload } from './discord-harness.ts';
+import { chatInputPayload, commandPayload } from './discord-harness.ts';
 import {
 	FORUM,
 	GUILD,
 	MAPPED,
+	msg,
 	open,
 	P_ENG,
 	P_HIDDEN,
@@ -108,6 +109,20 @@ describe('тред из ответа бота (1c)', () => {
 		expect(w.logs.map((l) => l.event)).toContain('ix.done');
 	});
 
+	test('create: не-Discord ошибка при открытии треда не глотается → «Не получилось»', async () => {
+		const w = await setup();
+		w.discord.startThreadFromMessage = async () => {
+			throw new Error('boom');
+		};
+		const { customId } = await open(w);
+		await submitCreate(w, customId, { title: 'T' });
+		await w.settle();
+		expect(w.logs.map((l) => l.event)).toContain('ix.failed');
+		expect(w.discord.callsOf('editOriginal')[0]?.[1]).toEqual({
+			content: 'Не получилось: внутренняя ошибка.',
+		});
+	});
+
 	test('create: «Уже есть» (повтор) → второго треда нет', async () => {
 		const w = await setup();
 		const first = await open(w);
@@ -151,6 +166,10 @@ describe('/plane-link', () => {
 			['tok-900000000000000002', { content: 'Тред уже привязан к LAB-40.', ephemeral: true }],
 		]);
 		expect(w.store.findByThread(THREAD)?.workItemId).toBe('w40');
+		expect(w.logs.filter((l) => l.event === 'ix.done').map((l) => l.result)).toEqual([
+			'linked',
+			'already_linked',
+		]);
 	});
 
 	test('тот же ключ в уже привязанном треде → снова «привязан»', async () => {
@@ -207,7 +226,26 @@ describe('/plane-link', () => {
 		await w.settle();
 		const texts = w.discord.callsOf('followup').map((c) => (c[1] as { content: string }).content);
 		expect(texts).toEqual(['Задача ZEN-7 не найдена.', 'Задача LAB-999 не найдена.']);
-		expect(w.discord.callsOf('deleteOriginal')).toHaveLength(2);
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([
+			['tok-900000000000000001'],
+			['tok-900000000000000002'],
+		]);
+		expect(w.discord.callsOf('followup').map((c) => c[0])).toEqual([
+			'tok-900000000000000001',
+			'tok-900000000000000002',
+		]);
+		const done = (result: string, interaction: string) => ({
+			event: 'ix.done',
+			tenant: 'initech',
+			interaction,
+			kind: 'link',
+			result,
+			ms: 0,
+		});
+		expect(w.logs.filter((l) => l.event === 'ix.done')).toEqual([
+			done('not_found', '900000000000000001'),
+			done('not_found', '900000000000000002'),
+		]);
 		expect(w.store.findByThread(THREAD)).toBeNull();
 	});
 
@@ -253,6 +291,44 @@ describe('/plane-link', () => {
 			'Тред уже привязан к другой задаче.',
 			'Тред уже привязан к другой задаче.',
 		]);
+	});
+
+	test('приватный тред (12) и канал только в ix.channel_id → связь', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		await link(w, 'LAB-40', threadChannel(OTHER_THREAD, 12));
+		await link(w, 'LAB-40', { type: 11, parent_id: MAPPED });
+		await w.settle();
+		expect(w.store.findByThread(OTHER_THREAD)?.channelId).toBe(MAPPED);
+		expect(w.discord.callsOf('editOriginal')).toHaveLength(1);
+	});
+
+	test('тред без id или без parent_id → ephemeral «Не удалось определить канал.», Plane не тронут', async () => {
+		const w = await setup();
+		for (const channel of [
+			{ id: THREAD, type: 11 },
+			{ type: 11, parent_id: MAPPED },
+		]) {
+			const res = await link(w, 'LAB-40', channel);
+			expect(res.body.data.content).toBe('Не удалось определить канал.');
+		}
+		await w.settle();
+		expect(w.planeCalls).toEqual([]);
+	});
+
+	test('message-команда с именем plane-link → «Неизвестная команда», не /plane-link', async () => {
+		const w = await setup();
+		const res = await w.ask(
+			commandPayload({
+				id: w.ids.next(),
+				guildId: GUILD,
+				channel: threadChannel(THREAD),
+				name: 'plane-link',
+				message: msg(),
+			}),
+		);
+		expect(res.body.data.content).toBe('Неизвестная команда.');
+		expect(w.planeCalls).toEqual([]);
 	});
 
 	test('ошибка Plane → «Не получилось», публичная заглушка удалена, лог ix.failed', async () => {
