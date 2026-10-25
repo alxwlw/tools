@@ -129,6 +129,8 @@ describe('parsePlaneDelivery', () => {
 	});
 
 	test('человеческий двойник state без прежнего состояния → событие принято, previous пуст', () => {
+		const absent = parseBody(humanState(null, ID(9), (b) => delete b.activity.old_identifier));
+		expect(absent).toMatchObject({ kind: 'workitem.updated', previous: {} });
 		for (const oldId of [null, '']) {
 			const event = parseBody(humanState(oldId, ID(9))) as { kind: string; previous: object };
 			expect(event.kind).toBe('workitem.updated');
@@ -259,7 +261,9 @@ describe('parsePlaneDelivery', () => {
 		const a = parseBody(humanState(ID(4), ID(9)))!;
 		const b = parseBody(humanState(ID(9), ID(4)))!;
 		const c = parseBody(humanState(ID(4), ID(5)))!;
-		expect(new Set([a.eventKey, b.eventKey, c.eventKey]).size).toBe(3);
+		// same new state, another old one
+		const d = parseBody(humanState(ID(5), ID(9)))!;
+		expect(new Set([a.eventKey, b.eventKey, c.eventKey, d.eventKey]).size).toBe(4);
 		expect(parseBody(humanState(ID(4), ID(9)))!.eventKey).toBe(a.eventKey);
 		// the hash is 16 hex chars after the timestamp
 		expect(a.eventKey).toMatch(/:\d{2}:\d{2}\.\d+Z:[0-9a-f]{16}$/);
