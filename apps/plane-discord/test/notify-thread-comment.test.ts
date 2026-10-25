@@ -71,6 +71,13 @@ describe('createNotifier: comment.created → тред', () => {
 		expect(msg).toEqual([`<@${D_ALICE}> и @Carol`]);
 	});
 
+	test('упоминание человека без имени в Plane → «@кто-то»', async () => {
+		const w = bound();
+		w.plane.members = [{ id: ID(98), displayName: '', avatarUrl: null }];
+		await runAll(await w.notify(comment(`<p>${mentionTag(ID(98))}</p>`, BOB)));
+		expect((webhookCalls(w)[0]![3] as { content: string }).content).toBe('@кто-то');
+	});
+
 	test('webhook канала создаётся один раз, дальше берётся из store', async () => {
 		const w = bound();
 		await runAll(await w.notify(comment('<p>раз</p>')));
@@ -113,7 +120,9 @@ describe('createNotifier: comment.created → тред', () => {
 			['wh-old', 'tok-old', THREAD],
 			[fresh.id, fresh.token, THREAD],
 		]);
-		expect(w.logs.filter((l) => l.event === 'notify.webhook_gone')).toHaveLength(1);
+		expect(w.logs.filter((l) => l.event === 'notify.webhook_gone')).toEqual([
+			{ event: 'notify.webhook_gone', level: 'warn', tenant: 'initech', channel: FORUM },
+		]);
 	});
 
 	test('webhook удалён и новый тоже отказал → ошибка уходит в очередь, третьей попытки нет', async () => {
@@ -133,6 +142,8 @@ describe('createNotifier: comment.created → тред', () => {
 		for (const err of [
 			new DiscordApiError(404, 'POST', '/webhooks/x/:token', 10003),
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', null),
+			// the code alone is not enough: only a 404 means the webhook is gone
+			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10015),
 		]) {
 			const w = bound();
 			w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
