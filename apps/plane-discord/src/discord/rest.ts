@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { truncate } from '../html.ts';
 import type { Fetch } from '../plane/auth.ts';
 
@@ -12,6 +14,11 @@ export type OutMessage = {
 	embeds?: Embed[];
 	replyTo?: string;
 	ephemeral?: boolean;
+	/**
+	 * Idempotency key for `sendMessage` only (see `deliveryNonce`): Discord drops a repeat of the same nonce from the
+	 * same author within minutes. The forum-post endpoint has no nonce field, so `createForumPost` ignores it.
+	 */
+	nonce?: string;
 };
 export type ChannelInfo = {
 	id: string;
@@ -79,6 +86,15 @@ const MAX_RATE_RETRIES = 3;
  */
 const INTERACTION_MAX_WAIT_MS = 60_000;
 const FLAG_EPHEMERAL = 64;
+const NONCE_MAX = 25;
+
+/**
+ * A stable nonce for one delivery job: the same label gives the same nonce across the queue's retries, different
+ * labels give different ones. 25 base64url characters of the label's SHA-256 (Discord caps nonce at 25).
+ */
+export function deliveryNonce(label: string): string {
+	return createHash('sha256').update(label).digest('base64url').slice(0, NONCE_MAX);
+}
 
 type Rec = Record<string, unknown>;
 const isRecord = (value: unknown): value is Rec =>
@@ -193,11 +209,12 @@ export class DiscordRest implements DiscordApi {
 	}
 
 	async sendMessage(channelId: string, message: OutMessage): Promise<{ id: string }> {
-		const res = await this.#bot(
-			'POST',
-			`/channels/${encodeURIComponent(channelId)}/messages`,
-			messageBody(message),
-		);
+		const res = await this.#bot('POST', `/channels/${encodeURIComponent(channelId)}/messages`, {
+			...messageBody(message),
+			...(message.nonce === undefined
+				? {}
+				: { nonce: message.nonce.slice(0, NONCE_MAX), enforce_nonce: true }),
+		});
 		return { id: str(res, 'id') };
 	}
 

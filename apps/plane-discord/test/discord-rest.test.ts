@@ -1,5 +1,11 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { CHANNEL, DISCORD_ERR, DiscordApiError, DiscordRest } from '../src/discord/rest.ts';
+import {
+	CHANNEL,
+	DISCORD_ERR,
+	DiscordApiError,
+	DiscordRest,
+	deliveryNonce,
+} from '../src/discord/rest.ts';
 
 type Reply = { status: number; body?: unknown };
 type Call = { url: string; method: string; headers: Record<string, string>; body: any };
@@ -118,6 +124,33 @@ describe('DiscordRest: сообщения', () => {
 		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
 		await rest.sendMessage('c1', { content: 'c' });
 		expect(Object.keys(calls[0]?.body).sort()).toEqual(['allowed_mentions', 'content']);
+	});
+
+	test('sendMessage с nonce → nonce и enforce_nonce true в теле; без nonce их нет; createForumPost nonce не шлёт', async () => {
+		const withNonce = stub([{ status: 200, body: { id: 'm1' } }]);
+		await withNonce.rest.sendMessage('c1', { content: 'c', nonce: 'n-1' });
+		expect(withNonce.calls[0]?.body.nonce).toBe('n-1');
+		expect(withNonce.calls[0]?.body.enforce_nonce).toBe(true);
+		const plain = stub([{ status: 200, body: { id: 'm1' } }]);
+		await plain.rest.sendMessage('c1', { content: 'c' });
+		expect(plain.calls[0]?.body).not.toHaveProperty('nonce');
+		expect(plain.calls[0]?.body).not.toHaveProperty('enforce_nonce');
+		const forum = stub([{ status: 200, body: { id: 't1', message: { id: 'm1' } } }]);
+		await forum.rest.createForumPost('f1', 'name', { content: 'c', nonce: 'n-1' });
+		expect(JSON.stringify(forum.calls[0]?.body)).not.toContain('nonce');
+	});
+
+	test('nonce длиннее 25 символов обрезается до лимита Discord', async () => {
+		const { calls, rest } = stub([{ status: 200, body: { id: 'm1' } }]);
+		await rest.sendMessage('c1', { content: 'c', nonce: 'x'.repeat(40) });
+		expect(calls[0]?.body.nonce).toBe('x'.repeat(25));
+	});
+
+	test('deliveryNonce: ≤ 25 символов, стабилен для метки, различается между метками', () => {
+		const a = deliveryNonce('issue.created:x→channel:1');
+		expect(a).toBe(deliveryNonce('issue.created:x→channel:1'));
+		expect(a).toHaveLength(25);
+		expect(deliveryNonce('issue.created:x→channel:2')).not.toBe(a);
 	});
 
 	test('replyTo → message_reference с fail_if_not_exists false; ephemeral → flags 64', async () => {

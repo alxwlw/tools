@@ -192,5 +192,9 @@ export const agentMention = (commentId: string | null = ID(200)): PlaneEvent => 
 	commentId,
 	runId: ID(300),
 });
-export const sent = (discord: FakeDiscord) =>
+/** Every recorded sendMessage as [channel, message], the message exactly as the notifier passed it (nonce included). */
+export const sentRaw = (discord: FakeDiscord) =>
 	discord.callsOf('sendMessage') as Array<[string, OutMessage]>;
+/** The same without the delivery nonce: the nonce has its own tests, the rest of the suite pins content. */
+export const sent = (discord: FakeDiscord) =>
+	sentRaw(discord).map(([channel, { nonce: _nonce, ...message }]) => [channel, message] as const);

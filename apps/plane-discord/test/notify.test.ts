@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ChannelRoute } from '../src/config.ts';
-import { DISCORD_ERR, DiscordApiError, type OutMessage } from '../src/discord/rest.ts';
+import {
+	DISCORD_ERR,
+	DiscordApiError,
+	type OutMessage,
+	deliveryNonce,
+} from '../src/discord/rest.ts';
 import { type Delivery, routesFor } from '../src/notify.ts';
 import { SerialQueue } from '../src/queue.ts';
 import { FakeDiscord } from './fake-discord.ts';
@@ -35,6 +40,7 @@ import {
 	S_DONE_2,
 	S_STARTED,
 	sent,
+	sentRaw,
 	setup,
 	tenantOf,
 	TEXT,
@@ -523,6 +529,34 @@ describe('доставки через очередь', () => {
 			ANNOUNCE,
 		]);
 		expect(queueLogs).toEqual([expect.objectContaining({ event: 'job.retry', attempt: 1 })]);
+	});
+
+	test('таймаут POST (status 0) после того, как Discord сообщение создал → повтор с тем же nonce; другая доставка — другой nonce', async () => {
+		const { notify, discord, queue, queueLogs } = setupQueue([route(TEXT), route(ANNOUNCE)]);
+		discord.script.set(TEXT, [new DiscordApiError(0, 'POST', '/channels/:id/messages')]);
+		for (const d of await notify(created({ assignees: [BOB] }))) queue.push(d.label, d.run);
+		await queue.idle();
+		expect(queueLogs).toEqual([expect.objectContaining({ event: 'job.retry', attempt: 1 })]);
+		const calls = sentRaw(discord);
+		expect(calls.map(([channel]) => channel)).toEqual([TEXT, TEXT, ANNOUNCE, `dm-${D_BOB}`]);
+		const [first, retry, other, dm] = calls.map(([, message]) => message.nonce);
+		expect(first).toBe(deliveryNonce(`issue.created:x→channel:${TEXT}`));
+		expect(retry).toBe(first);
+		expect(other).toBe(deliveryNonce(`issue.created:x→channel:${ANNOUNCE}`));
+		expect(dm).toBe(deliveryNonce(`issue.created:x→dm:${D_BOB}`));
+		expect(new Set([first, other, dm]).size).toBe(3);
+		for (const n of [first, other, dm]) expect(n?.length).toBeLessThanOrEqual(25);
+	});
+
+	test('форум: сообщение в существующий пост несёт nonce, createForumPost — нет (эндпоинт его не принимает)', async () => {
+		const { notify, discord } = setup([route(FORUM)]);
+		await runAll(await notify(created({}, ALICE)));
+		await runAll(await notify(updated({ stateId: S_STARTED }, { stateId: S_DONE }, ALICE)));
+		const [post] = discord.callsOf('createForumPost') as Array<[string, string, OutMessage]>;
+		expect(post?.[2]).not.toHaveProperty('nonce');
+		expect(sentRaw(discord).map(([, message]) => message.nonce)).toEqual([
+			deliveryNonce(`issue.updated:x→channel:${FORUM}`),
+		]);
 	});
 
 	test('транспортный сбой (status 0) на openDm один раз → повтор, DM доставлен', async () => {

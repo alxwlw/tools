@@ -4,6 +4,7 @@
 import type { ChannelRoute, EventKind, Tenant } from './config.ts';
 import {
 	CHANNEL,
+	deliveryNonce,
 	DISCORD_ERR,
 	type DiscordApi,
 	DiscordApiError,
@@ -140,12 +141,13 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		key: string,
 		channelId: string,
 		message: OutMessage,
+		nonce: string,
 	): Promise<void> {
 		// Read at run time: an earlier delivery of another event may have created the post since this list was built.
 		const threadId = deps.store.getThread(rt.tenant.id, item.id, channelId);
 		if (threadId !== null) {
 			try {
-				await deps.discord.sendMessage(threadId, message);
+				await deps.discord.sendMessage(threadId, { ...message, nonce });
 				return;
 			} catch (err) {
 				if (!(err instanceof DiscordApiError && err.status === 404)) throw err;
@@ -158,6 +160,7 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 				});
 			}
 		}
+		// No nonce here: Discord's forum-post endpoint does not take one, so a timed-out create may repeat (see rest.ts).
 		const post = await deps.discord.createForumPost(channelId, `${key} ${item.name}`, message);
 		deps.store.putThread(rt.tenant.id, item.id, channelId, post.threadId);
 	}
@@ -170,14 +173,17 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		channelId: string,
 		message: OutMessage,
 	): Delivery {
+		const label = `${event.eventKey}→channel:${channelId}`;
+		// Stable across the queue's retries of this job: a timed-out POST that Discord did complete is not repeated.
+		const nonce = deliveryNonce(label);
 		return {
-			label: `${event.eventKey}→channel:${channelId}`,
+			label,
 			run: async () => {
 				const type = await deps.channelType(channelId);
 				if (type === CHANNEL.FORUM || type === CHANNEL.MEDIA)
-					await toForum(rt, item, key, channelId, message);
+					await toForum(rt, item, key, channelId, message, nonce);
 				else if (type === CHANNEL.TEXT || type === CHANNEL.ANNOUNCEMENT)
-					await deps.discord.sendMessage(channelId, message);
+					await deps.discord.sendMessage(channelId, { ...message, nonce });
 				else
 					deps.log({
 						event: 'notify.bad_channel',
@@ -196,12 +202,13 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		discordId: string,
 		message: OutMessage,
 	): Delivery {
+		const label = `${event.eventKey}→dm:${discordId}`;
 		return {
-			label: `${event.eventKey}→dm:${discordId}`,
+			label,
 			run: async () => {
 				try {
 					const channelId = await deps.discord.openDm(discordId);
-					await deps.discord.sendMessage(channelId, message);
+					await deps.discord.sendMessage(channelId, { ...message, nonce: deliveryNonce(label) });
 				} catch (err) {
 					// The person closed DMs from server members: not an error of ours, and a retry cannot help.
 					if (err instanceof DiscordApiError && err.code === DISCORD_ERR.CANNOT_DM) {
