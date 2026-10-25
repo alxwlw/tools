@@ -185,7 +185,12 @@ describe('/plane KEY', () => {
 			content: 'Не удалось разобрать запрос Discord.',
 			flags: 64,
 		});
-		expect(w.logs.at(-1)).toMatchObject({ event: 'ix.refused', reason: 'no_token' });
+		expect(w.logs.at(-1)).toMatchObject({
+			event: 'ix.refused',
+			tenant: 'initech',
+			interaction: '900000000000000002',
+			reason: 'no_token',
+		});
 		const bad = await slash(w, 'abc');
 		expect(bad.body.data.flags).toBe(64);
 		expect(w.logs.at(-1)).toMatchObject({
@@ -201,6 +206,22 @@ describe('/plane KEY', () => {
 			interaction: '900000000000000004',
 			kind: 'card',
 			ms: 0,
+		});
+	});
+
+	test('сбой Discord при отправке карточки: лог со статусом Discord, ephemeral «Discord ответил»', async () => {
+		const w = await setup();
+		seed(w);
+		w.discord.failures.set('editOriginal', new DiscordApiError(429, 'PATCH', '/x'));
+		await slash(w, 'LAB-40');
+		await w.settle();
+		expect(w.logs.find((l) => l.event === 'ix.failed')).toMatchObject({
+			error: 'DiscordApiError',
+			status: 429,
+		});
+		expect(w.discord.callsOf('followup')[0]?.[1]).toEqual({
+			content: 'Не получилось: Discord ответил 429.',
+			ephemeral: true,
 		});
 	});
 
