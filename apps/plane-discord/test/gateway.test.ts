@@ -39,6 +39,9 @@ class Conn {
 	send(frame: Frame) {
 		this.ws.send(JSON.stringify(frame));
 	}
+	sendRaw(text: string) {
+		this.ws.send(text);
+	}
 	close(code: number) {
 		this.ws.close(code);
 	}
@@ -284,6 +287,22 @@ describe('Gateway', () => {
 			['warn', 'channel_id'],
 			['warn', 'author.id'],
 		]);
+		expect(server.conns).toHaveLength(1);
+	});
+
+	test('мусорный кадр логируется как gateway.bad_frame и не рвёт соединение', async () => {
+		const { server, logs, messages } = run({ heartbeatInterval: 20 });
+		const c = await server.conn(0);
+		await c.takeOp(2);
+		c.sendRaw('not json');
+		c.sendRaw('{"op":"x"}');
+		c.send(messageCreate(1, validMessage));
+		await c.take((f) => f.op === 1 && f.d === 1);
+		expect(logs.filter((l) => l.event === 'gateway.bad_frame')).toEqual([
+			{ event: 'gateway.bad_frame', level: 'warn' },
+			{ event: 'gateway.bad_frame', level: 'warn' },
+		]);
+		expect(messages.map((m) => m.id)).toEqual(['m1']);
 		expect(server.conns).toHaveLength(1);
 	});
 
