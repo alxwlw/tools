@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { commandDefinitions } from '../src/discord/commands.ts';
+import { DiscordApiError } from '../src/discord/rest.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
 import { chatInputPayload, commandPayload } from './discord-harness.ts';
 import {
@@ -153,6 +154,77 @@ describe('/plane KEY', () => {
 		await w.settle();
 		const embed = (w.discord.callsOf('editOriginal')[0]?.[1] as { embeds: any[] }).embeds[0];
 		expect(embed.fields[1].value).toBe(`<@${LINKED}>, Мира, кто-то`);
+	});
+
+	test('нет состояния и пустое имя участника → «—» и «кто-то»', async () => {
+		const w = await setup();
+		seed(w, ['plane-user-2']);
+		w.plane.members = [{ id: 'plane-user-2', displayName: '' }];
+		w.plane.states.set(P_LAB, []);
+		await slash(w, 'LAB-40');
+		await w.settle();
+		const embed = (w.discord.callsOf('editOriginal')[0]?.[1] as { embeds: any[] }).embeds[0];
+		expect(embed.fields.map((f: any) => f.value)).toEqual(['—', 'кто-то', 'Срочный']);
+	});
+
+	test('другая slash-команда → неизвестная; лог отказа и успеха без текстов', async () => {
+		const w = await setup();
+		seed(w);
+		const other = await w.ask(
+			chatInputPayload({ id: w.ids.next(), guildId: GUILD, name: 'other', options: [] }),
+		);
+		expect(other.body.data).toMatchObject({ content: 'Неизвестная команда.', flags: 64 });
+		const payload = chatInputPayload({
+			id: w.ids.next(),
+			guildId: GUILD,
+			name: 'plane',
+			options: [{ name: 'key', type: 3, value: 'LAB-40' }],
+		});
+		const noToken = await w.ask({ ...payload, token: undefined });
+		expect(noToken.body.data).toMatchObject({
+			content: 'Не удалось разобрать запрос Discord.',
+			flags: 64,
+		});
+		expect(w.logs.at(-1)).toMatchObject({ event: 'ix.refused', reason: 'no_token' });
+		const bad = await slash(w, 'abc');
+		expect(bad.body.data.flags).toBe(64);
+		expect(w.logs.at(-1)).toMatchObject({
+			event: 'ix.refused',
+			tenant: 'initech',
+			reason: 'bad_key',
+		});
+		await slash(w, 'LAB-40');
+		await w.settle();
+		expect(w.logs.at(-1)).toMatchObject({
+			event: 'ix.done',
+			tenant: 'initech',
+			interaction: '900000000000000004',
+			kind: 'card',
+			ms: 0,
+		});
+	});
+
+	test('сбой Plane: лог ix.failed с именем и статусом; сбой уборки и followup — в лог', async () => {
+		const w = await setup();
+		w.plane.getWorkItemByKey = async () => {
+			throw new PlaneApiError(502, 'GET', '/x');
+		};
+		w.discord.failures.set('deleteOriginal', new DiscordApiError(500, 'DELETE', '/x'));
+		w.discord.failures.set('followup', new DiscordApiError(500, 'POST', '/x'));
+		await slash(w, 'LAB-40');
+		await w.settle();
+		const byEvent = (event: string) => w.logs.find((l) => l.event === event);
+		expect(byEvent('ix.failed')).toMatchObject({
+			level: 'error',
+			tenant: 'initech',
+			interaction: '900000000000000001',
+			kind: 'card',
+			error: 'PlaneApiError',
+			status: 502,
+			ms: 0,
+		});
+		expect(byEvent('ix.cleanup_failed')).toMatchObject({ level: 'warn', kind: 'card' });
+		expect(byEvent('ix.reply_failed')).toMatchObject({ level: 'error', kind: 'card' });
 	});
 
 	test('commandDefinitions: plane с обязательной опцией key; обе MESSAGE-команды на месте', () => {
