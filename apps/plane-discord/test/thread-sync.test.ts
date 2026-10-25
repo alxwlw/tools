@@ -253,6 +253,43 @@ describe('createThreadSync', () => {
 		expect(w.logs).toEqual([]);
 	});
 
+	test('длинное имя автора режется; упоминание вне списка mentions → «пользователь»', async () => {
+		const w = setup();
+		await w.sync(
+			message({
+				author: { id: AUTHOR, name: 'Я'.repeat(100), bot: false },
+				content: `<@${LINKED}x> <@4242>`,
+			}),
+		);
+		const html = w.plane.createdComments[0]!.comment.comment_html;
+		expect(html).toStartWith(`<p><strong>${'Я'.repeat(79)}…</strong> (Discord):</p>`);
+		expect(html).toContain('пользователь');
+	});
+
+	test('сообщение без guild_id → ссылка на сервер тенанта', async () => {
+		const w = setup();
+		await w.sync(message({ guildId: null }));
+		expect(w.plane.createdComments[0]!.comment.comment_html).toContain(
+			`https://discord.com/channels/${GUILD}/${THREAD}/${MSG}`,
+		);
+	});
+
+	test('тенант привязки не настроен → sync.skipped no_tenant', async () => {
+		const w = setup();
+		w.store.putThread('gone', 'item-x', PARENT, '222222222222222229', P_ENG);
+		await w.sync(message({ channelId: '222222222222222229' }));
+		expect(w.logs).toEqual([
+			{
+				event: 'sync.skipped',
+				level: 'warn',
+				tenant: 'gone',
+				thread: '222222222222222229',
+				message: MSG,
+				reason: 'no_tenant',
+			},
+		]);
+	});
+
 	test('задача скрытого проекта → пропуск без текста в логе', async () => {
 		const w = setup({ projectId: P_HIDDEN, itemProject: P_HIDDEN });
 		await w.sync(message({ content: SECRET_TEXT }));

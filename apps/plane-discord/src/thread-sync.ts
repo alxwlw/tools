@@ -74,7 +74,6 @@ export function createThreadSync(deps: {
 			return;
 		}
 
-		const started = Date.now();
 		const dup = await rt.plane.findCommentByExternalId(
 			projectId,
 			link.workItemId,
@@ -103,11 +102,6 @@ export function createThreadSync(deps: {
 			external_id: message.id,
 			external_source: SOURCE,
 		});
-		log({
-			event: 'sync.done',
-			...ids,
-			created: result.created,
-			ms: Date.now() - started,
-		});
+		log({ event: 'sync.done', ...ids, created: result.created });
 	};
 }
