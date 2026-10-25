@@ -326,7 +326,10 @@ describe('POST /plane/webhook', () => {
 				throw new Error('EPIPE');
 			},
 		});
-		const ignored = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'state'));
+		const ignored = edited(
+			'plane-app-workitem-state-done',
+			(b) => (b.activity.field = 'description'),
+		);
 		const requests: Array<() => Request> = [
 			() => fixtureRequest('plane-app-workitem-created'), // accepted
 			() => fixtureRequest('plane-app-workitem-created'), // duplicate
@@ -344,7 +347,7 @@ describe('POST /plane/webhook', () => {
 
 	test('игнорируемая доставка → 200, plane.ignored, enqueue не вызван, ключ не занят', async () => {
 		const { handler, events, logs, store } = setup();
-		const body = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'state'));
+		const body = edited('plane-app-workitem-state-done', (b) => (b.activity.field = 'description'));
 		const res = await handler(post(body, sign(body)));
 		expect(res.status).toBe(200);
 		expect(events).toEqual([]);

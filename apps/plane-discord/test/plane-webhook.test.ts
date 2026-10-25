@@ -23,6 +23,34 @@ function edited(name: string, edit: (body: any) => void): unknown {
 	return body;
 }
 
+/** The Plane "human" twin of a state change (REST v1 sends only this one): names in values, uuids in identifiers. */
+const humanState = (
+	oldId: string | null,
+	newId: string | null,
+	edit: (b: any) => void = () => {},
+) =>
+	edited('plane-app-workitem-state-done', (b) => {
+		b.activity.field = 'state';
+		b.activity.old_value = oldId === null ? null : 'Backlog';
+		b.activity.new_value = 'Done';
+		b.activity.old_identifier = oldId;
+		b.activity.new_identifier = newId;
+		edit(b);
+	});
+/** The human twin of one person added (`added`) or removed (`removed`) from the snapshot's assignees. */
+const humanAssignee = (
+	who: { added?: string; removed?: string },
+	edit: (b: any) => void = () => {},
+) =>
+	edited('plane-app-workitem-assigned', (b) => {
+		b.activity.field = 'assignees';
+		b.activity.old_value = who.removed ? 'User9' : '';
+		b.activity.new_value = who.added ? 'User5' : '';
+		b.activity.old_identifier = who.removed ?? null;
+		b.activity.new_identifier = who.added ?? null;
+		edit(b);
+	});
+
 describe('parsePlaneDelivery', () => {
 	test('created → workitem.created с id, projectId, sequenceId, stateId; actorId — бот', () => {
 		const event = parse('plane-app-workitem-created');
@@ -43,27 +71,41 @@ describe('parsePlaneDelivery', () => {
 		});
 	});
 
-	test('state_id → workitem.updated, previous.stateId = old_value', () => {
-		const event = parse('plane-app-workitem-state-done');
+	test('человеческий двойник state → workitem.updated, previous.stateId = old_identifier', () => {
+		const event = parseBody(humanState(ID(4), ID(9)));
 		expect(event).toMatchObject({
 			kind: 'workitem.updated',
 			tenant: 'initech',
-			eventKey: `issue.updated:${ID(3)}:state_id:2026-10-22T14:10:07.079913Z:d21ce489ad2594bb`,
 			actorId: ID(8),
 			previous: { stateId: ID(4) },
 			item: { id: ID(3), stateId: ID(9), assignees: [ID(8)] },
 		});
+		expect((event as PlaneEvent).eventKey).toMatch(
+			new RegExp(`^issue\\.updated:${ID(3)}:state:2026-10-22T14:10:07\\.079913Z:[0-9a-f]{16}$`),
+		);
 		expect(Object.keys((event as { previous: object }).previous)).toEqual(['stateId']);
 	});
 
-	test('assignee_ids → previous.assignees = []', () => {
-		const event = parse('plane-app-workitem-assigned');
-		expect(event).toMatchObject({
+	test('машинные двойники state_id и assignee_ids → null (иначе смена в UI уведомляет дважды)', () => {
+		expect(parse('plane-app-workitem-state-done')).toBeNull();
+		expect(parse('plane-app-workitem-assigned')).toBeNull();
+	});
+
+	test('человеческий двойник assignees: добавлен → previous.assignees = снимок без него; снят → null', () => {
+		const snapshotWith = (b: any) =>
+			(b.data.assignees = [{ id: ID(8) }, { id: ID(14) }, { id: ID(15) }]);
+		const added = parseBody(humanAssignee({ added: ID(14) }, snapshotWith));
+		expect(added).toMatchObject({
 			kind: 'workitem.updated',
-			previous: { assignees: [] },
-			item: { assignees: [ID(8)] },
+			previous: { assignees: [ID(8), ID(15)] },
+			item: { assignees: [ID(8), ID(14), ID(15)] },
 		});
-		expect(Object.keys((event as { previous: object }).previous)).toEqual(['assignees']);
+		expect(Object.keys((added as { previous: object }).previous)).toEqual(['assignees']);
+		expect(parseBody(humanAssignee({ removed: ID(14) }, snapshotWith))).toBeNull();
+		// the only assignee added: nobody was assigned before
+		expect(parseBody(humanAssignee({ added: ID(8) }))).toMatchObject({
+			previous: { assignees: [] },
+		});
 	});
 
 	test('description_html → previous.descriptionHtml = old_value', () => {
@@ -86,13 +128,12 @@ describe('parsePlaneDelivery', () => {
 		expect(empty).toMatchObject({ previous: { descriptionHtml: null } });
 	});
 
-	test('assignee_ids с непустым old_value → previous.assignees — те же id', () => {
-		const event = parseBody(
-			edited('plane-app-workitem-assigned', (b) => {
-				b.activity.old_value = [ID(8), ID(9)];
-			}),
-		);
-		expect(event).toMatchObject({ previous: { assignees: [ID(8), ID(9)] } });
+	test('человеческий двойник state без прежнего состояния → событие принято, previous пуст', () => {
+		for (const oldId of [null, '']) {
+			const event = parseBody(humanState(oldId, ID(9))) as { kind: string; previous: object };
+			expect(event.kind).toBe('workitem.updated');
+			expect(event.previous).toEqual({});
+		}
 	});
 
 	test('отсутствующее поле html → null, а не ошибка', () => {
@@ -163,12 +204,12 @@ describe('parsePlaneDelivery', () => {
 		expect(b!.eventKey).toBe(a!.eventKey);
 	});
 
-	test('человеческий двойник (field state), agent_run_user_prompt, created с field modules, удаление → null', () => {
+	test('поля name, priority, description, agent_run_user_prompt, created с field modules, удаление → null', () => {
 		const human = (field: string) =>
 			edited('plane-app-workitem-state-done', (b) => {
 				b.activity.field = field;
 			});
-		for (const field of ['state', 'assignees', 'description', 'name', 'priority'])
+		for (const field of ['description', 'name', 'priority'])
 			expect(parseBody(human(field))).toBeNull();
 		expect(
 			parseBody(edited('plane-app-agent-run-create', (b) => (b.event = 'agent_run_user_prompt'))),
@@ -200,47 +241,49 @@ describe('parsePlaneDelivery', () => {
 	});
 
 	test('два изменения одной задачи с разным last_activity_at → разные eventKey', () => {
-		const a = parse('plane-app-workitem-state-done')!;
+		const a = parseBody(humanState(ID(4), ID(9)))!;
 		const later = parseBody(
-			edited('plane-app-workitem-state-done', (b) => {
-				b.data.last_activity_at = '2026-10-22T15:00:00.000000Z';
-			}),
+			humanState(ID(4), ID(9), (b) => (b.data.last_activity_at = '2026-10-22T15:00:00.000000Z')),
 		)!;
-		const other = parseBody(
-			edited('plane-app-workitem-state-done', (b) => {
-				b.activity.field = 'assignee_ids';
-				b.activity.old_value = [];
-			}),
-		)!;
+		const other = parseBody(humanAssignee({ added: ID(8) }))!;
 		expect(new Set([a.eventKey, later.eventKey, other.eventKey]).size).toBe(3);
-		expect(later.eventKey).toBe(
-			`issue.updated:${ID(3)}:state_id:2026-10-22T15:00:00.000000Z:d21ce489ad2594bb`,
-		);
+		expect(
+			later.eventKey.startsWith(`issue.updated:${ID(3)}:state:2026-10-22T15:00:00.000000Z:`),
+		).toBe(true);
+		expect(other.eventKey.startsWith(`issue.updated:${ID(3)}:assignees:`)).toBe(true);
 		// a repeat of one delivery keeps its key
-		expect(parse('plane-app-workitem-state-done')!.eventKey).toBe(a.eventKey);
-	});
-
-	test('state_id с old_value null → событие принято, previous.stateId не выставлен', () => {
-		const event = parseBody(
-			edited('plane-app-workitem-state-done', (b) => (b.activity.old_value = null)),
-		) as { kind: string; previous: object };
-		expect(event.kind).toBe('workitem.updated');
-		expect(event.previous).toEqual({});
+		expect(parseBody(humanState(ID(4), ID(9)))!.eventKey).toBe(a.eventKey);
 	});
 
 	test('два изменения одного поля в одну метку last_activity_at → разные eventKey; повтор — тот же', () => {
-		const change = (oldValue: string, newValue: string) =>
+		const a = parseBody(humanState(ID(4), ID(9)))!;
+		const b = parseBody(humanState(ID(9), ID(4)))!;
+		const c = parseBody(humanState(ID(4), ID(5)))!;
+		expect(new Set([a.eventKey, b.eventKey, c.eventKey]).size).toBe(3);
+		expect(parseBody(humanState(ID(4), ID(9)))!.eventKey).toBe(a.eventKey);
+		// the hash is 16 hex chars after the timestamp
+		expect(a.eventKey).toMatch(/:\d{2}:\d{2}\.\d+Z:[0-9a-f]{16}$/);
+	});
+
+	test('двое назначены одним запросом (одна метка, разные identifier) → разные eventKey; повтор — тот же', () => {
+		const two = (b: any) => (b.data.assignees = [{ id: ID(8) }, { id: ID(14) }]);
+		const first = parseBody(humanAssignee({ added: ID(8) }, two))!;
+		const second = parseBody(humanAssignee({ added: ID(14) }, two))!;
+		expect(first.eventKey).not.toBe(second.eventKey);
+		expect(parseBody(humanAssignee({ added: ID(14) }, two))!.eventKey).toBe(second.eventKey);
+	});
+
+	test('description_html (машинный) → ключ по old_value/new_value, не по identifier', () => {
+		const html = (oldValue: string, newValue: string) =>
 			edited('plane-app-workitem-state-done', (b) => {
+				b.activity.field = 'description_html';
 				b.activity.old_value = oldValue;
 				b.activity.new_value = newValue;
 			});
-		const a = parseBody(change(ID(4), ID(9)))!;
-		const b = parseBody(change(ID(9), ID(4)))!;
-		const c = parseBody(change(ID(4), ID(5)))!;
-		expect(new Set([a.eventKey, b.eventKey, c.eventKey]).size).toBe(3);
-		expect(parseBody(change(ID(4), ID(9)))!.eventKey).toBe(a.eventKey);
-		// the hash is 16 hex chars after the timestamp
-		expect(a.eventKey).toMatch(/:\d{2}:\d{2}\.\d+Z:[0-9a-f]{16}$/);
+		const a = parseBody(html('<p>a</p>', '<p>b</p>'))!;
+		expect(a.eventKey).toMatch(/^issue\.updated:.+:description_html:.+:[0-9a-f]{16}$/);
+		expect(parseBody(html('<p>a</p>', '<p>c</p>'))!.eventKey).not.toBe(a.eventKey);
+		expect(parseBody(html('<p>a</p>', '<p>b</p>'))!.eventKey).toBe(a.eventKey);
 	});
 
 	test('враждебное тело → BadDelivery, не другое исключение', () => {
@@ -272,17 +315,20 @@ describe('parsePlaneDelivery', () => {
 			edited('plane-app-workitem-created', (b) => (b.data.assignees = [{ id: 5 }])),
 			edited('plane-app-workitem-created', (b) => (b.data.description_html = 5)),
 			edited('plane-app-workitem-created', (b) => (b.activity.actor = null)),
-			edited('plane-app-workitem-state-done', (b) => (b.activity.old_value = 5)),
-			edited('plane-app-workitem-state-done', (b) => delete b.data.last_activity_at),
-			edited('plane-app-workitem-assigned', (b) => (b.activity.old_value = 'x')),
-			edited('plane-app-workitem-assigned', (b) => (b.activity.old_value = [5])),
-			edited('plane-app-workitem-assigned', (b) => (b.activity.old_value = [''])),
+			humanState(ID(4), ID(9), (b) => (b.activity.old_identifier = 5)),
+			humanState(ID(4), ID(9), (b) => (b.activity.new_identifier = {})),
+			humanState(ID(4), ID(9), (b) => delete b.data.last_activity_at),
+			humanAssignee({ added: ID(8) }, (b) => (b.activity.new_identifier = 5)),
+			humanAssignee({ added: ID(8) }, (b) => (b.activity.old_identifier = [])),
+			// the identifiers are validated before a removal is dropped
+			humanAssignee({ removed: ID(8) }, (b) => (b.activity.old_identifier = 5)),
 			edited('plane-app-workitem-state-done', (b) => {
 				b.activity.field = 'description_html';
 				b.activity.old_value = 5;
 			}),
 		];
-		for (const body of hostile) expect(() => parseBody(body)).toThrow(BadDelivery);
+		for (const [i, body] of hostile.entries())
+			expect(() => parseBody(body), String(i)).toThrow(BadDelivery);
 		expect(() => parsePlaneDelivery('initech', new Headers(), 'not json')).toThrow(BadDelivery);
 	});
 });

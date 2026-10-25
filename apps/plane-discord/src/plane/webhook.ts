@@ -96,6 +96,13 @@ function htmlOrNull(v: unknown, where: string): string | null {
 	return v;
 }
 
+/** A tracker's old_identifier / new_identifier: a uuid string, or null when there was none. */
+function identifier(v: unknown, where: string): string | null {
+	if (v === null || v === undefined || v === '') return null;
+	if (typeof v !== 'string') throw new BadDelivery(`${where} is not a string`);
+	return v;
+}
+
 function ids(v: unknown, where: string, objects: boolean): string[] {
 	if (!Array.isArray(v)) throw new BadDelivery(`${where} is not an array`);
 	return (v as unknown[]).map((entry) => {
@@ -191,29 +198,42 @@ export function parsePlaneDelivery(
 		};
 	}
 
-	// issue/updated: only the "machine" twin of a change; the "human" twin (state, assignees,
-	// description) and every other field are ignored.
-	if (field !== 'state_id' && field !== 'assignee_ids' && field !== 'description_html') return null;
+	// issue/updated reaches us from two producers (Plane webhook_task.py): `model_activity` (:503), the
+	// "machine" twin with field = the request key (state_id, assignee_ids, description_html) and
+	// identifiers always null, and `webhook_activity` (:418, fed by the issue_activities_task.py
+	// trackers), the "human" twin with field state / assignees / description and the identifiers set.
+	// The UI sends both; the REST v1 PATCH (api/views/issue.py:1477) sends only the human one. So
+	// state and assignees are taken from the human twin (track_state :273, track_assignees :610 — one
+	// activity per person added or removed) and their machine twins are dropped, or a UI change
+	// would notify twice. Description: the human twin (track_description :97) has no HTML to diff, so
+	// the machine twin description_html stays the source; known gap: mentions added to a description
+	// through the API send no DM.
+	if (field !== 'state' && field !== 'assignees' && field !== 'description_html') return null;
 	const data = obj(body, 'data', 'body');
 	const item = snapshot(data);
 	const old = activity.old_value;
 	const previous: { stateId?: string; assignees?: string[]; descriptionHtml?: string | null } = {};
-	if (field === 'state_id') {
-		// A work item created without a state arrives with old_value null: no previous state.
-		if (old !== null && typeof old !== 'string')
-			throw new BadDelivery('activity.old_value is not a string');
-		if (old !== null) previous.stateId = old;
-	} else if (field === 'assignee_ids') {
-		previous.assignees = ids(old, 'activity.old_value', false);
-	} else {
+	let changed: [unknown, unknown];
+	if (field === 'description_html') {
 		previous.descriptionHtml = htmlOrNull(old, 'activity.old_value');
+		changed = [old ?? null, activity.new_value ?? null];
+	} else {
+		const oldId = identifier(activity.old_identifier, 'activity.old_identifier');
+		const newId = identifier(activity.new_identifier, 'activity.new_identifier');
+		if (field === 'state') {
+			// A work item created without a state arrives with old_identifier null: no previous state.
+			if (oldId !== null) previous.stateId = oldId;
+		} else {
+			// Only a person added is news (removal notifies nobody). The snapshot is the state after the
+			// change, so the state before is the snapshot without that person.
+			if (newId === null) return null;
+			previous.assignees = item.assignees.filter((id) => id !== newId);
+		}
+		changed = [oldId, newId];
 	}
-	// last_activity_at alone could merge two quick changes of one field; the values tell them apart,
-	// and a re-sent delivery carries the same ones.
-	const change = createHash('sha256')
-		.update(JSON.stringify([old ?? null, activity.new_value ?? null]))
-		.digest('hex')
-		.slice(0, 16);
+	// last_activity_at alone could merge two quick changes of one field (or two people added by one
+	// request); the values tell them apart, and a re-sent delivery carries the same ones.
+	const change = createHash('sha256').update(JSON.stringify(changed)).digest('hex').slice(0, 16);
 	return {
 		kind: 'workitem.updated',
 		tenant,
