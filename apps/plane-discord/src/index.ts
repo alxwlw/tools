@@ -2,6 +2,7 @@ import type { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 
 import { type Config, describeTenants, loadConfig } from './config.ts';
+import { Gateway, type GatewayMessage, INTENTS } from './discord/gateway.ts';
 import { createInteractionHandler } from './discord/interactions.ts';
 import { DiscordRest } from './discord/rest.ts';
 import { jsonLog, type Log } from './log.ts';
@@ -12,6 +13,7 @@ import { SerialQueue } from './queue.ts';
 import { createRuntime, type Runtime } from './runtime.ts';
 import { createHandler } from './server.ts';
 import { Store } from './store.ts';
+import { createThreadSync } from './thread-sync.ts';
 import { checkSilence } from './watchdog.ts';
 
 const MINUTE_MS = 60_000;
@@ -36,7 +38,17 @@ export type Service = {
 	idle: () => Promise<void>;
 	stop: () => Promise<void>;
 };
+/** The Gateway client as the service uses it; tests inject a fake instead of dialing Discord. */
+export type GatewayLike = { start: () => void; stop: () => Promise<void> };
+export type GatewayFactory = (opts: {
+	token: string;
+	intents: number;
+	onMessage: (message: GatewayMessage) => void;
+	log: Log;
+}) => GatewayLike;
 export type ServiceOptions = {
+	/** Default: the real Gateway client. */
+	gateway?: GatewayFactory;
 	readFile?: (path: string) => string;
 	fetch?: Fetch;
 	write?: (line: string) => void;
@@ -150,6 +162,20 @@ export function startService(
 		now,
 	});
 
+	// Thread sync is a side feature: a dead Gateway (gateway.fatal) never takes the HTTP service down.
+	const threadSync = createThreadSync({
+		runtimes,
+		store,
+		applicationId: config.discord.applicationId,
+		log,
+	});
+	const gateway = (options.gateway ?? ((opts) => new Gateway(opts)))({
+		token: config.discord.botToken,
+		intents: INTENTS.GUILDS | INTENTS.GUILD_MESSAGES | INTENTS.MESSAGE_CONTENT,
+		onMessage: (message) => queue.push(`sync:${message.id}`, () => threadSync(message)),
+		log,
+	});
+
 	const server = Bun.serve({
 		port: options.listenPort ?? config.port,
 		development: false,
@@ -195,6 +221,7 @@ export function startService(
 		}, PRUNE_MS),
 	];
 
+	gateway.start();
 	log({ event: 'listening', port: server.port ?? 0, tenants: describeTenants(config) });
 
 	return {
@@ -203,6 +230,8 @@ export function startService(
 		idle: () => queue.idle(),
 		async stop() {
 			for (const stopTimer of cancel) stopTimer();
+			// No new thread messages from here on; jobs already queued still drain below. Not awaited, like server.stop().
+			gateway.stop().catch(() => {});
 			// Not awaited: it resolves only when keep-alive connections close. New connections are refused at once.
 			server.stop().catch(() => {});
 			// Jobs in flight get a few seconds; the rest is lost (the queue is in memory by design).

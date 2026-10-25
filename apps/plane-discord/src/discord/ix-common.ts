@@ -1,4 +1,5 @@
 // Pieces shared by the interaction handler and the slash commands: payload parsing, reply shapes, error texts.
+import { esc, link } from '../html.ts';
 import type { Log } from '../log.ts';
 import type { TenantRuntime } from '../notify.ts';
 import { PlaneApiError } from '../plane/client.ts';
@@ -83,3 +84,21 @@ export async function keyOf(
 
 export const itemLink = (planeUrl: string, rt: TenantRuntime, key: string): string =>
 	`[\`${key}\`](<${workItemUrl(planeUrl, rt.tenant.workspace, key)}>)`;
+
+/** `<ul>` of attachment links for a Plane comment; a non-http(s) URL is dropped. */
+export const attachmentsHtml = (files: readonly { url: string; filename: string }[]): string => {
+	const items = files.flatMap((f) => {
+		const a = link(f.url, f.filename);
+		return a === null ? [] : [`<li>${a}</li>`];
+	});
+	return items.length === 0 ? '' : `<ul>${items.join('')}</ul>`;
+};
+
+/** `<a>` to a Discord message. */
+export const messageLinkHtml = (
+	guildId: string,
+	channelId: string,
+	messageId: string,
+	text: string,
+): string =>
+	`<a href="https://discord.com/channels/${guildId}/${channelId}/${messageId}">${esc(text)}</a>`;

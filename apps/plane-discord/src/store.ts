@@ -33,6 +33,13 @@ export class Store {
 			)`,
 		);
 		this.#db.run(
+			`CREATE TABLE IF NOT EXISTS webhooks (
+				channel_id TEXT PRIMARY KEY,
+				webhook_id TEXT NOT NULL UNIQUE,
+				token TEXT NOT NULL
+			)`,
+		);
+		this.#db.run(
 			`CREATE TABLE IF NOT EXISTS heartbeat (
 				tenant TEXT PRIMARY KEY,
 				last_event_at INTEGER,
@@ -133,6 +140,30 @@ export class Store {
 					project_id = excluded.project_id, work_item_id = excluded.work_item_id`,
 			)
 			.run(tenant, messageId, projectId, workItemId);
+	}
+
+	getWebhook(channelId: string): { id: string; token: string } | null {
+		const row = this.#db
+			.query<{ webhook_id: string; token: string }, [string]>(
+				'SELECT webhook_id, token FROM webhooks WHERE channel_id = ?',
+			)
+			.get(channelId);
+		return row ? { id: row.webhook_id, token: row.token } : null;
+	}
+
+	/** Upsert by channel: a recreated webhook replaces the old one. */
+	putWebhook(channelId: string, id: string, token: string): void {
+		this.#db
+			.query(
+				`INSERT INTO webhooks (channel_id, webhook_id, token) VALUES (?, ?, ?)
+				ON CONFLICT (channel_id) DO UPDATE SET webhook_id = excluded.webhook_id, token = excluded.token`,
+			)
+			.run(channelId, id, token);
+	}
+
+	/** True for a webhook this service created: its messages in a bound thread are our own echo. */
+	isOwnWebhook(webhookId: string): boolean {
+		return this.#db.query('SELECT 1 FROM webhooks WHERE webhook_id = ?').get(webhookId) !== null;
 	}
 
 	touchEvent(tenant: string, at: number): void {

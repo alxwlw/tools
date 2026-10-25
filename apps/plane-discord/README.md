@@ -4,8 +4,8 @@ A [Bun](https://bun.sh) service that bridges [Plane](https://plane.so) and Disco
 tenants (a Discord server plus a Plane workspace each). It has no runtime dependencies and keeps its
 state in one SQLite file.
 
-Phases 1 to 3 (this version; thread messages are not yet synced to Plane, and comments are not yet
-synced back):
+Phases 1 to 3 (this version; Discord thread messages reach Plane as comments, comments are not yet
+synced back to threads):
 
 - **1a, Plane to a channel.** A work item is created, closed or cancelled, or the bot is mentioned in a
   comment: a message goes to the Discord channel mapped to the project (and optionally a module). A
@@ -23,6 +23,12 @@ synced back):
   channel, the bot opens a thread on its public reply and binds it to the item (a forum post from 1a is
   already bound). `/plane-link KEY` binds the thread it is typed in; a thread holds one work item.
   Binding a thread to a hidden project's item is refused like an unknown key.
+  A message in a bound thread becomes a Plane comment `Name (Discord): …` with a link to the message
+  (`external_source=discord`, `external_id=<message id>`; a repeat adds nothing). The bot's own messages,
+  its webhooks' messages and system messages are skipped; edits and deletions are not synced. This needs the
+  privileged `MESSAGE_CONTENT` intent enabled in the Developer Portal: without it the Gateway closes with
+  4014 and only thread sync stops (the log says `gateway.fatal`); the other phases keep working. Items of
+  hidden projects are never synced.
 
 Hidden projects (`hiddenProjects`) are hidden completely: no channel topics, no DMs, no modal, no
 forwarded mentions.

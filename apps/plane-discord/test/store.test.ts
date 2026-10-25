@@ -180,3 +180,32 @@ describe('Store: треды и задачи', () => {
 		again.close();
 	});
 });
+
+describe('Store: webhooks', () => {
+	test('putWebhook/getWebhook/isOwnWebhook; повтор по каналу заменяет вебхук', () => {
+		const store = new Store(':memory:');
+		expect(store.getWebhook('chan-1')).toBeNull();
+		expect(store.isOwnWebhook('wh-1')).toBe(false);
+		store.putWebhook('chan-1', 'wh-1', 'tok-1');
+		expect(store.getWebhook('chan-1')).toEqual({ id: 'wh-1', token: 'tok-1' });
+		expect(store.isOwnWebhook('wh-1')).toBe(true);
+		expect(store.getWebhook('chan-2')).toBeNull();
+		store.putWebhook('chan-1', 'wh-2', 'tok-2');
+		expect(store.getWebhook('chan-1')).toEqual({ id: 'wh-2', token: 'tok-2' });
+		expect(store.isOwnWebhook('wh-1')).toBe(false);
+		expect(store.isOwnWebhook('wh-2')).toBe(true);
+	});
+
+	test('база фазы 2 без таблицы webhooks получает её при открытии', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'store-'));
+		dirs.push(dir);
+		const path = join(dir, 's.sqlite');
+		const old = new Database(path, { create: true });
+		old.run('CREATE TABLE seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)');
+		old.close();
+		const store = new Store(path);
+		store.putWebhook('c', 'w', 't');
+		expect(store.isOwnWebhook('w')).toBe(true);
+		store.close();
+	});
+});

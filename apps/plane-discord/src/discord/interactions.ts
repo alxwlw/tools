@@ -11,6 +11,7 @@ import type { Store } from '../store.ts';
 import { discordToPlaneHtml, planeMentionHtml, titleFrom, workItemUrl } from '../text.ts';
 import { APPEND_COMMAND, CREATE_COMMAND, PLANE_COMMAND, PLANE_LINK_COMMAND } from './commands.ts';
 import {
+	attachmentsHtml,
 	describe,
 	ephemeral,
 	failedEntry,
@@ -23,6 +24,7 @@ import {
 	KEY_RE,
 	keyOf,
 	mdLabel,
+	messageLinkHtml,
 	own,
 	type Rec,
 	rec,
@@ -220,14 +222,8 @@ export function createInteractionHandler(
 		return planeId !== null ? planeMentionHtml(planeId) : esc(ctx.author.name);
 	}
 
-	// Attachment URLs were checked to be http(s) when the command came in.
-	const attachmentsHtml = (ctx: FormContext): string =>
-		ctx.attachments.length === 0
-			? ''
-			: `<ul>${ctx.attachments.map((a) => `<li><a href="${esc(a.url)}">${esc(a.filename)}</a></li>`).join('')}</ul>`;
-
 	const messageLink = (ctx: FormContext, text: string): string =>
-		`<a href="https://discord.com/channels/${ctx.guildId}/${ctx.channelId}/${ctx.messageId}">${esc(text)}</a>`;
+		messageLinkHtml(ctx.guildId, ctx.channelId, ctx.messageId, text);
 
 	const itemLink = (rt: TenantRuntime, key: string): string => linkTo(deps.planeUrl, rt, key);
 
@@ -273,7 +269,7 @@ export function createInteractionHandler(
 				const html =
 					discordToPlaneHtml(description, mentionFor(rt, ctx)) +
 					`<p>Из Discord: ${messageLink(ctx, 'сообщение')} · автор: ${authorHtml(rt, ctx)}</p>` +
-					attachmentsHtml(ctx);
+					attachmentsHtml(ctx.attachments);
 				const made = await rt.plane.createWorkItem(projectId, {
 					name: title,
 					description_html: html,
@@ -356,7 +352,7 @@ export function createInteractionHandler(
 				? ''
 				: `<blockquote>${discordToPlaneHtml(text, mentionFor(rt, ctx))}</blockquote>`) +
 			`<p>— ${authorHtml(rt, ctx)}, ${messageLink(ctx, 'сообщение в Discord')}</p>` +
-			attachmentsHtml(ctx);
+			attachmentsHtml(ctx.attachments);
 		await rt.plane.createComment(item.projectId, item.id, {
 			comment_html: html,
 			external_id: ctx.messageId,

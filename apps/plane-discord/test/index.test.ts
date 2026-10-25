@@ -1,5 +1,8 @@
 // The composition root: every module wired as in production, with Plane and Discord replaced at fetch level.
 import { createHmac } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { connect } from 'node:net';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, jest, test } from 'bun:test';
@@ -9,10 +12,12 @@ import {
 	intervalEvery,
 	logUnhandled,
 	type Service,
+	type ServiceOptions,
 	startService,
 } from '../src/index.ts';
 import { CREATE_COMMAND } from '../src/discord/commands.ts';
 import { commandPayload, makeSigner, submitPayload } from './discord-harness.ts';
+import { Store } from '../src/store.ts';
 import { fixture } from './fixtures.ts';
 
 const signer = await makeSigner();
@@ -127,6 +132,10 @@ function world() {
 				priority: 'none',
 				assignees: [],
 			});
+		if (pathname.endsWith('/comments/'))
+			return init.method === 'POST'
+				? json({ id: 'c1' }, 201)
+				: json({ results: [], next_page_results: false });
 		if (pathname.endsWith('/states/'))
 			return json({
 				results: [
@@ -158,6 +167,11 @@ function world() {
 			check();
 		});
 	const lines: string[] = [];
+	const gateways: Array<{
+		opts: Parameters<NonNullable<ServiceOptions['gateway']>>[0];
+		started: number;
+		stopped: number;
+	}> = [];
 	const entries = () => lines.map((l) => JSON.parse(l) as Record<string, unknown>);
 	const ticks: Array<{ tick: () => void; ms: number }> = [];
 	let clock = 1_800_000_000_000;
@@ -171,6 +185,7 @@ function world() {
 		lines,
 		entries,
 		ticks,
+		gateways,
 		advance: (ms: number) => (clock += ms),
 		options: {
 			readFile: () => TENANTS,
@@ -180,6 +195,14 @@ function world() {
 				poke();
 			},
 			listenPort: 0,
+			gateway: ((opts) => {
+				const g = { opts, started: 0, stopped: 0 };
+				gateways.push(g);
+				return {
+					start: () => void g.started++,
+					stop: async () => void g.stopped++,
+				};
+			}) as NonNullable<ServiceOptions['gateway']>,
 			now: () => clock,
 			every: (tick: () => void, ms: number) => {
 				ticks.push({ tick, ms });
@@ -242,6 +265,76 @@ const post = (base: string, req: Request & { raw: string }) =>
 	fetch(`${base}/plane/webhook`, { method: 'POST', body: req.raw, headers: req.headers });
 const messages = (w: ReturnType<typeof world>, channel = CHANNEL) =>
 	w.discord.filter((c) => c.method === 'POST' && c.path === `/channels/${channel}/messages`);
+
+describe('startService: Gateway', () => {
+	test('startService поднимает и останавливает Gateway через внедрённую фабрику', async () => {
+		const { w, service } = start();
+		expect(w.gateways).toHaveLength(1);
+		const g = w.gateways[0]!;
+		expect(g.opts.token).toBe('bot-token-value');
+		expect(g.opts.intents).toBe(1 | 512 | 32768);
+		expect(g.started).toBe(1);
+		expect(g.stopped).toBe(0);
+		await service.stop();
+		expect(g.stopped).toBe(1);
+	});
+
+	test('сообщение из Gateway привязанного треда → комментарий в Plane через очередь', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'idx-'));
+		try {
+			const db = join(dir, 'state.sqlite');
+			const seed = new Store(db);
+			seed.putThread('acme', 'w1', CHANNEL, '777777777777777771', PROJECT);
+			seed.close();
+			const { w, service } = start(world(), { ...ENV, PLANE_DISCORD_DB: db });
+			w.gateways[0]!.opts.onMessage({
+				id: '888888888888888881',
+				channelId: '777777777777777771',
+				guildId: GUILD,
+				type: 0,
+				content: 'из треда',
+				author: { id: '555555555555555551', name: 'Мира', bot: false },
+				webhookId: null,
+				applicationId: null,
+				attachments: [],
+				mentions: [],
+			});
+			// The bot's own message in the same thread is not echoed back.
+			w.gateways[0]!.opts.onMessage({
+				id: '888888888888888882',
+				channelId: '777777777777777771',
+				guildId: GUILD,
+				type: 0,
+				content: 'эхо',
+				author: { id: '123456789012345678', name: 'Plane', bot: true },
+				webhookId: null,
+				applicationId: '123456789012345678',
+				attachments: [],
+				mentions: [],
+			});
+			await service.idle();
+			const posts = w.planeRequests.filter(
+				(r) => r.method === 'POST' && r.path.endsWith('/comments/'),
+			);
+			expect(posts).toHaveLength(1);
+			expect(JSON.parse(posts[0]!.body)).toMatchObject({
+				external_source: 'discord',
+				external_id: '888888888888888881',
+			});
+			expect(w.entries().some((e) => e.event === 'sync.done')).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test('gateway.fatal не останавливает HTTP-сервис', async () => {
+		const { w, url } = start();
+		w.gateways[0]!.opts.log({ event: 'gateway.fatal', level: 'error', code: 4014 });
+		const res = await fetch(url('/healthz'));
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('ok');
+	});
+});
 
 describe('startService', () => {
 	test('/healthz → ok, строка listening с картой тенантов без секретов', async () => {
