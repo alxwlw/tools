@@ -60,6 +60,8 @@ describe('verifyIdToken', () => {
 			'команда не помещается в число': tok({ team: 3458764500000000001 }),
 			'отрицательный пользователь': tok({ user: -1 }),
 			'без пользователя': tok({ user: undefined }),
+			'части не base64url': '@@@.@@@.AAAA',
+			'payload не base64url': signed(b64({ alg: 'HS256' }), '@@@'),
 			'payload null': signed(b64({ alg: 'HS256' }), b64('null')),
 			'payload массив': signed(b64({ alg: 'HS256' }), b64('[]')),
 			'payload число': signed(b64({ alg: 'HS256' }), b64('5')),
