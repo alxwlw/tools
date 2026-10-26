@@ -408,6 +408,12 @@ describe('POST /miro/api/convert', () => {
 		]);
 	});
 
+	test('известный проект не перечитывает список проектов', async () => {
+		const w = world();
+		await w.call('POST', '/miro/api/convert', { body: convertBody() });
+		expect(w.plane.calls.filter((c) => c === 'listProjects')).toHaveLength(1);
+	});
+
 	test('проект, созданный после первого чтения списка, принимается convert', async () => {
 		const w = world();
 		await w.call('GET', '/miro/api/projects');

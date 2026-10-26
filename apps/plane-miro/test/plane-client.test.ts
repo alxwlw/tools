@@ -606,16 +606,16 @@ describe('PlaneClient: лимитер и таймаут', () => {
 	});
 
 	test('timeoutMs обрывает запрос, который не отвечает', async () => {
-		const { client } = limited(
-			(_u, init) =>
-				new Promise<Response>((_resolve, reject) => {
-					(init.signal as AbortSignal).addEventListener('abort', () =>
-						reject(new Error('aborted')),
-					);
-				}),
-			20,
-		);
+		const signals: Array<AbortSignal | null | undefined> = [];
+		const { client } = limited((_u, init) => {
+			signals.push(init.signal);
+			return new Promise<Response>((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+			});
+		}, 20);
 		const error = await failure(client.listProjects());
+		expect(signals[0]).toBeInstanceOf(AbortSignal);
+		expect(signals[0]?.aborted).toBe(true);
 		expect(error).toBeInstanceOf(PlaneApiError);
 		expect(error).toMatchObject({ status: 0, method: 'GET', path: '/projects/' });
 	});

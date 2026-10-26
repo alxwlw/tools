@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { CACHE_TTL_MS, createRuntime } from '../src/runtime.ts';
+import { CACHE_TTL_MS, createRuntime, MISS_REFRESH_MS } from '../src/runtime.ts';
 import { Store } from '../src/store.ts';
 import { world } from './world.ts';
 
 describe('createRuntime', () => {
 	test('кэш живёт десять минут', () => {
 		expect(CACHE_TTL_MS).toBe(600_000);
+		expect(MISS_REFRESH_MS).toBe(30_000);
 	});
 
 	test('projects: без скрытых и архивных, кэш на CACHE_TTL_MS', async () => {
