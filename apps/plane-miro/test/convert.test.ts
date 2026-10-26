@@ -10,7 +10,8 @@ import {
 } from '../src/convert.ts';
 import { MiroApiError, MiroNotConnected } from '../src/miro/rest.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
-import { BOARD, MIRO_WRITES, seedItem, sticky, world } from './world.ts';
+import { syncWorkItem } from '../src/sync.ts';
+import { BOARD, gateCreateAppCard, MIRO_WRITES, seedItem, sticky, world } from './world.ts';
 
 const req = (ids: string[], over: Partial<ConvertRequest> = {}): ConvertRequest => ({
 	boardId: BOARD,
@@ -306,17 +307,91 @@ describe('convertItems', () => {
 		);
 	});
 
-	test('embed: задача пропала между шагами → not_found, описание не трогается', async () => {
-		const w = world({ keepSource: true, embed: true });
-		const read = w.plane.getWorkItem.bind(w.plane);
-		let reads = 0;
-		// the first read follows createWorkItem; the second is the fresh one of the Embed step
-		w.plane.getWorkItem = async (projectId, workItemId) =>
-			++reads === 2 ? null : read(projectId, workItemId);
+	test('задача пропала между шагами → not_found, описание и карточка не трогаются (с embed и без)', async () => {
+		for (const embed of [true, false]) {
+			const w = world({ keepSource: true, embed });
+			const read = w.plane.getWorkItem.bind(w.plane);
+			let reads = 0;
+			// the first read follows createWorkItem; the second is the fresh one after the card
+			w.plane.getWorkItem = async (projectId, workItemId) =>
+				++reads === 2 ? null : read(projectId, workItemId);
+			expect(await convertItems(w.rt, w.store, req(['101']), w.log), `embed ${embed}`).toEqual([
+				{ itemId: '101', ok: false, error: 'not_found' },
+			]);
+			expect(w.plane.calls).not.toContain('updateDescription');
+			expect(w.miro.calls).not.toContain('updateAppCard');
+		}
+	});
+
+	test('карточка уже показывает задачу как есть → не обновляется', async () => {
+		const w = world({ keepSource: true });
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		expect(w.miro.calls).not.toContain('updateAppCard');
+	});
+
+	test('статус сменился, пока ставилась карточка, а ссылка не встала → повтор обновляет карточку', async () => {
+		const w = world({ keepSource: true });
+		const gate = gateCreateAppCard(w.miro);
+		w.plane.failNext('createLink', new PlaneApiError(503, 'POST', '/links/'));
+		const pending = convertItems(w.rt, w.store, req(['101']), w.log);
+		await gate.entered;
+		const live = w.plane.items.get('fake-w-1');
+		if (live === undefined) throw new Error('created');
+		live.stateId = 's-started';
+		const { id, projectId, sequenceId, name, stateId, assignees } = live;
+		// the webhook of that change: no card row yet, so the sync does nothing
+		await syncWorkItem(
+			w.rt,
+			w.store,
+			{
+				kind: 'workitem.changed',
+				tenant: 'acme',
+				eventKey: 'e1',
+				item: { id, projectId, sequenceId, name, stateId, assignees },
+			},
+			w.log,
+		);
+		gate.open();
+		expect(await pending).toEqual([{ itemId: '101', ok: false, error: 'plane_failed' }]);
+		expect(w.miro.cardsOn(BOARD)[0]?.card.fields[0]?.value).toBe('Backlog');
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: true,
+		});
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
+		expect(w.miro.cardsOn(BOARD)[0]?.card.fields[0]?.value).toBe('In Progress');
+	});
+
+	test('карточку удалили на доске, пока шла конвертация, а статус сменился → miro_failed; повтор ставит новую', async () => {
+		const w = world({ keepSource: true });
+		const create = w.miro.createAppCard.bind(w.miro);
+		let first = '';
+		w.miro.createAppCard = async (boardId, card, place) => {
+			const made = await create(boardId, card, place);
+			if (first === '') {
+				first = made;
+				// someone deletes the new card on the board, and the item changes in Plane meanwhile
+				w.miro.boards.get(boardId)?.cards.delete(made);
+				const live = w.plane.items.get('fake-w-1');
+				if (live !== undefined) live.stateId = 's-started';
+			}
+			return made;
+		};
 		expect(await convertItems(w.rt, w.store, req(['101']), w.log)).toEqual([
-			{ itemId: '101', ok: false, error: 'not_found' },
+			{ itemId: '101', ok: false, error: 'miro_failed' },
 		]);
-		expect(w.plane.calls).not.toContain('updateDescription');
+		expect(w.store.findCard(BOARD, first)).toBeNull();
+		const next = (await convertItems(w.rt, w.store, req(['101']), w.log))[0] as {
+			ok: boolean;
+			cardId: string;
+		};
+		expect(next.ok).toBe(true);
+		expect(next.cardId).not.toBe(first);
+		expect(w.miro.cardsOn(BOARD).map((c) => [c.id, c.card.fields[0]?.value])).toEqual([
+			[next.cardId, 'In Progress'],
+		]);
+		expect(w.store.getSource('acme', BOARD, '101')?.cardId).toBe(next.cardId);
+		expect(w.plane.createdItems).toHaveLength(1);
 	});
 
 	test('устаревший cardId (строка карточки удалена) → новая карточка и новый cardId в источнике', async () => {

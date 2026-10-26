@@ -39,7 +39,8 @@ export function besidePlace(item: MiroItem): Place {
  * `board_no_access`: createAppCard answered 403 — probe: a Free board beyond the team's three is view-only,
  * `insufficientPermissions`. `already_linked`: the sticker is a source of another work item, or its external id
  * belongs to an item Plane hides from reads (archived, draft, triage). `not_found`: no such sticker; the bind target
- * does not exist or is in another project; or the work item vanished while the Embed step re-read it.
+ * does not exist or is in another project; or the work item vanished before the re-read after the card.
+ * `miro_failed` also covers a card deleted on the board while the item was converted (the retry places a new one).
  */
 export type ItemError =
 	| 'not_found'
@@ -254,16 +255,29 @@ async function attempt(
 	const title = await miro(() => linkTitle(rt, boardId, ctx.boardName, item.parentId));
 	await plane(() => rt.plane.createLink(projectId, workItemId, { url, title }));
 
-	// 5. The Embed block, once per URL.
+	// 5. The card as of a read made after its row exists: a sync of a change that landed while the card was being
+	// made found no row to update. Every run checks it, so a retry also refreshes a card an earlier run left stale.
+	const fresh = await plane(() => rt.plane.getWorkItem(projectId, workItemId));
+	if (fresh === null) throw new ItemFailure('not_found');
+	const shown = await plane(() => cardFor(rt, fresh));
+	const hash = fieldsHash(shown);
+	if (store.findCard(boardId, cardId)?.fieldsHash !== hash) {
+		if ((await miro(() => rt.miro.updateAppCard(boardId, cardId, shown))) === 'gone') {
+			// deleted on the board in the meantime: the retry places a new card
+			store.deleteCard(boardId, cardId);
+			throw new ItemFailure('miro_failed');
+		}
+		store.setFieldsHash(boardId, cardId, hash);
+	}
+
+	// 6. The Embed block, once per URL.
 	if (tenant.embed) {
-		const fresh = await plane(() => rt.plane.getWorkItem(projectId, workItemId));
-		if (fresh === null) throw new ItemFailure('not_found');
 		const html = fresh.descriptionHtml ?? '';
 		if (!html.includes(url))
 			await plane(() => rt.plane.updateDescription(projectId, workItemId, html + embedBlock(url)));
 	}
 
-	// 6. Binding only: the sticker's text becomes a comment, once per sticker.
+	// 7. Binding only: the sticker's text becomes a comment, once per sticker.
 	if (mode.kind === 'bind' && lines.length > 0) {
 		const externalId = `${boardId}:${itemId}`;
 		const found = await plane(() =>
@@ -279,7 +293,7 @@ async function attempt(
 			);
 	}
 
-	// 7. Without keepSource the arrows move to the card and the sticker goes, last.
+	// 8. Without keepSource the arrows move to the card and the sticker goes, last.
 	if (!tenant.keepSource) {
 		const target = cardId;
 		for (const c of await miro(ctx.connectors)) {

@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { boardLink } from '../src/card.ts';
+import { boardLink, fieldsHash } from '../src/card.ts';
 import { bindItem, type BindRequest, convertItems } from '../src/convert.ts';
-import { MiroApiError } from '../src/miro/rest.ts';
+import { type AppCardInput, MiroApiError } from '../src/miro/rest.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
-import { BOARD, MIRO_WRITES, seedItem, sticky, world } from './world.ts';
+import { syncWorkItem } from '../src/sync.ts';
+import { BOARD, gateCreateAppCard, MIRO_WRITES, seedItem, sticky, world } from './world.ts';
 
 const bind = (over: Partial<BindRequest> = {}): BindRequest => ({
 	boardId: BOARD,
@@ -196,6 +197,44 @@ describe('bindItem', () => {
 		expect((await bindItem(w.rt, w.store, bind(), w.log)).ok).toBe(true);
 		expect(w.plane.createdComments).toHaveLength(1);
 		expect(w.miro.item(BOARD, '101')).toBeNull();
+	});
+
+	test('статус сменился, пока ставилась карточка (синхронизация её ещё не нашла) → карточка показывает новый статус', async () => {
+		const w = world({ keepSource: true });
+		seedItem(w.plane, 'w-ex', { stateId: 's-backlog' });
+		const gate = gateCreateAppCard(w.miro);
+		const pending = bindItem(w.rt, w.store, bind(), w.log);
+		await gate.entered;
+		const live = w.plane.items.get('w-ex');
+		if (live === undefined) throw new Error('seed');
+		live.stateId = 's-started';
+		const { id, projectId, sequenceId, name, stateId, assignees } = live;
+		await syncWorkItem(
+			w.rt,
+			w.store,
+			{
+				kind: 'workitem.changed',
+				tenant: 'acme',
+				eventKey: 'e1',
+				item: { id, projectId, sequenceId, name, stateId, assignees },
+			},
+			w.log,
+		);
+		// the sync came while the card was being made: no card row yet, nothing updated
+		expect(w.miro.calls).not.toContain('updateAppCard');
+		gate.open();
+		expect(await pending).toMatchObject({ ok: true, key: 'LAB-7' });
+		const cards = w.miro.cardsOn(BOARD);
+		expect(cards).toHaveLength(1);
+		expect(cards[0]?.card.fields[0]).toEqual({
+			value: 'In Progress',
+			fillColor: '#fff3bf',
+			textColor: '#1a1a1a',
+		});
+		// the stored hash is the shown card's, so the next sync of an unchanged item skips it
+		expect(w.store.findCard(BOARD, cards[0]?.id as string)?.fieldsHash).toBe(
+			fieldsHash(cards[0]?.card as AppCardInput),
+		);
 	});
 
 	test('лог привязки: ключ и id, без текста и автора', async () => {

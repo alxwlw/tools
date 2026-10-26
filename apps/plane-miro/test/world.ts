@@ -121,6 +121,19 @@ export function frame(id: string, title: string) {
 	return { id, type: 'frame', html: title, x: 0, y: 0, width: 800, height: 600, parentId: null };
 }
 
+/** Holds every createAppCard of `miro` until `open()`; `entered` settles once the first one is waiting. */
+export function gateCreateAppCard(miro: FakeMiro): { entered: Promise<void>; open: () => void } {
+	const entered = Promise.withResolvers<void>();
+	const gate = Promise.withResolvers<void>();
+	const create = miro.createAppCard.bind(miro);
+	miro.createAppCard = async (boardId, card, place) => {
+		entered.resolve();
+		await gate.promise;
+		return create(boardId, card, place);
+	};
+	return { entered: entered.promise, open: () => gate.resolve() };
+}
+
 /** A work item seeded straight into FakePlane. */
 export function seedItem(
 	plane: FakePlane,
