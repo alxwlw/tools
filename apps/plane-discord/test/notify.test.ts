@@ -60,6 +60,12 @@ describe('createNotifier: workitem.created', () => {
 			],
 		]);
 		expect(store.getThread('initech', ITEM, FORUM)).toBe('d1');
+		expect(store.findByThread('d1')).toEqual({
+			tenant: 'initech',
+			projectId: PROJECT,
+			workItemId: ITEM,
+			channelId: FORUM,
+		});
 		expect(sent(discord)).toEqual([]);
 
 		await runAll(await notify(updated({ stateId: S_STARTED }, { stateId: S_DONE })));
@@ -136,7 +142,7 @@ describe('createNotifier: workitem.created', () => {
 
 	test('автор с пустым именем в members → «кто-то»', async () => {
 		const { notify, plane, discord } = setup([route(TEXT)]);
-		plane.members.push({ id: ID(98), displayName: '' });
+		plane.members.push({ id: ID(98), displayName: '', avatarUrl: null });
 		await runAll(await notify(created({}, ID(98))));
 		expect(sent(discord)[0]?.[1].content.split('\n')[1]).toBe('Задача создана · кто-то');
 	});
@@ -588,7 +594,7 @@ describe('доставки через очередь', () => {
 describe('форум: удалённый пост', () => {
 	test('пост форума удалён (404) → новый пост, связь перезаписана', async () => {
 		const { notify, discord, store, logs } = setup([route(FORUM)]);
-		store.putThread('initech', ITEM, FORUM, 'gone-thread');
+		store.putThread('initech', ITEM, FORUM, 'gone-thread', null);
 		discord.failures.set('sendMessage', new DiscordApiError(404, 'POST', '/x', 10003));
 		await runAll(await notify(updated({ stateId: S_STARTED }, { stateId: S_DONE })));
 		discord.failures.delete('sendMessage');
@@ -612,7 +618,7 @@ describe('форум: удалённый пост', () => {
 
 	test('404 в текстовом канале и 5xx в треде не пересоздают пост, а пробрасываются', async () => {
 		const { notify, discord, store } = setup([route(TEXT), route(FORUM)]);
-		store.putThread('initech', ITEM, FORUM, 'live-thread');
+		store.putThread('initech', ITEM, FORUM, 'live-thread', null);
 		const [text, forum] = await notify(created());
 		discord.failures.set('sendMessage', new DiscordApiError(404, 'POST', '/x', 10003));
 		await expect((text as Delivery).run()).rejects.toMatchObject({ status: 404 });
@@ -628,7 +634,7 @@ describe('ошибки не из Discord не принимаются за 404 и
 
 	test('ошибка с status 404 не из DiscordApiError в треде — проброс, поста нет', async () => {
 		const { notify, discord, store } = setup([route(FORUM)]);
-		store.putThread('initech', ITEM, FORUM, 'live-thread');
+		store.putThread('initech', ITEM, FORUM, 'live-thread', null);
 		const [forum] = await notify(created());
 		discord.failures.set('sendMessage', foreign({ status: 404 }) as DiscordApiError);
 		await expect((forum as Delivery).run()).rejects.toThrow('boom');

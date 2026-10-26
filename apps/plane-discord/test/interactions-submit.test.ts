@@ -70,9 +70,9 @@ describe('createInteractionHandler: отправка формы «создать
 		]);
 		expect(w.discord.callsOf('deleteOriginal')).toHaveLength(1);
 		expect(w.discord.callsOf('editOriginal')).toEqual([]);
-		// Order: the public message first, then the cleanup.
+		// Order: the public message first, then the thread on it, then the cleanup.
 		const order = w.discord.calls.map((c) => c.method);
-		expect(order).toEqual(['sendMessage', 'deleteOriginal']);
+		expect(order).toEqual(['sendMessage', 'startThreadFromMessage', 'deleteOriginal']);
 	});
 
 	test('название с разметкой и пробелами: метка ссылки экранирована, пробелы схлопнуты', async () => {

@@ -31,6 +31,7 @@ export type ChannelInfo = {
 export const CHANNEL = {
 	TEXT: 0,
 	ANNOUNCEMENT: 5,
+	ANNOUNCEMENT_THREAD: 10,
 	PUBLIC_THREAD: 11,
 	PRIVATE_THREAD: 12,
 	FORUM: 15,
@@ -39,7 +40,9 @@ export const CHANNEL = {
 export const DISCORD_ERR = {
 	CANNOT_DM: 50007,
 	MISSING_ACCESS: 50001,
+	UNKNOWN_CHANNEL: 10003,
 	MISSING_PERMISSIONS: 50013,
+	UNKNOWN_WEBHOOK: 10015,
 } as const;
 
 export interface DiscordApi {
@@ -51,6 +54,28 @@ export interface DiscordApi {
 		message: OutMessage,
 	): Promise<{ threadId: string; messageId: string }>;
 	sendMessage(channelId: string, message: OutMessage): Promise<{ id: string }>;
+	/** Opens a public thread on a message of a text or announcement channel; returns the thread id. */
+	startThreadFromMessage(channelId: string, messageId: string, name: string): Promise<string>;
+	/** The bot joins a thread (idempotent): a private thread's messages reach only its members. */
+	joinThread(threadId: string): Promise<void>;
+	/** Creates an application-owned webhook in a text, announcement or forum channel. */
+	createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }>;
+	/** Webhooks of a channel; the token is only present for webhooks created by this application. */
+	listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]>;
+	/** Posts into a thread through a webhook, under the given name and avatar. */
+	executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }>;
+	/** The newest messages of a channel or thread, newest first (needs Read Message History). */
+	recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]>;
 	openDm(userId: string): Promise<string>;
 	editOriginal(interactionToken: string, message: OutMessage): Promise<void>;
 	deleteOriginal(interactionToken: string): Promise<void>;
@@ -58,7 +83,7 @@ export interface DiscordApi {
 	bulkOverwriteGuildCommands(guildId: string, commands: readonly unknown[]): Promise<void>;
 }
 
-/** Carries status and Discord's JSON `code`, never the body; the interaction token is masked in `route`. */
+/** Carries status and Discord's JSON `code`, never the body; the interaction and webhook tokens are masked in `route`. */
 export class DiscordApiError extends Error {
 	override name = 'DiscordApiError';
 
@@ -73,7 +98,7 @@ export class DiscordApiError extends Error {
 }
 
 const API = 'https://discord.com/api/v10';
-const CONTENT_MAX = 2000;
+export const CONTENT_MAX = 2000;
 const POST_NAME_MAX = 100;
 const EMBED_TITLE_MAX = 256;
 const EMBED_DESCRIPTION_MAX = 4096;
@@ -87,6 +112,7 @@ const MAX_RATE_RETRIES = 3;
 const INTERACTION_MAX_WAIT_MS = 60_000;
 const FLAG_EPHEMERAL = 64;
 const NONCE_MAX = 25;
+const THREAD_ARCHIVE_MINUTES = 10080;
 
 /**
  * A stable nonce for one delivery job: the same label gives the same nonce across the queue's retries, different
@@ -216,6 +242,82 @@ export class DiscordRest implements DiscordApi {
 				: { nonce: message.nonce.slice(0, NONCE_MAX), enforce_nonce: true }),
 		});
 		return { id: str(res, 'id') };
+	}
+
+	async startThreadFromMessage(
+		channelId: string,
+		messageId: string,
+		name: string,
+	): Promise<string> {
+		const res = await this.#bot(
+			'POST',
+			`/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
+			{ name: truncate(name, POST_NAME_MAX), auto_archive_duration: THREAD_ARCHIVE_MINUTES },
+		);
+		return str(res, 'id');
+	}
+
+	async joinThread(threadId: string): Promise<void> {
+		await this.#bot('PUT', `/channels/${encodeURIComponent(threadId)}/thread-members/@me`);
+	}
+
+	async createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }> {
+		const res = await this.#bot('POST', `/channels/${encodeURIComponent(channelId)}/webhooks`, {
+			name,
+		});
+		return { id: str(res, 'id'), token: str(res, 'token') };
+	}
+
+	async listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]> {
+		const rows = await this.#bot('GET', `/channels/${encodeURIComponent(channelId)}/webhooks`);
+		if (!Array.isArray(rows)) throw new Error('Discord response: webhook list is not an array');
+		return rows.map((row) => ({
+			id: str(row, 'id'),
+			token: optStr(row, 'token'),
+			applicationId: optStr(row, 'application_id'),
+		}));
+	}
+
+	async executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }> {
+		const base = `/webhooks/${encodeURIComponent(webhookId)}`;
+		const query = `?wait=true&thread_id=${encodeURIComponent(threadId)}`;
+		const res = await this.#request(
+			'POST',
+			`${base}/${encodeURIComponent(token)}${query}`,
+			// The webhook token authenticates the call: it never reaches an error.
+			`${base}/:token${query}`,
+			false,
+			Number.POSITIVE_INFINITY,
+			{
+				...messageBody(message),
+				...(message.username === undefined ? {} : { username: message.username }),
+				...(message.avatarUrl === undefined ? {} : { avatar_url: message.avatarUrl }),
+			},
+		);
+		return { id: str(res, 'id') };
+	}
+
+	async recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]> {
+		const rows = await this.#bot(
+			'GET',
+			`/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`,
+		);
+		if (!Array.isArray(rows)) throw new Error('Discord response: message list is not an array');
+		return rows.map((row) => ({
+			id: str(row, 'id'),
+			webhookId: optStr(row, 'webhook_id'),
+			content: optStr(row, 'content') ?? '',
+		}));
 	}
 
 	async openDm(userId: string): Promise<string> {

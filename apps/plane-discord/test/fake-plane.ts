@@ -9,6 +9,7 @@ import type {
 	Upsert,
 	WorkItem,
 } from '../src/plane/client.ts';
+import { PlaneApiError } from '../src/plane/client.ts';
 
 type StoredComment = CommentDetail & { projectId: string; workItemId: string };
 
@@ -56,7 +57,7 @@ export class FakePlane implements PlaneApi {
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItem> {
 		const item = this.items.get(workItemId);
 		if (!item || item.projectId !== projectId)
-			throw new Error(`fake plane: no work item ${workItemId}`);
+			throw new PlaneApiError(404, 'GET', `/projects/${projectId}/work-items/${workItemId}/`);
 		return item;
 	}
 

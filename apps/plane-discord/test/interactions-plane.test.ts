@@ -27,7 +27,7 @@ const slash = (w: World, key: unknown) =>
 
 function seed(w: World, assignees: string[] = []) {
 	w.plane.states.set(P_LAB, [{ id: 's-doing', name: 'В работе', group: 'started' }]);
-	w.plane.members = [{ id: 'plane-user-2', displayName: 'Мира' }];
+	w.plane.members = [{ id: 'plane-user-2', displayName: 'Мира', avatarUrl: null }];
 	w.plane.items.set('w40', {
 		id: 'w40',
 		projectId: P_LAB,
@@ -159,7 +159,7 @@ describe('/plane KEY', () => {
 	test('нет состояния и пустое имя участника → «—» и «кто-то»', async () => {
 		const w = await setup();
 		seed(w, ['plane-user-2']);
-		w.plane.members = [{ id: 'plane-user-2', displayName: '' }];
+		w.plane.members = [{ id: 'plane-user-2', displayName: '', avatarUrl: null }];
 		w.plane.states.set(P_LAB, []);
 		await slash(w, 'LAB-40');
 		await w.settle();
@@ -340,7 +340,9 @@ describe('/plane KEY', () => {
 	test('markdown в имени состояния и исполнителя приходит в поля экранированным', async () => {
 		const w = await setup();
 		seed(w, ['plane-user-2']);
-		w.plane.members = [{ id: 'plane-user-2', displayName: '**Мира** [x](https://example.com)' }];
+		w.plane.members = [
+			{ id: 'plane-user-2', displayName: '**Мира** [x](https://example.com)', avatarUrl: null },
+		];
 		w.plane.states.set(P_LAB, [
 			{ id: 's-doing', name: '[x](https://example.com) **жирно**', group: 'started' },
 		]);
@@ -357,11 +359,27 @@ describe('/plane KEY', () => {
 			['Создать задачу в Plane', 3],
 			['Добавить в задачу', 3],
 			['plane', 1],
+			['plane-link', 1],
 		]);
 		expect(defs[2] as unknown).toEqual({
 			name: 'plane',
 			type: 1,
 			description: 'Карточка задачи Plane',
+			options: [
+				{ name: 'key', type: 3, description: 'Ключ задачи, например LAB-40', required: true },
+			],
+			contexts: [0],
+			integration_types: [0],
+		});
+	});
+
+	test('commandDefinitions: плюс plane-link с обязательной опцией key, только гильдия', () => {
+		const defs = commandDefinitions();
+		expect(defs).toHaveLength(4);
+		expect(defs[3] as unknown).toEqual({
+			name: 'plane-link',
+			type: 1,
+			description: 'Привязать тред к задаче Plane',
 			options: [
 				{ name: 'key', type: 3, description: 'Ключ задачи, например LAB-40', required: true },
 			],

@@ -15,11 +15,34 @@ export type DiscordCall = { method: keyof DiscordApi; args: unknown[] };
 export class FakeDiscord implements DiscordApi {
 	channels = new Map<string, ChannelInfo>();
 	failures = new Map<keyof DiscordApi, DiscordApiError>();
+	/** Like `failures`, but the entry is consumed by the first call: the retry succeeds. */
+	failOnce = new Map<keyof DiscordApi, DiscordApiError>();
+	/**
+	 * Like `failOnce`, but for a call whose effect happened: Discord took the post and the response was lost.
+	 * `executeWebhook` stores the message, then throws.
+	 */
+	lostResponse = new Map<keyof DiscordApi, DiscordApiError>();
+	/** What webhooks posted, per thread, oldest first. */
+	posted = new Map<string, { id: string; webhookId: string | null; content: string }[]>();
 	calls: DiscordCall[] = [];
 	#seq = 0;
+	/** The fake's own application id: the webhooks `createWebhook` makes carry it. */
+	applicationId = '999000000000000001';
+	/** Webhooks that exist per channel (created here, or seeded by a test). */
+	webhooks = new Map<
+		string,
+		{ id: string; token: string | null; applicationId: string | null }[]
+	>();
+	/** Clock for snowflake ids of webhook posts. */
+	now: () => number = Date.now;
 
 	#enter(method: keyof DiscordApi, ...args: unknown[]): void {
 		this.calls.push({ method, args });
+		const once = this.failOnce.get(method);
+		if (once) {
+			this.failOnce.delete(method);
+			throw once;
+		}
 		const failure = this.failures.get(method);
 		if (failure) throw failure;
 	}
@@ -65,6 +88,81 @@ export class FakeDiscord implements DiscordApi {
 	async sendMessage(channelId: string, message: OutMessage): Promise<{ id: string }> {
 		this.#enter('sendMessage', channelId, message);
 		return { id: this.#id() };
+	}
+
+	async startThreadFromMessage(
+		channelId: string,
+		messageId: string,
+		name: string,
+	): Promise<string> {
+		this.#enter('startThreadFromMessage', channelId, messageId, name);
+		const threadId = this.#id();
+		const parent = this.channels.get(channelId);
+		this.channels.set(threadId, {
+			id: threadId,
+			type:
+				parent?.type === CHANNEL.ANNOUNCEMENT ? CHANNEL.ANNOUNCEMENT_THREAD : CHANNEL.PUBLIC_THREAD,
+			parentId: channelId,
+			guildId: parent?.guildId ?? null,
+			name,
+		});
+		return threadId;
+	}
+
+	async joinThread(threadId: string): Promise<void> {
+		this.#enter('joinThread', threadId);
+	}
+
+	async createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }> {
+		this.#enter('createWebhook', channelId, name);
+		const n = this.#id();
+		const made = { id: `wh-${n}`, token: `tok-${n}` };
+		this.webhooks.set(channelId, [
+			...(this.webhooks.get(channelId) ?? []),
+			{ ...made, applicationId: this.applicationId },
+		]);
+		const lost = this.lostResponse.get('createWebhook');
+		if (lost) {
+			this.lostResponse.delete('createWebhook');
+			throw lost;
+		}
+		return made;
+	}
+
+	async listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]> {
+		this.#enter('listChannelWebhooks', channelId);
+		return [...(this.webhooks.get(channelId) ?? [])];
+	}
+
+	async executeWebhook(
+		webhookId: string,
+		token: string,
+		threadId: string,
+		message: OutMessage & { username?: string; avatarUrl?: string },
+	): Promise<{ id: string }> {
+		this.#enter('executeWebhook', webhookId, token, threadId, message);
+		// A real snowflake: the code under test reads the creation time out of it.
+		const id = ((BigInt(this.now()) - 1420070400000n) * 4194304n + BigInt(++this.#seq)).toString();
+		this.posted.set(threadId, [
+			...(this.posted.get(threadId) ?? []),
+			{ id, webhookId, content: message.content },
+		]);
+		const lost = this.lostResponse.get('executeWebhook');
+		if (lost) {
+			this.lostResponse.delete('executeWebhook');
+			throw lost;
+		}
+		return { id };
+	}
+
+	async recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]> {
+		this.#enter('recentMessages', channelId, limit);
+		return [...(this.posted.get(channelId) ?? [])].reverse().slice(0, limit);
 	}
 
 	async openDm(userId: string): Promise<string> {

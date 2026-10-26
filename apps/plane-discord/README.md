@@ -4,7 +4,7 @@ A [Bun](https://bun.sh) service that bridges [Plane](https://plane.so) and Disco
 tenants (a Discord server plus a Plane workspace each). It has no runtime dependencies and keeps its
 state in one SQLite file.
 
-Phases 1 and 2 (this version):
+Phases 1 to 3 (this version; a bound thread and its work item are synced both ways):
 
 - **1a, Plane to a channel.** A work item is created, closed or cancelled, or the bot is mentioned in a
   comment: a message goes to the Discord channel mapped to the project (and optionally a module). A
@@ -18,6 +18,23 @@ Phases 1 and 2 (this version):
 - **2, `/plane KEY`.** A slash command that answers in the channel with a public card of the work item
   (title, state, assignees, priority, link). A malformed key, an unknown key and a key of a hidden
   project get a private (ephemeral) reply; the last two look the same.
+- **3, thread binding.** When `Создать задачу в Plane` creates a work item in a text or announcement
+  channel, the bot opens a thread on its public reply and binds it to the item (a forum post from 1a is
+  already bound). `/plane-link KEY` binds the thread it is typed in; a thread holds one work item.
+  Binding a thread to a hidden project's item is refused like an unknown key.
+  `/plane-link` makes the bot join the thread; in a private thread @Plane must be added first.
+  A message in a bound thread becomes a Plane comment `Name (Discord): …` with a link to the message
+  (`external_source=discord`, `external_id=<message id>`; a repeat adds nothing). The bot's own messages,
+  its webhooks' messages and system messages are skipped; edits and deletions are not synced. This needs the
+  privileged `MESSAGE_CONTENT` intent enabled in the Developer Portal: without it the Gateway closes with
+  4014 and only thread sync stops (the log says `gateway.fatal`); the other phases keep working. Items of
+  hidden projects are never synced.
+  A comment by a person in Plane goes to every thread bound to the item, through a webhook the bot creates
+  in the thread's parent channel (needs Manage Webhooks), under the author's Plane name and, when Plane gives
+  an absolute `https` URL, avatar (`discord` and `clyde` are cut from the name, empty → `Plane`). People
+  mentioned in the comment appear as `<@id>` or `@name`, but the message never pings. Comments of the bot itself are
+  not sent, and a bot mention in a channel where the item already has a thread is not repeated as a 1a message.
+  A deleted webhook is created again once per delivery.
 
 Hidden projects (`hiddenProjects`) are hidden completely: no channel topics, no DMs, no modal, no
 forwarded mentions.
@@ -98,8 +115,9 @@ in threads):
 https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=309774601216&guild_id=<GUILD>&disable_guild_select=true
 ```
 
-Set the interactions endpoint URL to `https://plane-discord.example.com/discord/interactions`. No
-privileged intents are needed in this phase.
+Set the interactions endpoint URL to `https://plane-discord.example.com/discord/interactions`. Enable the
+privileged `MESSAGE_CONTENT` intent in the Developer Portal (Bot, Privileged Gateway Intents): thread sync
+(phase 3) needs it; without it only thread sync stops.
 
 ## Scripts
 
@@ -115,9 +133,13 @@ docker exec <container> bun scripts/list-channels.ts       # id, type, parent an
 - **Logs** are one JSON line per event on stdout: `{ts, event, tenant?, …ids, ms?, error?}`. Secrets and
   the text of messages, descriptions and comments never reach them.
 - **State** is one SQLite file (`/data`, a named volume): deduplication keys, links between work items and
-  Discord threads or messages, the watchdog heartbeat. It is not backed up. Losing it costs the
-  deduplication window (a retried delivery can post twice) and the thread links of existing posts (new
-  events open new posts); nothing in Plane or Discord is lost.
+  Discord threads or messages, the ids and tokens of the webhooks the bot created for thread messages, the
+  watchdog heartbeat. It is not backed up. Losing it costs the deduplication window (a retried delivery can
+  post twice), the thread links of existing posts (new events open new posts) and the links of threads bound
+  by `Создать задачу в Plane` or `/plane-link`: their sync stops until `/plane-link` is run again. The bot
+  adopts its own webhook found in a channel, or creates a new one; webhooks created earlier stay in the
+  channels (Discord allows 15 per channel, so remove stale ones by hand). Nothing in Plane or Discord is
+  lost.
 - **Queue** is in memory: a restart drops the deliveries not yet sent. A Discord form open in a modal is
   also in memory; after a restart it answers "form is stale", and the command is run again.
 

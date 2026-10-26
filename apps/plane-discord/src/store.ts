@@ -15,9 +15,14 @@ export class Store {
 				work_item_id TEXT NOT NULL,
 				channel_id TEXT NOT NULL,
 				thread_id TEXT NOT NULL UNIQUE,
+				project_id TEXT,
 				PRIMARY KEY (tenant, work_item_id, channel_id)
 			)`,
 		);
+		// Phase 1-2 databases have no project_id; their rows keep NULL until a thread binding rewrites them.
+		const columns = this.#db.query<{ name: string }, []>('PRAGMA table_info(threads)').all();
+		if (!columns.some((c) => c.name === 'project_id'))
+			this.#db.run('ALTER TABLE threads ADD COLUMN project_id TEXT');
 		this.#db.run(
 			`CREATE TABLE IF NOT EXISTS discord_items (
 				tenant TEXT NOT NULL,
@@ -25,6 +30,13 @@ export class Store {
 				project_id TEXT NOT NULL,
 				work_item_id TEXT NOT NULL,
 				PRIMARY KEY (tenant, message_id)
+			)`,
+		);
+		this.#db.run(
+			`CREATE TABLE IF NOT EXISTS webhooks (
+				channel_id TEXT PRIMARY KEY,
+				webhook_id TEXT NOT NULL UNIQUE,
+				token TEXT NOT NULL
 			)`,
 		);
 		this.#db.run(
@@ -57,14 +69,67 @@ export class Store {
 		return row?.thread_id ?? null;
 	}
 
-	/** Upsert: a recreated forum post replaces the old thread id. */
-	putThread(tenant: string, workItemId: string, channelId: string, threadId: string): void {
+	/** Upsert: a recreated forum post (or a re-linked thread) replaces the old thread id. */
+	putThread(
+		tenant: string,
+		workItemId: string,
+		channelId: string,
+		threadId: string,
+		projectId: string | null,
+	): void {
 		this.#db
 			.query(
-				`INSERT INTO threads (tenant, work_item_id, channel_id, thread_id) VALUES (?, ?, ?, ?)
-				ON CONFLICT (tenant, work_item_id, channel_id) DO UPDATE SET thread_id = excluded.thread_id`,
+				`INSERT INTO threads (tenant, work_item_id, channel_id, thread_id, project_id) VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT (tenant, work_item_id, channel_id) DO UPDATE SET
+					thread_id = excluded.thread_id, project_id = excluded.project_id`,
 			)
-			.run(tenant, workItemId, channelId, threadId);
+			.run(tenant, workItemId, channelId, threadId, projectId);
+	}
+
+	/** Drops the binding of a thread that no longer exists in Discord. */
+	deleteThread(threadId: string): void {
+		this.#db.query('DELETE FROM threads WHERE thread_id = ?').run(threadId);
+	}
+
+	/** Fills in the project of a row written before `project_id` existed; touches nothing else, so a concurrent rebinding survives. */
+	setThreadProject(threadId: string, projectId: string): void {
+		this.#db
+			.query('UPDATE threads SET project_id = ? WHERE thread_id = ? AND project_id IS NULL')
+			.run(projectId, threadId);
+	}
+
+	/** The work item a thread is bound to; `projectId` is null on rows written before it was recorded. */
+	findByThread(threadId: string): {
+		tenant: string;
+		projectId: string | null;
+		workItemId: string;
+		channelId: string;
+	} | null {
+		const row = this.#db
+			.query<
+				{ tenant: string; project_id: string | null; work_item_id: string; channel_id: string },
+				[string]
+			>('SELECT tenant, project_id, work_item_id, channel_id FROM threads WHERE thread_id = ?')
+			.get(threadId);
+		return row
+			? {
+					tenant: row.tenant,
+					projectId: row.project_id,
+					workItemId: row.work_item_id,
+					channelId: row.channel_id,
+				}
+			: null;
+	}
+
+	/** Every thread bound to a work item, one per channel. */
+	threadsOfItem(tenant: string, workItemId: string): { channelId: string; threadId: string }[] {
+		return this.#db
+			.query<{ channel_id: string; thread_id: string }, [string, string]>(
+				`SELECT channel_id, thread_id FROM threads WHERE tenant = ? AND work_item_id = ?
+				ORDER BY channel_id, thread_id`,
+			)
+			.all(tenant, workItemId)
+			.map((r) => ({ channelId: r.channel_id, threadId: r.thread_id }));
 	}
 
 	getDiscordItem(
@@ -87,6 +152,30 @@ export class Store {
 					project_id = excluded.project_id, work_item_id = excluded.work_item_id`,
 			)
 			.run(tenant, messageId, projectId, workItemId);
+	}
+
+	getWebhook(channelId: string): { id: string; token: string } | null {
+		const row = this.#db
+			.query<{ webhook_id: string; token: string }, [string]>(
+				'SELECT webhook_id, token FROM webhooks WHERE channel_id = ?',
+			)
+			.get(channelId);
+		return row ? { id: row.webhook_id, token: row.token } : null;
+	}
+
+	/** Upsert by channel: a recreated webhook replaces the old one. */
+	putWebhook(channelId: string, id: string, token: string): void {
+		this.#db
+			.query(
+				`INSERT INTO webhooks (channel_id, webhook_id, token) VALUES (?, ?, ?)
+				ON CONFLICT (channel_id) DO UPDATE SET webhook_id = excluded.webhook_id, token = excluded.token`,
+			)
+			.run(channelId, id, token);
+	}
+
+	/** True for a webhook this service created: its messages in a bound thread are our own echo. */
+	isOwnWebhook(webhookId: string): boolean {
+		return this.#db.query('SELECT 1 FROM webhooks WHERE webhook_id = ?').get(webhookId) !== null;
 	}
 
 	touchEvent(tenant: string, at: number): void {
