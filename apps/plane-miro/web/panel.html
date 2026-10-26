@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Plane</title>
+		<script src="https://miro.com/app/static/sdk/v2/miro.js"></script>
+		<style>
+			body {
+				margin: 0;
+				padding: 12px;
+				width: 320px;
+				box-sizing: border-box;
+				font:
+					14px/1.4 system-ui,
+					sans-serif;
+				color: #1a1a1a;
+			}
+			h2 {
+				margin: 16px 0 8px;
+				font-size: 14px;
+			}
+			label {
+				display: block;
+				margin-bottom: 4px;
+				color: #666;
+			}
+			select,
+			input,
+			button {
+				width: 100%;
+				box-sizing: border-box;
+				padding: 6px 8px;
+				font: inherit;
+			}
+			button {
+				margin-top: 8px;
+				cursor: pointer;
+			}
+			button:disabled {
+				cursor: default;
+				opacity: 0.5;
+			}
+			#count {
+				margin: 8px 0 0;
+			}
+			#hits {
+				list-style: none;
+				margin: 8px 0 0;
+				padding: 0;
+			}
+			#hits li {
+				padding: 4px 6px;
+				border-radius: 4px;
+				cursor: pointer;
+			}
+			#hits li:hover {
+				background: #f1f3f5;
+			}
+			#hits li.picked {
+				background: #dbe4ff;
+			}
+			#status {
+				margin: 12px 0 0;
+				min-height: 1.4em;
+			}
+			#status.error {
+				color: #b42318;
+			}
+		</style>
+		<script type="module" src="/miro/assets/panel.js"></script>
+	</head>
+	<body>
+		<label for="project">Проект</label>
+		<select id="project"></select>
+		<p id="count">Выделено для Plane: 0</p>
+		<button id="convert" type="button" disabled>В Plane</button>
+		<h2>Привязать к задаче</h2>
+		<input id="query" type="search" placeholder="Ключ или слова из названия" autocomplete="off" />
+		<ul id="hits"></ul>
+		<button id="bind" type="button" disabled>Привязать</button>
+		<p id="status"></p>
+	</body>
+</html>

@@ -12,7 +12,10 @@ fileGroups:
     - 'scripts/**/*'
     - 'web/**/*'
 
-# The canon lint targets src only; the appended arg adds scripts/.
+# The canon lint targets src only; the appended arg adds scripts/ and web/.
 tasks:
   lint:
-    args: 'scripts'
+    args: 'scripts web'
+  # The browser code (web/) has its own tsconfig with DOM types, which the root one cannot mix with @types/bun.
+  typecheck:
+    script: 'bun run --bun ../../node_modules/typescript/bin/tsc --noEmit && bun run --bun ../../node_modules/typescript/bin/tsc --noEmit -p web'
