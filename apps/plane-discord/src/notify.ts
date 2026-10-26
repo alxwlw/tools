@@ -91,11 +91,22 @@ export function webhookUsername(displayName: string | undefined): string {
 	return clean === '' ? WEBHOOK_NAME : truncate(clean, USERNAME_MAX);
 }
 
-/** Only an absolute https URL is an avatar; a relative path or anything else leaves Discord's default. */
-export function webhookAvatar(avatarUrl: string | null | undefined): string | undefined {
+/**
+ * An avatar is an https URL: an absolute one as is, or a path from the root of the Plane instance
+ * (`/api/assets/v2/static/<id>/`, what self-hosted Plane gives) joined to `planeUrl` the way `workItemUrl`
+ * joins it. `//host/…`, other schemes, a path without the leading `/` and junk leave Discord's default.
+ */
+export function webhookAvatar(
+	avatarUrl: string | null | undefined,
+	planeUrl: string,
+): string | undefined {
 	if (!avatarUrl) return undefined;
+	const raw =
+		avatarUrl.startsWith('/') && !avatarUrl.startsWith('//')
+			? `${planeUrl.replace(/\/+$/, '')}${avatarUrl}`
+			: avatarUrl;
 	try {
-		const url = new URL(avatarUrl);
+		const url = new URL(raw);
 		return url.protocol === 'https:' ? url.href : undefined;
 	} catch {
 		return undefined;
@@ -409,7 +420,10 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			} catch (err) {
 				if (
 					err instanceof DiscordApiError &&
-					err.status === 404 &&
+					// Live Discord answers 400, not 404, for a deleted thread. A 5xx or status 0 is doubt, not a fact.
+					err.status >= 400 &&
+					err.status < 500 &&
+					err.status !== 429 &&
 					err.code === DISCORD_ERR.UNKNOWN_CHANNEL
 				)
 					threadGone = true;
@@ -503,7 +517,7 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		}).trim();
 		if (content === '') return [];
 		const author = members.find((m) => m.id === event.actorId);
-		const avatarUrl = webhookAvatar(author?.avatarUrl);
+		const avatarUrl = webhookAvatar(author?.avatarUrl, deps.planeUrl);
 		const message = {
 			content,
 			username: webhookUsername(author?.displayName),

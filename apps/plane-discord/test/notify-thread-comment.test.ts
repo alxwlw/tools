@@ -22,6 +22,7 @@ import {
 	ITEM,
 	mentionHtml,
 	mentionTag,
+	PLANE_URL,
 	PROJECT,
 	route,
 	runAll,
@@ -146,8 +147,10 @@ describe('createNotifier: comment.created → тред', () => {
 	test('404 другого рода и 5xx → ошибка как есть, webhook не пересоздаётся', async () => {
 		for (const err of [
 			new DiscordApiError(404, 'POST', '/webhooks/x/:token', 10008),
-			// the code alone is not enough: only a 404 means the thread is gone
+			// a 5xx is doubt, not a deleted thread
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10003),
+			new DiscordApiError(429, 'POST', '/webhooks/x/:token', 10003),
+			new DiscordApiError(0, 'POST', '/webhooks/x/:token', 10003),
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', null),
 			// the code alone is not enough: only a 404 means the webhook is gone
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10015),
@@ -182,12 +185,27 @@ describe('createNotifier: comment.created → тред', () => {
 	test('имя и аватар: длинное имя режется до 80, не-https и относительный аватар отбрасываются', () => {
 		expect(webhookUsername('я'.repeat(100))).toBe('я'.repeat(79) + '…');
 		expect(webhookUsername(undefined)).toBe('Plane');
-		expect(webhookAvatar(AVATAR)).toBe(AVATAR);
-		expect(webhookAvatar('http://cdn.example.com/a.png')).toBeUndefined();
-		expect(webhookAvatar('/media/a.png')).toBeUndefined();
-		expect(webhookAvatar('javascript:alert(1)')).toBeUndefined();
-		expect(webhookAvatar('')).toBeUndefined();
-		expect(webhookAvatar(null)).toBeUndefined();
+		expect(webhookAvatar(AVATAR, PLANE_URL)).toBe(AVATAR);
+		expect(webhookAvatar('http://cdn.example.com/a.png', PLANE_URL)).toBeUndefined();
+		expect(webhookAvatar('media/a.png', PLANE_URL)).toBeUndefined();
+		expect(webhookAvatar('javascript:alert(1)', PLANE_URL)).toBeUndefined();
+		expect(webhookAvatar('', PLANE_URL)).toBeUndefined();
+		expect(webhookAvatar(null, PLANE_URL)).toBeUndefined();
+	});
+
+	test('аватар: путь от корня инстанса разрешается от planeUrl, только в https', () => {
+		const path = '/api/assets/v2/static/u/';
+		const full = 'https://plane.example.com/api/assets/v2/static/u/';
+		expect(webhookAvatar(path, PLANE_URL)).toBe(full);
+		expect(webhookAvatar(path, 'https://plane.example.com/')).toBe(full);
+		expect(webhookAvatar(path, 'https://plane.example.com/sub//')).toBe(
+			'https://plane.example.com/sub/api/assets/v2/static/u/',
+		);
+		expect(webhookAvatar('//evil.example/x.png', PLANE_URL)).toBeUndefined();
+		expect(webhookAvatar(path, 'http://plane.example.com')).toBeUndefined();
+		expect(
+			webhookAvatar('http://plane.example.com/a.png', 'http://plane.example.com'),
+		).toBeUndefined();
 	});
 
 	test('имя: остатки после вычистки не склеиваются в запрещённое слово', () => {
@@ -197,12 +215,25 @@ describe('createNotifier: comment.created → тред', () => {
 	});
 
 	test('аватар: возвращается разобранный href, а не исходная строка', () => {
-		expect(webhookAvatar(' https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
+		expect(webhookAvatar(' https://cdn.example.com/a.png', PLANE_URL)).toBe(
+			'https://cdn.example.com/a.png',
+		);
+	});
+
+	test('относительный avatar_url Plane → в webhook уходит абсолютный https', async () => {
+		const w = bound();
+		w.plane.members = [{ id: CAROL, displayName: 'Carol', avatarUrl: '/api/assets/v2/static/c/' }];
+		await runAll(await w.notify(comment('<p>x</p>')));
+		expect(webhookCalls(w)[0]![3]).toEqual({
+			content: 'x',
+			username: 'Carol',
+			avatarUrl: `${PLANE_URL}/api/assets/v2/static/c/`,
+		});
 	});
 
 	test('аватар не https → в webhook нет avatarUrl', async () => {
 		const w = bound();
-		w.plane.members = [{ id: CAROL, displayName: 'Carol', avatarUrl: '/media/c.png' }];
+		w.plane.members = [{ id: CAROL, displayName: 'Carol', avatarUrl: 'media/c.png' }];
 		await runAll(await w.notify(comment('<p>x</p>')));
 		expect(webhookCalls(w)[0]![3]).toEqual({ content: 'x', username: 'Carol' });
 	});
@@ -383,6 +414,30 @@ describe('createNotifier: удалённый тред', () => {
 		await runAll(await w.notify(agentMention()));
 		expect(sent(w.discord).map(([channel]) => channel)).toEqual([TEXT]);
 		expect(w.plane.activities.at(-1)?.body).toBe(`→ Discord: ${TEXT}`);
+	});
+});
+
+describe('createNotifier: удалённый тред, ответ 400', () => {
+	test('executeWebhook 400/10003 → привязка снята, лог thread_gone, run() без ошибки', async () => {
+		const w = setup([route(TEXT)]);
+		w.store.putThread('initech', ITEM, TEXT, THREAD, PROJECT);
+		w.store.putWebhook(TEXT, 'wh-old', 'tok-old');
+		w.discord.failures.set(
+			'executeWebhook',
+			new DiscordApiError(400, 'POST', '/webhooks/wh-old/:token', 10003),
+		);
+		const [d] = await w.notify(comment('<p>в пустоту</p>'));
+		await d!.run();
+		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(w.logs.filter((l) => l.event === 'notify.thread_gone')).toEqual([
+			{
+				event: 'notify.thread_gone',
+				level: 'warn',
+				tenant: 'initech',
+				channel: TEXT,
+				thread: THREAD,
+			},
+		]);
 	});
 });
 

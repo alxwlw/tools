@@ -31,10 +31,11 @@ Phases 1 to 3 (this version; a bound thread and its work item are synced both wa
   hidden projects are never synced.
   A comment by a person in Plane goes to every thread bound to the item, through a webhook the bot creates
   in the thread's parent channel (needs Manage Webhooks), under the author's Plane name and, when Plane gives
-  an absolute `https` URL, avatar (`discord` and `clyde` are cut from the name, empty → `Plane`). People
+  an `https` URL (or a path from the Plane root, joined to `PLANE_DISCORD_PLANE_URL`), avatar (`discord` and `clyde` are cut from the name, empty → `Plane`). People
   mentioned in the comment appear as `<@id>` or `@name`, but the message never pings. Comments of the bot itself are
   not sent, and a bot mention in a channel where the item already has a thread is not repeated as a 1a message.
-  A deleted webhook is created again once per delivery.
+  A deleted webhook is created again once per delivery. A deleted thread (any 4xx but 429 with code 10003; live
+  Discord answers 400) is unbound with `notify.thread_gone`; a 5xx or a transport error is retried.
 
 Hidden projects (`hiddenProjects`) are hidden completely: no channel topics, no DMs, no modal, no
 forwarded mentions.
