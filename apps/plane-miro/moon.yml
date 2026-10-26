@@ -1,0 +1,18 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'typescript'
+layer: 'application'
+
+# Канон смотрит в src/ и tests/; здесь каталог тестов — test/, плюс scripts/ и web/.
+fileGroups:
+  tests:
+    - 'test/**/*'
+  sources:
+    - 'src/**/*'
+    - 'scripts/**/*'
+    - 'web/**/*'
+
+# The skeleton has no src/ yet (lint targets src only); lint scripts/ until it does.
+tasks:
+  lint:
+    args: 'scripts'

@@ -239,6 +239,18 @@ importers:
         specifier: catalog:dev
         version: 7.0.2
 
+  apps/plane-miro:
+    devDependencies:
+      '@alxwlw/tsconfig':
+        specifier: catalog:dev
+        version: 1.7.1
+      '@types/bun':
+        specifier: catalog:dev
+        version: 1.4.3
+      typescript:
+        specifier: catalog:dev
+        version: 7.0.2
+
 packages:
 
   '@alxwlw/oxlint-config@1.7.1':
