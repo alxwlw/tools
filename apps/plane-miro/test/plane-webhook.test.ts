@@ -1,5 +1,5 @@
 // Adapted from apps/plane-discord/test/plane-webhook.test.ts.
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import {
 	BadDelivery,
@@ -169,6 +169,21 @@ describe('parsePlaneDelivery: ссылка в задаче', () => {
 		const a = withId('link-1');
 		expect(a.eventKey).toMatch(new RegExp(`^issue\\.link:${at(name, 'data.id')}:[0-9a-f]{32}$`));
 		expect(a.eventKey).not.toContain('SECRET');
+		const digest = createHash('sha256')
+			.update('link-1|https://x.example/?token=SECRET-9137')
+			.digest('hex')
+			.slice(0, 32);
+		expect(a.eventKey).toBe(`issue.link:${at(name, 'data.id')}:${digest}`);
+		const noId = createHash('sha256').update('|https://x.example/a').digest('hex').slice(0, 32);
+		expect(withId(null, 'https://x.example/a').eventKey).toBe(
+			`issue.link:${at(name, 'data.id')}:${noId}`,
+		);
+		expect(withId(null, 'https://x.example/a').eventKey).not.toBe(
+			withId(null, 'https://x.example/b').eventKey,
+		);
+		expect(withId('link-1', 'https://x.example/a').eventKey).not.toBe(
+			withId('link-1', 'https://x.example/b').eventKey,
+		);
 		expect(withId('link-2').eventKey).not.toBe(a.eventKey);
 		expect(withId('link-1').eventKey).toBe(a.eventKey);
 		expect(withId(null).eventKey).not.toBe(a.eventKey);
