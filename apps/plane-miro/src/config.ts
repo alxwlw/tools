@@ -169,7 +169,8 @@ function parseTenant(
 	);
 	const id = str(raw, 'id', at, TENANT_ID, 'a-z then up to 15 of a-z0-9');
 	const workspace = str(raw, 'workspace', at);
-	const workspaceId = str(raw, 'workspaceId', at, UUID, 'a UUID');
+	// UUIDs are kept lower-case: Plane sends them so, and the routing map and the hidden set compare exactly.
+	const workspaceId = str(raw, 'workspaceId', at, UUID, 'a UUID').toLowerCase();
 
 	let clientId = '';
 	let appInstallationId = '';
@@ -208,7 +209,7 @@ function parseTenant(
 		if (!Array.isArray(raw.hiddenProjects)) fail(`${at}.hiddenProjects must be an array`);
 		else
 			raw.hiddenProjects.forEach((p, j) => {
-				if (typeof p === 'string' && UUID.test(p)) hiddenProjects.push(p);
+				if (typeof p === 'string' && UUID.test(p)) hiddenProjects.push(p.toLowerCase());
 				else fail(`${at}.hiddenProjects[${j}] must be a UUID`);
 			});
 	}

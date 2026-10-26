@@ -1,10 +1,48 @@
 import { describe, expect, test } from 'bun:test';
 
+import { loadConfig } from '../src/config.ts';
 import { CACHE_TTL_MS, createRuntime, MISS_REFRESH_MS } from '../src/runtime.ts';
 import { Store } from '../src/store.ts';
+import { env, read } from './config-fixture.ts';
+import { FakeMiro } from './fake-miro.ts';
+import { FakePlane } from './fake-plane.ts';
 import { world } from './world.ts';
 
 describe('createRuntime', () => {
+	test('UUID конфига в верхнем регистре: проект скрыт и не предлагается (Plane шлёт id строчными)', async () => {
+		const hidden = '0000000a-0000-4000-8000-00000000000b';
+		const workspaceId = '0000000c-0000-4000-8000-00000000000d';
+		const file = {
+			tenants: [
+				{
+					id: 'acme',
+					workspace: 'example-ws',
+					workspaceId: workspaceId.toUpperCase(),
+					plane: { clientId: 'example-client-id', appInstallationId: 'inst' },
+					miro: { teamId: '3458764500000000001' },
+					embed: false,
+					hiddenProjects: [hidden.toUpperCase()],
+				},
+			],
+		};
+		const tenant = loadConfig(env(), read(JSON.stringify(file))).tenants[0];
+		if (tenant === undefined) throw new Error('tenant');
+		expect(tenant.workspaceId).toBe(workspaceId);
+		const plane = new FakePlane();
+		plane.projects = [
+			{ id: hidden, identifier: 'SEC', name: 'Секрет', archived: false },
+			{ id: 'p1', identifier: 'LAB', name: 'Лаборатория', archived: false },
+		];
+		const rt = createRuntime(tenant, {
+			planeUrl: 'https://plane.example.com',
+			store: new Store(':memory:'),
+			plane,
+			miro: new FakeMiro(),
+		});
+		expect(rt.isHidden(hidden)).toBe(true);
+		expect((await rt.projects()).map((p) => p.identifier)).toEqual(['LAB']);
+	});
+
 	test('кэш живёт десять минут', () => {
 		expect(CACHE_TTL_MS).toBe(600_000);
 		expect(MISS_REFRESH_MS).toBe(30_000);

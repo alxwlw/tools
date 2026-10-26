@@ -323,6 +323,22 @@ describe('convertItems', () => {
 		}
 	});
 
+	test('записанная задача стикера в проекте, скрытом после конвертации → unknown_project, Plane и доску не трогают', async () => {
+		const w = world({ keepSource: true });
+		seedItem(w.plane, 'w-hid', { projectId: 'p-hidden', sequenceId: 5 });
+		w.store.putSource('acme', BOARD, '101', {
+			workItemId: 'w-hid',
+			projectId: 'p-hidden',
+			key: 'HID-5',
+		});
+		expect(await convertItems(w.rt, w.store, req(['101']), w.log)).toEqual([
+			{ itemId: '101', ok: false, error: 'unknown_project' },
+		]);
+		expect(w.plane.calls).toEqual([]);
+		expect(writes(w.miro.calls)).toEqual([]);
+		expect(w.plane.links.size).toBe(0);
+	});
+
 	test('карточка уже показывает задачу как есть → не обновляется', async () => {
 		const w = world({ keepSource: true });
 		await convertItems(w.rt, w.store, req(['101']), w.log);

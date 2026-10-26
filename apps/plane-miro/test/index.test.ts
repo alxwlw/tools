@@ -162,6 +162,26 @@ describe('startService', () => {
 		});
 	});
 
+	test('workspaceId конфига в верхнем регистре: доставка с id строчными принимается', async () => {
+		const w = world();
+		const lower = '0000000e-0000-4000-8000-00000000000f';
+		w.options.readFile = read(TENANTS.replace(WORKSPACE, lower.toUpperCase()));
+		const { service, url } = await start(w);
+		const res = await fetch(
+			url('/plane/webhook'),
+			stateDelivery((body) => {
+				body.workspace_id = lower;
+			}),
+		);
+		expect(res.status).toBe(200);
+		await service.idle();
+		expect(w.entries().filter((e) => e.event === 'plane.rejected')).toEqual([]);
+		expect(w.entries().find((e) => e.event === 'plane.accepted')).toMatchObject({
+			tenant: 'acme',
+			kind: 'workitem.changed',
+		});
+	});
+
 	test('сервис: удаление задачи → карточка disabled', async () => {
 		const w = world();
 		w.options.runtimeFor = (tenant, store) => {

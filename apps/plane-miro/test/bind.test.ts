@@ -199,6 +199,24 @@ describe('bindItem', () => {
 		expect(w.miro.item(BOARD, '101')).toBeNull();
 	});
 
+	test('записанная задача стикера в скрытом проекте → unknown_project и при привязке к ней же', async () => {
+		const w = withItem({ keepSource: true });
+		seedItem(w.plane, 'w-hid', { projectId: 'p-hidden', sequenceId: 5 });
+		w.store.putSource('acme', BOARD, '101', {
+			workItemId: 'w-hid',
+			projectId: 'p-hidden',
+			key: 'HID-5',
+		});
+		expect(await bindItem(w.rt, w.store, bind({ workItemId: 'w-hid' }), w.log)).toEqual({
+			itemId: '101',
+			ok: false,
+			error: 'unknown_project',
+		});
+		expect(w.plane.calls).toEqual([]);
+		expect(w.miro.calls.filter((c) => MIRO_WRITES.includes(c))).toEqual([]);
+		expect(w.plane.createdComments).toEqual([]);
+	});
+
 	test('статус сменился, пока ставилась карточка (синхронизация её ещё не нашла) → карточка показывает новый статус', async () => {
 		const w = world({ keepSource: true });
 		seedItem(w.plane, 'w-ex', { stateId: 's-backlog' });

@@ -41,12 +41,15 @@ export function besidePlace(item: MiroItem): Place {
  * belongs to an item Plane hides from reads (archived, draft, triage). `not_found`: no such sticker; the bind target
  * does not exist or is in another project; or the work item vanished before the re-read after the card.
  * `miro_failed` also covers a card deleted on the board while the item was converted (the retry places a new one).
+ * `unknown_project`: the sticker's recorded work item is in a project the tenant hides — the request-level answer
+ * to a hidden project, given per item.
  */
 export type ItemError =
 	| 'not_found'
 	| 'unsupported_type'
 	| 'empty_text'
 	| 'already_linked'
+	| 'unknown_project'
 	| 'board_no_access'
 	| 'plane_failed'
 	| 'miro_failed';
@@ -337,6 +340,8 @@ async function resolveWorkItem(
 	};
 
 	const recorded = store.getSource(tenantId, boardId, itemId);
+	// A project hidden after the sticker was converted: its item is not read, and no card or link is made for it.
+	if (recorded !== null && rt.isHidden(recorded.projectId)) throw new ItemFailure('unknown_project');
 	if (recorded !== null && mode.kind === 'bind' && mode.workItemId !== recorded.workItemId)
 		throw new ItemFailure('already_linked');
 	if (recorded !== null) {
