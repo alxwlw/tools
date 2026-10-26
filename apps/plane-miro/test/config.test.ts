@@ -291,7 +291,8 @@ describe('loadConfig', () => {
 		for (const root of [[], { tenants: {} }, { tenants: [], extra: 1 }, null]) {
 			expect(errorOf(() => load(root))).toContain('{"tenants": [...]}');
 		}
-		expect(errorOf(() => load({ tenants: [5] }))).toContain('tenants[0] must be an object');
+		for (const item of [5, [], null])
+			expect(errorOf(() => load({ tenants: [item] }))).toContain('tenants[0] must be an object');
 	});
 
 	test('некорректные глобальные env — ошибки с именами', () => {
