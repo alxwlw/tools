@@ -5,5 +5,5 @@ import { esc } from '../html.ts';
  * the oEmbed data when it shows the block, and the `moveToWidget` parameter of the URL survives.
  */
 export function embedBlock(url: string, id: string = crypto.randomUUID()): string {
-	return `<external-embed-component id="${id}" data-id="${id}" src="${esc(url)}" data-is-rich-card="false" data-has-embed-failed="false" data-has-tried-embedding="false" data-entity-name="Miro" data-entity-type="embed" data-spacing-group="container"></external-embed-component>`;
+	return `<external-embed-component id="${esc(id)}" data-id="${esc(id)}" src="${esc(url)}" data-is-rich-card="false" data-has-embed-failed="false" data-has-tried-embedding="false" data-entity-name="Miro" data-entity-type="embed" data-spacing-group="container"></external-embed-component>`;
 }

@@ -20,6 +20,12 @@ describe('embedBlock', () => {
 		expect(a).toContain(`data-id="${idOf(a)}"`);
 	});
 
+	test('id с кавычкой экранирован в id и в data-id', () => {
+		const html = embedBlock('u', 'a"b');
+		expect(html).toContain(' id="a&quot;b"');
+		expect(html).toContain('data-id="a&quot;b"');
+	});
+
 	test('кавычка и скобка в URL экранированы, атрибут не закрывается раньше времени', () => {
 		const html = embedBlock('https://miro.com/a"b<c>&d', 'i');
 		expect(html).toContain('src="https://miro.com/a&quot;b&lt;c&gt;&amp;d"');

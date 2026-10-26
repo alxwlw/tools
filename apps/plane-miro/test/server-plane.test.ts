@@ -472,6 +472,7 @@ describe('лог', () => {
 			}),
 			make('plane-issue-link-created', (b) => {
 				b.data.name = TEXT;
+				b.activity.new_value = `https://x.example/?token=${TEXT}`;
 			}),
 			make('plane-issue-deleted', (b) => {
 				b.activity.old_value = TEXT;

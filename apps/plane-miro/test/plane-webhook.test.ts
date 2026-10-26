@@ -90,6 +90,18 @@ describe('parsePlaneDelivery: задача', () => {
 		});
 	});
 
+	test('удаление не задачи (ссылка, вложение, модуль, цикл, реакция) → null; поле issue → workitem.deleted', () => {
+		for (const f of ['link', 'attachment', 'modules', 'cycles', 'reaction'])
+			expect(parseBody(edited('plane-issue-deleted', (b) => (b.activity.field = f))), f).toBeNull();
+		expect(parseBody(edited('plane-issue-deleted', (b) => delete b.activity))).toBeNull();
+		expect(parseBody(edited('plane-issue-deleted', (b) => (b.activity = []))), 'array').toBeNull();
+		expect(
+			parseBody(edited('plane-issue-deleted', (b) => (b.activity.field = 'issue'))),
+		).toMatchObject({
+			kind: 'workitem.deleted',
+		});
+	});
+
 	test('description_html, priority, description, created без ссылки, архив → null', () => {
 		for (const value of ['description_html', 'description', 'priority', 'modules', 'labels'])
 			expect(parseBody(field(RENAMED, value)), value).toBeNull();
@@ -123,7 +135,7 @@ describe('parsePlaneDelivery: ссылка в задаче', () => {
 		expect(parse(name)).toEqual({
 			kind: 'link.created',
 			tenant: 'initech',
-			eventKey: `issue.link:${at(name, 'data.id')}:${at(name, 'activity.new_value')}`,
+			eventKey: expect.stringMatching(/^issue\.link:[^:]+:[0-9a-f]{32}$/),
 			actorId: at(name, 'activity.actor.id'),
 			projectId: at(name, 'data.project'),
 			workItemId: at(name, 'data.id'),
@@ -139,10 +151,31 @@ describe('parsePlaneDelivery: ссылка в задаче', () => {
 			actorId: at(name, 'activity.actor.id'),
 			url: expect.stringContaining('moveToWidget=3458764500000000001'),
 		});
-		expect(e?.eventKey).toBe(`issue.link:${at(name, 'data.id')}:${at(name, 'activity.new_value')}`);
+		expect(e?.eventKey).toMatch(/^issue\.link:[^:]+:[0-9a-f]{32}$/);
 		expect(e?.kind === 'link.created' && e.actorId).not.toBe(
 			at('plane-issue-link-created', 'activity.actor.id'),
 		);
+	});
+
+	test('ключ ссылки — хеш: URL и его длина не попадают в ключ, new_identifier различает одинаковые URL', () => {
+		const name = 'plane-issue-link-created';
+		const withId = (id: string | null, url = 'https://x.example/?token=SECRET-9137') =>
+			parseBody(
+				edited(name, (b) => {
+					b.activity.new_value = url;
+					b.activity.new_identifier = id;
+				}),
+			)!;
+		const a = withId('link-1');
+		expect(a.eventKey).toMatch(new RegExp(`^issue\\.link:${at(name, 'data.id')}:[0-9a-f]{32}$`));
+		expect(a.eventKey).not.toContain('SECRET');
+		expect(withId('link-2').eventKey).not.toBe(a.eventKey);
+		expect(withId('link-1').eventKey).toBe(a.eventKey);
+		expect(withId(null).eventKey).not.toBe(a.eventKey);
+		expect(withId('link-1', 'https://x.example/?' + 'a'.repeat(100_000)).eventKey).toHaveLength(
+			a.eventKey.length,
+		);
+		expect(a.kind === 'link.created' && a.url).toBe('https://x.example/?token=SECRET-9137');
 	});
 
 	test('две разные ссылки в одной задаче → разные ключи', () => {
@@ -190,6 +223,12 @@ describe('parsePlaneDelivery: комментарий', () => {
 		expect(comment).toMatchObject({ kind: 'comment.created', commentHtml: null });
 	});
 
+	test('comment_html: null → commentHtml null', () => {
+		expect(
+			parseBody(edited('plane-comment-miro-link', (b) => (b.data.comment_html = null))),
+		).toMatchObject({ kind: 'comment.created', commentHtml: null });
+	});
+
 	test('изменение и удаление комментария → null', () => {
 		for (const action of ['updated', 'deleted'])
 			expect(
@@ -215,9 +254,9 @@ describe('parsePlaneDelivery: враждебные тела', () => {
 			{ event: 'issue', action: 'created', activity: { field: 5 }, data: {} },
 			{ event: 'issue', action: 'updated', activity: { field: 'name' }, data: 'x' },
 			{ event: 'issue_comment', action: 'created', activity: { field: null }, data: {} },
-			{ event: 'issue', action: 'deleted' },
-			{ event: 'issue', action: 'deleted', data: {} },
-			{ event: 'issue', action: 'deleted', data: { id: 7 } },
+			{ event: 'issue', action: 'deleted', activity: { field: 'issue' } },
+			{ event: 'issue', action: 'deleted', activity: { field: 'issue' }, data: {} },
+			{ event: 'issue', action: 'deleted', activity: { field: 'issue' }, data: { id: 7 } },
 			edited(RENAMED, (b) => (b.data.id = '')),
 			edited(RENAMED, (b) => (b.data.sequence_id = '57')),
 			edited(RENAMED, (b) => (b.data.sequence_id = 1e300)),
@@ -228,6 +267,7 @@ describe('parsePlaneDelivery: враждебные тела', () => {
 			edited(RENAMED, (b) => (b.data.assignees = 'x')),
 			edited(RENAMED, (b) => (b.data.assignees = [null])),
 			edited(RENAMED, (b) => (b.data.assignees = [{ id: 5 }])),
+			edited(RENAMED, (b) => (b.data.assignees = [{ id: '' }])),
 			edited(RENAMED, (b) => delete b.data.last_activity_at),
 			edited(RENAMED, (b) => delete b.data.project),
 			edited('plane-issue-link-created', (b) => (b.activity.actor = null)),

@@ -17,6 +17,9 @@ describe('setupRedirect', () => {
 		expect(query.get('response_type')).toBe('code');
 		expect(query.get('redirect_uri')).toBe('https://plane-miro.example.com/plane/oauth/callback');
 		expect(query.get('scope')).toBe(PLANE_SCOPES.join(' '));
+		expect(query.get('scope')).toBe(
+			'projects:read projects.work_items:read projects.work_items:write projects.work_items.comments:read projects.work_items.comments:write projects.work_items.links:read projects.work_items.links:write projects.states:read projects.members:read workspaces.members:read',
+		);
 		// '&' in a value stays one parameter, and the scopes are separated by %20.
 		expect(location).toContain('client_id=client%26id&response_type=code&');
 		expect(location).toContain('&scope=projects%3Aread%20projects.work_items%3Aread%20');

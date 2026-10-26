@@ -1,5 +1,5 @@
 // Adapted from apps/plane-discord/src/plane/webhook.ts.
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export type WorkItemSnapshot = {
 	id: string;
@@ -106,9 +106,15 @@ function snapshot(data: Obj): WorkItemSnapshot {
 	};
 }
 
+/** Link key part: a hash, so that neither the URL (often a capability URL) nor its length reaches a key or a log line. */
+function linkDigest(identifier: unknown, url: string): string {
+	const id = typeof identifier === 'string' ? identifier : '';
+	return createHash('sha256').update(`${id}|${url}`).digest('hex').slice(0, 32);
+}
+
 // Fields of an issue/updated activity that the card shows. Plane sends one change as two deliveries,
 // a "machine" twin (state_id, assignee_ids: the request keys) and a "human" twin (state, assignees);
-// both are accepted, and the card writer (Task 8) writes only the fields that changed.
+// both are accepted, and the card writer writes only the fields that changed.
 const CARD_FIELDS: ReadonlySet<string> = new Set([
 	'name',
 	'state',
@@ -136,7 +142,9 @@ export function parsePlaneDelivery(
 	// Everything the service ignores is decided before the shape of data is demanded.
 	if (event !== 'issue' && event !== 'issue_comment') return null;
 	if (event === 'issue' && action === 'deleted') {
-		// Probe 2026-10-26: one delivery, data = {id}, activity.field = "issue".
+		// Probe 2026-10-26: one delivery, data = {id}, activity.field = "issue". Plane sends the removal of a link,
+		// attachment, module, cycle or reaction the same way, with another field: those leave the work item alive.
+		if (!isObj(body.activity) || body.activity.field !== 'issue') return null;
 		const workItemId = str(obj(body, 'data', 'body'), 'id', 'data');
 		return {
 			kind: 'workitem.deleted',
@@ -177,7 +185,7 @@ export function parsePlaneDelivery(
 		return {
 			kind: 'link.created',
 			tenant,
-			eventKey: `issue.link:${workItemId}:${url}`,
+			eventKey: `issue.link:${workItemId}:${linkDigest(activity.new_identifier, url)}`,
 			actorId: str(obj(activity, 'actor', 'activity'), 'id', 'activity.actor'),
 			projectId: str(data, 'project', 'data'),
 			workItemId,

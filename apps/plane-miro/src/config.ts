@@ -11,7 +11,7 @@ export type Tenant = {
 	miroTeamId: string;
 	/** Enabled per tenant: an Embed block of the card's place goes into the work item description. */
 	embed: boolean;
-	/** true: the source item stays and the card goes next to it (design §3.1, probe Task 1). */
+	/** true: the source item stays and the card goes next to it (design §3.1, probe 2026-10-26). */
 	keepSource: boolean;
 	silenceHours: number;
 	hiddenProjects: readonly string[];

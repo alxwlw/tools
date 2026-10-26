@@ -19,11 +19,11 @@ export type ServerDeps = {
 	enqueue: (event: PlaneEvent) => void;
 	/** GET /plane/setup and /plane/oauth/callback; absent → 404. */
 	config?: Config;
-	/** Task 5: GET /miro/setup and /miro/oauth/callback; absent → 404. */
+	/** GET /miro/setup and /miro/oauth/callback; absent → 404. */
 	miroOauth?: (req: Request, url: URL) => Promise<Response>;
-	/** Task 6: /miro/api/*; absent → 404. */
+	/** /miro/api/* (the front's API); absent → 404. */
 	api?: (req: Request, url: URL) => Promise<Response>;
-	/** Task 7: /miro/app, /miro/panel, /miro/card, /miro/assets/*; null → 404. */
+	/** Pages for Miro: /miro/app, /miro/panel, /miro/card, /miro/assets/*; null → 404. */
 	web?: (url: URL) => Response | null;
 	log: Log;
 	now?: () => number;

@@ -49,7 +49,18 @@ describe('botTokenAuth', () => {
 		expect(form.get('grant_type')).toBe('client_credentials');
 		expect(form.get('app_installation_id')).toBe('inst-1');
 		expect(form.get('scope')).toBe(PLANE_SCOPES.join(' '));
-		expect(PLANE_SCOPES).toHaveLength(10);
+		expect(PLANE_SCOPES).toEqual([
+			'projects:read',
+			'projects.work_items:read',
+			'projects.work_items:write',
+			'projects.work_items.comments:read',
+			'projects.work_items.comments:write',
+			'projects.work_items.links:read',
+			'projects.work_items.links:write',
+			'projects.states:read',
+			'projects.members:read',
+			'workspaces.members:read',
+		]);
 		expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
 	});
 

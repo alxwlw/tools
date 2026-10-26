@@ -33,6 +33,8 @@ export class FakePlane implements PlaneApi {
 	members: MemberSummary[] = [];
 	/** Work items by id; the key `LAB-40` is `<project identifier>-<sequenceId>`. */
 	items = new Map<string, WorkItem & { externalSource?: string; externalId?: string }>();
+	/** Ids of archived / draft / triage items: createWorkItem still names them (409), reads do not see them. */
+	archived = new Set<string>();
 	/** workItemId → links, in creation order. */
 	links = new Map<string, Array<{ url: string; title: string }>>();
 	comments: StoredComment[] = [];
@@ -85,12 +87,16 @@ export class FakePlane implements PlaneApi {
 	async getWorkItem(projectId: string, workItemId: string): Promise<WorkItem | null> {
 		this.#enter('getWorkItem');
 		const item = this.items.get(workItemId);
-		return item && item.projectId === projectId ? item : null;
+		return item && item.projectId === projectId && !this.archived.has(item.id) ? item : null;
 	}
 
 	async getWorkItemByKey(key: string): Promise<WorkItem | null> {
 		this.#enter('getWorkItemByKey');
-		return [...this.items.values()].find((item) => this.#keyOf(item) === key) ?? null;
+		return (
+			[...this.items.values()].find(
+				(item) => !this.archived.has(item.id) && this.#keyOf(item) === key,
+			) ?? null
+		);
 	}
 
 	/** Case-insensitive substring of the name, or exactly the key. */

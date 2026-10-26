@@ -46,6 +46,19 @@ describe('FakePlane', () => {
 		expect(await plane.getWorkItemByKey('ZZZ-1')).toBeNull();
 	});
 
+	test('архивная задача: createWorkItem по её external_id — created false, а getWorkItem и getWorkItemByKey — null', async () => {
+		const plane = seeded();
+		const first = await plane.createWorkItem('p1', newItem('m1'));
+		const seq = (await plane.getWorkItem('p1', first.id))!.sequenceId;
+		plane.archived.add(first.id);
+		expect(await plane.createWorkItem('p1', newItem('m1'))).toEqual({
+			id: first.id,
+			created: false,
+		});
+		expect(await plane.getWorkItem('p1', first.id)).toBeNull();
+		expect(await plane.getWorkItemByKey(`LAB-${seq}`)).toBeNull();
+	});
+
 	test('searchWorkItems: по подстроке названия без регистра и по точному ключу', async () => {
 		const plane = seeded();
 		const a = await plane.createWorkItem('p1', newItem('m1', 'Починить Насос'));

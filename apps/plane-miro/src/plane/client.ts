@@ -32,7 +32,10 @@ export interface PlaneApi {
 	listProjects(): Promise<ProjectSummary[]>;
 	listStates(projectId: string): Promise<StateSummary[]>;
 	listMembers(): Promise<MemberSummary[]>;
-	/** 404 → null: the work item is gone. */
+	/**
+	 * 404 → null: the work item is gone, or archived / draft / in triage, which Plane hides from this read.
+	 * The 409 of createWorkItem can still name such an item.
+	 */
 	getWorkItem(projectId: string, workItemId: string): Promise<WorkItem | null>;
 	/** `LAB-40`; 404 → null. */
 	getWorkItemByKey(key: string): Promise<WorkItem | null>;
