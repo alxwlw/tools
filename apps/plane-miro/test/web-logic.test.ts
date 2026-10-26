@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { CONVERTIBLE as serverConvertible } from '../src/convert.ts';
+import { CONVERTIBLE as serverConvertible, MAX_ITEMS } from '../src/convert.ts';
 import {
 	BATCH_SIZE,
 	bindableId,
 	CONVERTIBLE as webConvertible,
 	chunk,
+	convertInBatches,
+	currentSelection,
 	convertibleIds,
 	errorText,
 	mergeBatch,
@@ -111,6 +113,7 @@ describe('errorText', () => {
 describe('chunk и пакеты', () => {
 	test('BATCH_SIZE — 10', () => {
 		expect(BATCH_SIZE).toBe(10);
+		expect(BATCH_SIZE).toBeLessThanOrEqual(MAX_ITEMS);
 	});
 
 	test('chunk режет по размеру, остаток — последним, пустой вход — пусто', () => {
@@ -138,20 +141,88 @@ describe('chunk и пакеты', () => {
 		]);
 	});
 
-	test('пакеты с упавшим вторым: итог собирает все три, summary считает 10 неудач', () => {
-		const ids = Array.from({ length: 25 }, (_, i) => String(i));
-		const merged = chunk(ids, BATCH_SIZE).flatMap((batch, i) =>
-			i === 1
-				? mergeBatch(batch, { ok: false, error: 'network' })
-				: mergeBatch(batch, {
-						ok: true,
-						data: {
-							results: batch.map((id) => ({ itemId: id, ok: true as const, key: `LAB-${id}` })),
-						},
-					}),
+	test('mergeBatch: 2xx без results — неудача каждой записи пакета', () => {
+		const bad = { ok: true, data: {} } as never;
+		expect(mergeBatch(['1', '2'], bad)).toEqual([
+			{ ok: false, error: 'unknown' },
+			{ ok: false, error: 'unknown' },
+		]);
+	});
+});
+
+describe('convertInBatches', () => {
+	const ids = Array.from({ length: 25 }, (_, i) => String(i));
+	const good = (batch: string[]) => ({
+		ok: true as const,
+		data: { results: batch.map((id) => ({ ok: true as const, key: `LAB-${id}` })) },
+	});
+
+	test('второй пакет упал: размеры [10,10,5], 25 исходов, 10 неудач, третий всё равно ушёл', async () => {
+		const sizes: number[] = [];
+		const out = await convertInBatches(ids, async (batch) => {
+			sizes.push(batch.length);
+			return sizes.length === 2 ? { ok: false as const, error: 'network' } : good(batch);
+		});
+		expect(sizes).toEqual([10, 10, 5]);
+		expect(out).toHaveLength(25);
+		expect(out.slice(10, 20)).toEqual(
+			Array.from({ length: 10 }, () => ({ ok: false, error: 'network' })),
 		);
-		expect(merged).toHaveLength(25);
-		expect(summary(merged)).toContain('Не вышло: 10 — Что-то пошло не так.');
-		expect(summary(merged)).toStartWith('Готово: LAB-0, LAB-1');
+		expect(out.slice(20).every((o) => o.ok)).toBe(true);
+		expect(summary(out)).toContain('Не вышло: 10 —');
+		expect(summary(out)).toStartWith('Готово: LAB-0, LAB-1');
+	});
+
+	test('пакеты уходят по очереди, а не вместе', async () => {
+		let running = 0;
+		let peak = 0;
+		await convertInBatches(ids, async (batch) => {
+			running += 1;
+			peak = Math.max(peak, running);
+			await Promise.resolve();
+			running -= 1;
+			return good(batch);
+		});
+		expect(peak).toBe(1);
+	});
+
+	test('2xx без results — неудача пакета, прежние исходы сохранены', async () => {
+		let calls = 0;
+		const out = await convertInBatches(ids.slice(0, 20), async (batch) => {
+			calls += 1;
+			return calls === 2 ? ({ ok: true, data: {} } as never) : good(batch);
+		});
+		expect(out).toHaveLength(20);
+		expect(out.slice(0, 10).every((o) => o.ok)).toBe(true);
+		expect(out.slice(10)).toEqual(
+			Array.from({ length: 10 }, () => ({ ok: false, error: 'unknown' })),
+		);
+	});
+
+	test('прогресс: сделано и всего перед каждым пакетом; пустой список — без вызовов', async () => {
+		const seen: [number, number][] = [];
+		await convertInBatches(
+			ids,
+			async (batch) => good(batch),
+			(d, t) => seen.push([d, t]),
+		);
+		expect(seen).toEqual([
+			[0, 25],
+			[10, 25],
+			[20, 25],
+		]);
+		let calls = 0;
+		expect(await convertInBatches([], async (b) => (calls++, good(b)))).toEqual([]);
+		expect(calls).toBe(0);
+	});
+});
+
+describe('currentSelection', () => {
+	test('обновление, пришедшее раньше стартового чтения, не затирается им', () => {
+		const initial = [{ id: '1', type: 'text' }];
+		const updated = [{ id: '2', type: 'text' }];
+		expect(currentSelection(updated, initial)).toEqual(updated);
+		expect(currentSelection([], initial)).toEqual([]);
+		expect(currentSelection(null, initial)).toEqual(initial);
 	});
 });

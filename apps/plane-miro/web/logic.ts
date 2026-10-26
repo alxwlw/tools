@@ -68,11 +68,40 @@ export function chunk<T>(list: readonly T[], size: number): T[][] {
 	return parts;
 }
 
-/** One batch's outcomes: the backend's results, or — when the request itself failed — its error for every item. */
+/**
+ * One batch's outcomes: the backend's results, or — when the request failed or answered without `results` —
+ * an error for every item of the batch.
+ */
 export function mergeBatch(
 	ids: readonly string[],
 	response: ApiResult<{ results: readonly Outcome[] }>,
 ): Outcome[] {
-	if (response.ok) return [...response.data.results];
+	if (response.ok) {
+		const results = (response.data as { results?: unknown } | null)?.results;
+		if (Array.isArray(results)) return [...(results as Outcome[])];
+		return ids.map(() => ({ ok: false, error: 'unknown' }));
+	}
 	return ids.map(() => ({ ok: false, error: response.error }));
+}
+
+/** Sends the ids in sequential batches of BATCH_SIZE; a failed batch never stops the next one. */
+export async function convertInBatches(
+	ids: readonly string[],
+	send: (batch: string[]) => Promise<ApiResult<{ results: readonly Outcome[] }>>,
+	onProgress?: (done: number, total: number) => void,
+): Promise<Outcome[]> {
+	const outcomes: Outcome[] = [];
+	for (const batch of chunk(ids, BATCH_SIZE)) {
+		onProgress?.(outcomes.length, ids.length);
+		outcomes.push(...mergeBatch(batch, await send(batch)));
+	}
+	return outcomes;
+}
+
+/** The selection a `selection:update` stored wins over the one read at start-up while a request was in flight. */
+export function currentSelection(
+	updated: readonly Item[] | null,
+	initial: readonly Item[],
+): Item[] {
+	return [...(updated ?? initial)];
 }

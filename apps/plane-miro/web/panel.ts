@@ -1,12 +1,11 @@
 /// <reference lib="dom" />
 import { api } from './api.ts';
 import {
-	BATCH_SIZE,
 	bindableId,
-	chunk,
 	convertibleIds,
+	convertInBatches,
+	currentSelection,
 	errorText,
-	mergeBatch,
 	type Outcome,
 	summary,
 } from './logic.ts';
@@ -27,6 +26,8 @@ const bindEl = $('bind') as HTMLButtonElement;
 const statusEl = $('status');
 
 let selection: { id: string; type: string }[] = [];
+// Set once a selection:update arrives; the start-up read must not overwrite it.
+let updatedSelection: { id: string; type: string }[] | null = null;
 let hits: Hit[] = [];
 let picked: Hit | null = null;
 let busy = false;
@@ -125,15 +126,17 @@ async function convert(): Promise<void> {
 		miro.board.getInfo(),
 		miro.board.getUserInfo(),
 	]);
-	const results: Outcome[] = [];
-	for (const batch of chunk(ids, BATCH_SIZE)) {
-		say(`Переношу: ${results.length} из ${ids.length}…`);
-		const res = await api<{ results: Outcome[] }>('/miro/api/convert', {
-			method: 'POST',
-			body: JSON.stringify({ boardId, projectId: projectEl.value, author, itemIds: batch }),
-		});
-		results.push(...mergeBatch(batch, res));
-	}
+	const results = await convertInBatches(
+		ids,
+		(batch) =>
+			api<{ results: Outcome[] }>('/miro/api/convert', {
+				method: 'POST',
+				body: JSON.stringify({ boardId, projectId: projectEl.value, author, itemIds: batch }),
+			}),
+		(done, total) => {
+			say(`Переношу: ${done} из ${total}…`);
+		},
+	);
 	say(
 		summary(results),
 		results.some((r) => !r.ok),
@@ -181,6 +184,7 @@ queryEl.addEventListener('input', () => {
 });
 
 miro.board.ui.on('selection:update', ({ items }) => {
+	updatedSelection = items;
 	selection = items;
 	refresh();
 });
@@ -189,7 +193,7 @@ const [projects, current] = await Promise.all([
 	api<{ projects: Project[] }>('/miro/api/projects'),
 	miro.board.getSelection(),
 ]);
-selection = current;
+selection = currentSelection(updatedSelection, current);
 if (projects.ok) {
 	projectEl.replaceChildren(
 		...projects.data.projects.map((p) => {
