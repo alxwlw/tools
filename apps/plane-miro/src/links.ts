@@ -86,7 +86,8 @@ export function handleLinkCreated(
 
 /**
  * One board link → one card of the work item on that board. A card already there is not duplicated, but its
- * link is still ensured: a retry after a failed createLink must not end on «card exists» with no link.
+ * link is still ensured: a retry after a failed createLink must not end on «card exists» with no link. A board
+ * of another Miro team (or one whose reply names no team) gets nothing, only a log line.
  */
 export async function placeCardForLink(
 	rt: TenantRuntime,
@@ -100,6 +101,16 @@ export async function placeCardForLink(
 		if (board === null) {
 			log({
 				event: 'link.board_no_access',
+				level: 'warn',
+				tenant: rt.tenant.id,
+				boardId: link.boardId,
+			});
+			return;
+		}
+		// Probe: another team's public board answers 200 too; a card there would carry the item out of the tenant.
+		if (board.teamId !== rt.tenant.miroTeamId) {
+			log({
+				event: 'link.board_other_team',
 				level: 'warn',
 				tenant: rt.tenant.id,
 				boardId: link.boardId,

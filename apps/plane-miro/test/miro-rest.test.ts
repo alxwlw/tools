@@ -62,10 +62,11 @@ describe('MiroClient', () => {
 		expect(sent.length).toBe(0);
 	});
 
-	test('getBoard: 200 → id и имя; 403 и 404 → null; 500 → ошибка', async () => {
+	test('getBoard: 200 → id, имя и команда; 403 и 404 → null; 500 → ошибка', async () => {
 		expect(await client([json(apiFixture('miro-board'))]).c.getBoard(BOARD)).toEqual({
 			id: 'uXjVexample1=',
 			name: 'Name1',
+			teamId: '3458764500000000003',
 		});
 		expect(await client([json({}, 403)]).c.getBoard(BOARD)).toBeNull();
 		expect(await client([json({}, 404)]).c.getBoard(BOARD)).toBeNull();
@@ -292,7 +293,10 @@ describe('MiroClient', () => {
 		expect(await client([json({ type: 'text', data: {} })]).c.getItem(BOARD, '1')).toMatchObject({
 			html: '',
 		});
-		expect(await client([json({})]).c.getBoard(BOARD)).toEqual({ id: BOARD, name: '' });
+		expect(await client([json({})]).c.getBoard(BOARD)).toEqual({ id: BOARD, name: '', teamId: null });
+		expect(await client([json({ team: { id: 7 } })]).c.getBoard(BOARD)).toMatchObject({
+			teamId: null,
+		});
 		expect(await client([json({})]).c.getFrameTitle(BOARD, '7')).toBe('');
 		expect(await client([json({})]).c.getItemTags(BOARD, '7')).toEqual([]);
 		expect(await client([json({})]).c.listConnectors(BOARD)).toEqual([]);

@@ -1,6 +1,9 @@
 // Adapted from apps/plane-discord/test/config-fixture.ts.
 import type { Config } from '../src/config.ts';
 
+/** The Miro team of the `acme` tenant of configOf (and of FakeMiro's boards by default). */
+export const TEAM_ID = '3458764500000000001';
+
 export const configOf = (): Config => ({
 	port: 8080,
 	planeUrl: 'https://plane.example.com',
@@ -15,7 +18,7 @@ export const configOf = (): Config => ({
 			workspaceId: '00000000-0000-4000-8000-000000000001',
 			auth: { clientId: 'client&id', clientSecret: 'sec', appInstallationId: 'inst' },
 			webhookSecret: 'hook',
-			miroTeamId: '3458764500000000001',
+			miroTeamId: TEAM_ID,
 			embed: true,
 			keepSource: true,
 			silenceHours: 72,

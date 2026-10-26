@@ -147,7 +147,7 @@ describe('createRuntime', () => {
 		});
 		await expect(rt.miro.getBoard('b')).rejects.toThrow('not connected');
 		store.putMiroToken(w.tenant.miroTeamId, '42', 'miro-token');
-		expect(await rt.miro.getBoard('b')).toEqual({ id: 'b', name: 'Доска' });
+		expect(await rt.miro.getBoard('b')).toEqual({ id: 'b', name: 'Доска', teamId: null });
 		expect(calls.at(-1)).toBe('GET https://api.miro.com/v2/boards/b Bearer miro-token');
 		await rt.plane.listProjects();
 		expect(calls.some((c) => c.includes('example-ws') && c.endsWith('Bearer bot'))).toBe(true);

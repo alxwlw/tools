@@ -3,12 +3,16 @@ import {
 	type AppCardInput,
 	type Connector,
 	type MiroApi,
+	type MiroBoard,
 	type MiroItem,
 	type Place,
 } from '../src/miro/rest.ts';
+import { TEAM_ID } from './config-fixture.ts';
 
 export type FakeBoard = {
 	name: string;
+	/** The board's team; by default the team of the fixture tenant. */
+	teamId: string | null;
 	/** A frame's title is the `html` of its `frame` item. */
 	items: Map<string, MiroItem>;
 	tags: Map<string, string[]>;
@@ -26,9 +30,10 @@ export class FakeMiro implements MiroApi {
 	#seq = 0;
 	#valid = true;
 
-	addBoard(id: string, name = 'Board'): FakeBoard {
+	addBoard(id: string, name = 'Board', teamId: string | null = TEAM_ID): FakeBoard {
 		const board: FakeBoard = {
 			name,
+			teamId,
 			items: new Map(),
 			tags: new Map(),
 			connectors: [],
@@ -87,11 +92,11 @@ export class FakeMiro implements MiroApi {
 		return this.#board(boardId, method);
 	}
 
-	async getBoard(boardId: string): Promise<{ id: string; name: string } | null> {
+	async getBoard(boardId: string): Promise<MiroBoard | null> {
 		this.#enter('getBoard');
 		const board = this.boards.get(boardId);
 		if (board === undefined || this.noAccess.has(boardId)) return null;
-		return { id: boardId, name: board.name };
+		return { id: boardId, name: board.name, teamId: board.teamId };
 	}
 
 	async getItem(boardId: string, itemId: string): Promise<MiroItem | null> {

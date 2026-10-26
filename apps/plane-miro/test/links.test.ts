@@ -189,6 +189,34 @@ describe('handleCommentLinks', () => {
 		expect(w.plane.links.size).toBe(0);
 	});
 
+	test('доска другой команды Miro → лог link.board_other_team, ни карточки, ни ссылки в задаче', async () => {
+		const w = setup();
+		w.miro.addBoard('uXjVforeign=', 'Чужая', '3458764500000000777');
+		await handleCommentLinks(w.rt, w.store, commented(href('uXjVforeign=', '1')), w.log);
+		expect(w.logs).toEqual([
+			{ event: 'link.board_other_team', level: 'warn', tenant: 'acme', boardId: 'uXjVforeign=' },
+		]);
+		expect(w.miro.calls).toEqual(['getBoard']);
+		expect(w.miro.cardsOn('uXjVforeign=')).toEqual([]);
+		expect(w.plane.links.size).toBe(0);
+	});
+
+	test('в ответе о доске нет команды → то же, что чужая команда', async () => {
+		const w = setup();
+		w.miro.addBoard('uXjVnoteam=', 'Без команды', null);
+		await handleLinkCreated(
+			w.rt,
+			w.store,
+			linked('https://miro.com/app/board/uXjVnoteam=/'),
+			w.log,
+		);
+		expect(w.logs).toEqual([
+			{ event: 'link.board_other_team', level: 'warn', tenant: 'acme', boardId: 'uXjVnoteam=' },
+		]);
+		expect(w.miro.calls).toEqual(['getBoard']);
+		expect(w.plane.links.size).toBe(0);
+	});
+
 	test('Miro не подключён → лог miro.not_connected, без исключения', async () => {
 		const w = setup();
 		w.miro.failNext('getBoard', new MiroNotConnected());
