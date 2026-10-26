@@ -17,6 +17,13 @@ export class FakeDiscord implements DiscordApi {
 	failures = new Map<keyof DiscordApi, DiscordApiError>();
 	/** Like `failures`, but the entry is consumed by the first call: the retry succeeds. */
 	failOnce = new Map<keyof DiscordApi, DiscordApiError>();
+	/**
+	 * Like `failOnce`, but for a call whose effect happened: Discord took the post and the response was lost.
+	 * `executeWebhook` stores the message, then throws.
+	 */
+	lostResponse = new Map<keyof DiscordApi, DiscordApiError>();
+	/** What webhooks posted, per thread, oldest first. */
+	posted = new Map<string, { id: string; webhookId: string | null; content: string }[]>();
 	calls: DiscordCall[] = [];
 	#seq = 0;
 
@@ -110,7 +117,25 @@ export class FakeDiscord implements DiscordApi {
 		message: OutMessage & { username?: string; avatarUrl?: string },
 	): Promise<{ id: string }> {
 		this.#enter('executeWebhook', webhookId, token, threadId, message);
-		return { id: this.#id() };
+		const id = this.#id();
+		this.posted.set(threadId, [
+			...(this.posted.get(threadId) ?? []),
+			{ id, webhookId, content: message.content },
+		]);
+		const lost = this.lostResponse.get('executeWebhook');
+		if (lost) {
+			this.lostResponse.delete('executeWebhook');
+			throw lost;
+		}
+		return { id };
+	}
+
+	async recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]> {
+		this.#enter('recentMessages', channelId, limit);
+		return [...(this.posted.get(channelId) ?? [])].reverse().slice(0, limit);
 	}
 
 	async openDm(userId: string): Promise<string> {

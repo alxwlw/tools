@@ -4,6 +4,7 @@
 import type { ChannelRoute, EventKind, Tenant } from './config.ts';
 import {
 	CHANNEL,
+	CONTENT_MAX,
 	deliveryNonce,
 	DISCORD_ERR,
 	type DiscordApi,
@@ -50,6 +51,8 @@ const WEBHOOK_NAME = 'Plane';
 // Discord refuses a webhook username that holds these (case-insensitive) and caps it at 80 characters.
 const USERNAME_BANNED = /discord|clyde/gi;
 const USERNAME_MAX = 80;
+// How far back a retry looks for its own post that Discord took before the response was lost.
+const DUP_LOOKBACK = 10;
 const IN_THREAD = '→ Discord: в тред задачи';
 const NO_CHANNEL = 'Канал для проекта не настроен';
 const NO_PROJECT = 'Не удалось отправить в Discord: проект не найден в Plane';
@@ -67,7 +70,13 @@ async function findProject(
 
 /** The author's Plane name made acceptable as a webhook username; empty after cleaning → `Plane`. */
 export function webhookUsername(displayName: string | undefined): string {
-	const clean = (displayName ?? '').replace(USERNAME_BANNED, '').replace(/\s+/g, ' ').trim();
+	// Repeat: the halves left by one pass can join into a new banned word («disdiscordcord»).
+	let name = displayName ?? '';
+	for (let prev = ''; prev !== name;) {
+		prev = name;
+		name = name.replace(USERNAME_BANNED, '');
+	}
+	const clean = name.replace(/\s+/g, ' ').trim();
 	return clean === '' ? WEBHOOK_NAME : truncate(clean, USERNAME_MAX);
 }
 
@@ -75,7 +84,8 @@ export function webhookUsername(displayName: string | undefined): string {
 export function webhookAvatar(avatarUrl: string | null | undefined): string | undefined {
 	if (!avatarUrl) return undefined;
 	try {
-		return new URL(avatarUrl).protocol === 'https:' ? avatarUrl : undefined;
+		const url = new URL(avatarUrl);
+		return url.protocol === 'https:' ? url.href : undefined;
 	} catch {
 		return undefined;
 	}
@@ -365,30 +375,61 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			deps.store.putWebhook(target.channelId, made.id, made.token);
 			return made;
 		};
+		// Execute Webhook takes no nonce: after a lost response the retry first looks for its own post in the thread.
+		// The queue calls this same `run` on each retry, so the flag lives in the closure.
+		let inDoubt = false;
+		const alreadyPosted = async (): Promise<boolean> => {
+			const hook = deps.store.getWebhook(target.channelId);
+			if (hook === null) return false;
+			const recent = await deps.discord.recentMessages(target.threadId, DUP_LOOKBACK);
+			return recent.some(
+				(m) => m.webhookId === hook.id && m.content === truncate(message.content, CONTENT_MAX),
+			);
+		};
+		const attempt = async () => {
+			// Read at run time: an earlier delivery of another event may have created it since.
+			const hook = deps.store.getWebhook(target.channelId) ?? (await create());
+			try {
+				await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
+			} catch (err) {
+				if (
+					!(
+						err instanceof DiscordApiError &&
+						err.status === 404 &&
+						err.code === DISCORD_ERR.UNKNOWN_WEBHOOK
+					)
+				)
+					throw err;
+				deps.log({
+					event: 'notify.webhook_gone',
+					level: 'warn',
+					tenant: rt.tenant.id,
+					channel: target.channelId,
+				});
+				const fresh = await create();
+				await deps.discord.executeWebhook(fresh.id, fresh.token, target.threadId, message);
+			}
+		};
 		return {
 			label: `${event.eventKey}→thread:${target.threadId}`,
 			run: async () => {
-				// Read at run time: an earlier delivery of another event may have created it since.
-				const hook = deps.store.getWebhook(target.channelId) ?? (await create());
-				try {
-					await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
-				} catch (err) {
-					if (
-						!(
-							err instanceof DiscordApiError &&
-							err.status === 404 &&
-							err.code === DISCORD_ERR.UNKNOWN_WEBHOOK
-						)
-					)
-						throw err;
+				if (inDoubt && (await alreadyPosted())) {
 					deps.log({
-						event: 'notify.webhook_gone',
+						event: 'notify.thread_dup_skipped',
 						level: 'warn',
 						tenant: rt.tenant.id,
-						channel: target.channelId,
+						thread: target.threadId,
 					});
-					const fresh = await create();
-					await deps.discord.executeWebhook(fresh.id, fresh.token, target.threadId, message);
+					return;
+				}
+				try {
+					await attempt();
+					inDoubt = false;
+				} catch (err) {
+					// Transport failure or 5xx: Discord may have taken the post. A 429 or 4xx did not.
+					if (err instanceof DiscordApiError && (err.status === 0 || err.status >= 500))
+						inDoubt = true;
+					throw err;
 				}
 			},
 		};

@@ -67,6 +67,11 @@ export interface DiscordApi {
 		threadId: string,
 		message: OutMessage & { username?: string; avatarUrl?: string },
 	): Promise<{ id: string }>;
+	/** The newest messages of a channel or thread, newest first (needs Read Message History). */
+	recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]>;
 	openDm(userId: string): Promise<string>;
 	editOriginal(interactionToken: string, message: OutMessage): Promise<void>;
 	deleteOriginal(interactionToken: string): Promise<void>;
@@ -89,7 +94,7 @@ export class DiscordApiError extends Error {
 }
 
 const API = 'https://discord.com/api/v10';
-const CONTENT_MAX = 2000;
+export const CONTENT_MAX = 2000;
 const POST_NAME_MAX = 100;
 const EMBED_TITLE_MAX = 256;
 const EMBED_DESCRIPTION_MAX = 4096;
@@ -281,6 +286,22 @@ export class DiscordRest implements DiscordApi {
 			},
 		);
 		return { id: str(res, 'id') };
+	}
+
+	async recentMessages(
+		channelId: string,
+		limit: number,
+	): Promise<{ id: string; webhookId: string | null; content: string }[]> {
+		const rows = await this.#bot(
+			'GET',
+			`/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}`,
+		);
+		if (!Array.isArray(rows)) throw new Error('Discord response: message list is not an array');
+		return rows.map((row) => ({
+			id: str(row, 'id'),
+			webhookId: optStr(row, 'webhook_id'),
+			content: optStr(row, 'content') ?? '',
+		}));
 	}
 
 	async openDm(userId: string): Promise<string> {

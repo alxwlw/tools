@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { DiscordApiError } from '../src/discord/rest.ts';
 import type { GatewayMessage } from '../src/discord/gateway.ts';
+import { SerialQueue } from '../src/queue.ts';
 import { webhookAvatar, webhookUsername } from '../src/notify.ts';
 import { createThreadSync } from '../src/thread-sync.ts';
 import { userMap } from '../src/text.ts';
@@ -183,6 +184,16 @@ describe('createNotifier: comment.created → тред', () => {
 		expect(webhookAvatar(null)).toBeUndefined();
 	});
 
+	test('имя: остатки после вычистки не склеиваются в запрещённое слово', () => {
+		for (const n of ['disdiscordcord', 'DiscClydeord', 'clclydeyde'])
+			expect(webhookUsername(n)).not.toMatch(/discord|clyde/i);
+		expect(webhookUsername('disdiscordcord')).toBe('Plane');
+	});
+
+	test('аватар: возвращается разобранный href, а не исходная строка', () => {
+		expect(webhookAvatar(' https://cdn.example.com/a.png')).toBe('https://cdn.example.com/a.png');
+	});
+
 	test('аватар не https → в webhook нет avatarUrl', async () => {
 		const w = bound();
 		w.plane.members = [{ id: CAROL, displayName: 'Carol', avatarUrl: '/media/c.png' }];
@@ -228,7 +239,7 @@ describe('createNotifier: comment.created → тред', () => {
 		]);
 	});
 
-	test('эхо webhook, созданного доставкой, не становится комментарием (F1)', async () => {
+	test('эхо webhook, созданного доставкой, не становится комментарием', async () => {
 		const w = bound();
 		await runAll(await w.notify(comment('<p>из Plane</p>')));
 		const made = w.store.getWebhook(FORUM)!;
@@ -271,6 +282,73 @@ describe('createNotifier: comment.created → тред', () => {
 		// positive control: a foreign webhook's message does become a comment
 		await sync({ ...echo('foreign-hook'), applicationId: null });
 		expect(w.plane.createdComments).toHaveLength(1);
+	});
+});
+
+describe('createNotifier: повтор доставки в тред', () => {
+	const queueOf = (w: ReturnType<typeof bound>) =>
+		new SerialQueue({
+			log: (e) => w.logs.push({ event: e.event, error: e.error }),
+			delaysMs: [0],
+			sleep: async () => {},
+		});
+	const run = async (w: ReturnType<typeof bound>) => {
+		const q = queueOf(w);
+		for (const d of await w.notify(comment('<p>один раз</p>'))) q.push(d.label, d.run);
+		await q.idle();
+	};
+
+	test('ответ потерян, но Discord пост принял → повтор очереди не дублирует сообщение', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		w.discord.lostResponse.set(
+			'executeWebhook',
+			new DiscordApiError(0, 'POST', '/webhooks/wh-old/:token'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
+		expect(w.discord.callsOf('recentMessages')).toEqual([[THREAD, 10]]);
+		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toHaveLength(1);
+	});
+
+	test('сбой до поста (5xx без сообщения) → повтор постит ровно один раз', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		w.discord.failOnce.set(
+			'executeWebhook',
+			new DiscordApiError(502, 'POST', '/webhooks/wh-old/:token'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
+		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
+		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toEqual([]);
+	});
+
+	test('429 — пост не принят: повтор без чтения истории', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		w.discord.failOnce.set(
+			'executeWebhook',
+			new DiscordApiError(429, 'POST', '/webhooks/wh-old/:token'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
+		expect(w.discord.callsOf('recentMessages')).toEqual([]);
+	});
+
+	test('такой же текст в треде от другого webhook или другой текст → пост не пропускается', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		w.discord.posted.set(THREAD, [
+			{ id: 'x1', webhookId: 'wh-foreign', content: 'один раз' },
+			{ id: 'x2', webhookId: 'wh-old', content: 'совсем другое' },
+		]);
+		w.discord.failOnce.set(
+			'executeWebhook',
+			new DiscordApiError(0, 'POST', '/webhooks/wh-old/:token'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(3);
 	});
 });
 

@@ -570,3 +570,27 @@ describe('DiscordRest: webhooks приложения', () => {
 		expect(`${down.message}${down.stack}`).not.toContain('SECRET');
 	});
 });
+
+describe('DiscordRest: recentMessages', () => {
+	test('GET /channels/{id}/messages?limit=: id, webhookId и content', async () => {
+		const { calls, rest } = stub([
+			{
+				status: 200,
+				body: [
+					{ id: 'm2', webhook_id: 'w1', content: 'привет', extra: 1 },
+					{ id: 'm1', content: 'без webhook' },
+				],
+			},
+		]);
+		expect(await rest.recentMessages('t1', 10)).toEqual([
+			{ id: 'm2', webhookId: 'w1', content: 'привет' },
+			{ id: 'm1', webhookId: null, content: 'без webhook' },
+		]);
+		expect(calls[0]).toMatchObject({ url: `${API}/channels/t1/messages?limit=10`, method: 'GET' });
+	});
+
+	test('recentMessages: не массив → ошибка', async () => {
+		const { rest } = stub([{ status: 200, body: {} }]);
+		expect(String(await failure(rest.recentMessages('t1', 10)))).toContain('not an array');
+	});
+});
