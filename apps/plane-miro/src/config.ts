@@ -9,7 +9,7 @@ export type Tenant = {
 	auth: PlaneAuthConfig;
 	webhookSecret: string;
 	miroTeamId: string;
-	/** liq-egn only: an Embed block of the card's place goes into the work item description. */
+	/** Enabled per tenant: an Embed block of the card's place goes into the work item description. */
 	embed: boolean;
 	/** true: the source item stays and the card goes next to it (design §3.1, probe Task 1). */
 	keepSource: boolean;
