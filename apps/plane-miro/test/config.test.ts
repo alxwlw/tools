@@ -278,6 +278,12 @@ describe('loadConfig', () => {
 			'tenants[0].hiddenProjects must be an array',
 		],
 		['hiddenProjects с числом', (t) => (t.hiddenProjects = [5]), 'tenants[0].hiddenProjects[0]'],
+		[
+			// String(['<uuid>']) is the UUID itself: only the string check refuses it
+			'hiddenProjects с UUID в массиве',
+			(t) => (t.hiddenProjects = [['00000000-0000-4000-8000-000000000013']]),
+			'tenants[0].hiddenProjects[0] must be a UUID',
+		],
 	];
 	for (const [name, mutate, path] of badFile) {
 		test(`некорректный файл: ${name} — ошибка с путём`, () => {
