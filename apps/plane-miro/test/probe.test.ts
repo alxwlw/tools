@@ -159,6 +159,40 @@ test('--step переименовывает файл plane-read: два запу
 	expect(logs.join('\n')).not.toContain('"t"');
 });
 
+test('--tenant: acme по умолчанию и по имени, beta по имени, другое — ошибка; plane-token спрашивает оба', async () => {
+	const env = {
+		PROBE_PLANE_URL: 'https://plane.example.com',
+		PROBE_PLANE_CLIENT_ID: 'c',
+		PROBE_PLANE_CLIENT_SECRET: 's',
+		PROBE_ACME_WORKSPACE: 'ws-acme',
+		PROBE_ACME_INSTALLATION_ID: 'i-acme',
+		PROBE_BETA_WORKSPACE: 'ws-beta',
+		PROBE_BETA_INSTALLATION_ID: 'i-beta',
+	};
+	const urls: string[] = [];
+	const fetchFn = (url: string): Promise<Response> => {
+		urls.push(url);
+		return Promise.resolve(
+			new Response(JSON.stringify(url.endsWith('/auth/o/token/') ? { access_token: 't' } : [])),
+		);
+	};
+	const workspaces = () =>
+		urls.filter((u) => u.includes('/workspaces/')).map((u) => u.split('/')[6]);
+	const read = (...extra: string[]) =>
+		main(['plane-read', 'p', 'a', ...extra, '--out', out], env, fetchFn);
+	expect(await read()).toBe(0);
+	expect(await read('--tenant', 'acme', '--step', 'acme')).toBe(0);
+	expect(await read('--tenant', 'beta', '--step', 'beta')).toBe(0);
+	expect(workspaces()).toEqual(['ws-acme', 'ws-acme', 'ws-beta']);
+	// console.error is the spy of beforeEach
+	const errors = console.error as unknown as { mock: { calls: unknown[][] } };
+	expect(await read('--tenant', 'gamma')).toBe(1);
+	expect(String(errors.mock.calls.at(-1)?.[0])).toBe('--tenant must be acme or beta, got gamma');
+	urls.length = 0;
+	expect(await main(['plane-token', '--out', out], env, fetchFn)).toBe(0);
+	expect(workspaces()).toEqual(['ws-acme', 'ws-beta']);
+});
+
 test('miro-replace: PATCH переводит нужный конец коннектора на карточку (start и end)', async () => {
 	const patched: Record<string, unknown> = {};
 	const ends = { id: 'c2', startItem: { id: 's3' }, endItem: { id: 's1' } };
