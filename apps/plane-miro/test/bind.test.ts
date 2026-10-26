@@ -106,6 +106,7 @@ describe('bindItem', () => {
 			w.log,
 		);
 		const source = w.store.getSource('acme', BOARD, '101');
+		const planeCalls = w.plane.calls.length;
 		const cards = w.miro.cardsOn(BOARD);
 		w.miro.calls.length = 0;
 		expect(await bindItem(w.rt, w.store, bind(), w.log)).toEqual({
@@ -116,6 +117,8 @@ describe('bindItem', () => {
 		expect(w.store.getSource('acme', BOARD, '101')).toEqual(source);
 		expect(w.miro.cardsOn(BOARD)).toEqual(cards);
 		expect(w.plane.createdComments).toEqual([]);
+		// no Plane read at all: the answer comes from the recorded source
+		expect(w.plane.calls).toHaveLength(planeCalls);
 		expect(w.miro.calls.filter((c) => MIRO_WRITES.includes(c))).toEqual([]);
 	});
 
@@ -170,18 +173,6 @@ describe('bindItem', () => {
 		expect(w.miro.connector('c1')?.startItemId).toBe('101');
 		expect(w.plane.createdComments).toHaveLength(1);
 		expect(w.plane.links.get('w-ex')?.[0]?.url).toBe(boardLink(BOARD, cardId));
-	});
-
-	test('источник есть, задача удалена в Plane → источник забыт; привязка к живой задаче проходит', async () => {
-		const w = withItem({ keepSource: true });
-		seedItem(w.plane, 'w-new', { sequenceId: 8 });
-		await bindItem(w.rt, w.store, bind(), w.log);
-		w.plane.items.delete('w-ex');
-		expect(await bindItem(w.rt, w.store, bind({ workItemId: 'w-new' }), w.log)).toMatchObject({
-			ok: true,
-			key: 'LAB-8',
-		});
-		expect(w.store.getSource('acme', BOARD, '101')).toMatchObject({ workItemId: 'w-new' });
 	});
 
 	test('источник есть, задача удалена в Plane → not_found', async () => {

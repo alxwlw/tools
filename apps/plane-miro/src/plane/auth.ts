@@ -21,7 +21,7 @@ export const PLANE_SCOPES: readonly string[] = [
 	'workspaces.members:read',
 ];
 
-/** Non-2xx (or a body without a token) from /auth/o/token/. Carries the status, never the response body. */
+/** Non-2xx (or a body without a token) from /auth/o/token/; status 0 for a transport failure or timeout. Never carries the response body. */
 export class PlaneAuthError extends Error {
 	override name = 'PlaneAuthError';
 
@@ -58,23 +58,31 @@ export function botTokenAuth(opts: {
 	let generation = 0;
 
 	async function request(): Promise<Cached> {
-		const res = await doFetch(url, {
-			method: 'POST',
-			headers: {
-				Authorization: `Basic ${basic}`,
-				'Content-Type': 'application/x-www-form-urlencoded',
-			},
-			body: new URLSearchParams({
-				grant_type: 'client_credentials',
-				app_installation_id: opts.appInstallationId,
-				scope: PLANE_SCOPES.join(' '),
-			}).toString(),
-			signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
-		});
+		let res: Response;
+		let text: string;
+		try {
+			res = await doFetch(url, {
+				method: 'POST',
+				headers: {
+					Authorization: `Basic ${basic}`,
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+				body: new URLSearchParams({
+					grant_type: 'client_credentials',
+					app_installation_id: opts.appInstallationId,
+					scope: PLANE_SCOPES.join(' '),
+				}).toString(),
+				signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+			});
+			text = await res.text();
+		} catch {
+			// A refused connection, a reset or a timeout: status 0, which the queue retries.
+			throw new PlaneAuthError(0);
+		}
 		if (!res.ok) throw new PlaneAuthError(res.status);
 		let body: unknown = null;
 		try {
-			body = JSON.parse(await res.text());
+			body = JSON.parse(text);
 		} catch {
 			// Falls through to the shape check below.
 		}

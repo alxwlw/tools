@@ -17,6 +17,15 @@ export const CACHE_TTL_MS = 10 * 60_000;
 /** A lookup that misses the projects cache reloads it, but not more often than this. */
 export const MISS_REFRESH_MS = 30_000;
 
+/** keyOf: the project is not in the workspace's project list (deleted, or created after the last reload). */
+export class UnknownProject extends Error {
+	override name = 'UnknownProject';
+
+	constructor() {
+		super('unknown project');
+	}
+}
+
 export type TenantRuntime = {
 	tenant: Tenant;
 	plane: PlaneApi;
@@ -94,7 +103,7 @@ export function createRuntime(
 		async keyOf(projectId, sequenceId) {
 			const known = (list: ProjectSummary[]) => list.find((p) => p.id === projectId);
 			const project = known(await allProjects()) ?? known(await allProjects(true));
-			if (project === undefined) throw new Error('unknown project');
+			if (project === undefined) throw new UnknownProject();
 			return `${project.identifier}-${sequenceId}`;
 		},
 		async state(projectId, stateId) {

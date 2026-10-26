@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { MiroApiError, MiroNotConnected } from '../src/miro/rest.ts';
 import { createApi } from '../src/api.ts';
+import { createRuntime } from '../src/runtime.ts';
 import { PlaneAuthError } from '../src/plane/auth.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
 import { BOARD, jwt, MIRO_WRITES, NOW_SEC, seedItem, world } from './world.ts';
@@ -394,7 +395,7 @@ describe('POST /miro/api/convert', () => {
 		}
 	});
 
-	test('четыре кода отказа после JWT пишут по одной строке api.rejected, без текста', async () => {
+	test('три кода отказа после JWT пишут по строке api.rejected без текста; неизвестный маршрут не пишет', async () => {
 		const w = world();
 		w.miro.noAccess.add(BOARD);
 		await w.call('POST', '/miro/api/convert', { body: convertBody() });
@@ -406,6 +407,32 @@ describe('POST /miro/api/convert', () => {
 			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'unknown_project' },
 			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'bad_request' },
 		]);
+	});
+
+	test('отказ соединения при получении токена Plane → 502 plane_failed JSON, одна строка api.failed', async () => {
+		const w = world();
+		const rt = createRuntime(w.tenant, {
+			planeUrl: 'https://plane.example.com',
+			store: w.store,
+			miro: w.miro,
+			fetch: async () => {
+				throw Object.assign(new TypeError('Unable to connect'), { code: 'ConnectionRefused' });
+			},
+		});
+		const api = createApi({
+			config: w.config,
+			runtimes: new Map([[w.tenant.id, rt]]),
+			store: w.store,
+			log: w.log,
+			nowSec: () => NOW_SEC,
+		});
+		const res = await api(
+			new Request('http://x/miro/api/projects', { headers: { authorization: `Bearer ${jwt()}` } }),
+			new URL('http://x/miro/api/projects'),
+		);
+		expect([res.status, await res.json()]).toEqual([502, { error: 'plane_failed' }]);
+		expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
+		expect(w.logs.filter((l) => l.event === 'api.failed')).toHaveLength(1);
 	});
 
 	test('известный проект не перечитывает список проектов', async () => {
@@ -573,6 +600,23 @@ describe('GET /miro/api/card', () => {
 				status: 404,
 				body: { error: 'unknown_card' },
 			});
+	});
+
+	test('карточка удалённого проекта (ключ не собрать) → 404 unknown_card, а не 500', async () => {
+		const w = setup();
+		seedItem(w.plane, 'w-lost', { projectId: 'p-lost' });
+		w.store.putCard({
+			tenant: 'acme',
+			boardId: BOARD,
+			cardId: '559',
+			workItemId: 'w-lost',
+			projectId: 'p-lost',
+			fieldsHash: null,
+		});
+		expect(await json(await w.call('GET', path('559')))).toEqual({
+			status: 404,
+			body: { error: 'unknown_card' },
+		});
 	});
 
 	test('без board или item, с мусором в них → 400 bad_request', async () => {

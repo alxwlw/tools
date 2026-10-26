@@ -1,6 +1,7 @@
 // Adapted from apps/plane-discord/test/plane-auth.test.ts.
 import { describe, expect, test } from 'bun:test';
 import { botTokenAuth, PLANE_SCOPES, PlaneAuthError } from '../src/plane/auth.ts';
+import { isRetryable } from '../src/queue.ts';
 
 type Call = { url: string; headers: Record<string, string>; body: string; signal: unknown };
 
@@ -113,6 +114,42 @@ describe('botTokenAuth', () => {
 		expect((await second).Authorization).toBe('Bearer tok-1');
 		expect((await auth.headers()).Authorization).toBe('Bearer tok-1');
 		expect(calls).toHaveLength(2);
+	});
+
+	test('отказ соединения, таймаут и обрыв чтения тела токена — PlaneAuthError(0), который очередь повторяет', async () => {
+		const refused = make(
+			async () => {
+				throw Object.assign(new TypeError('Unable to connect'), { code: 'ConnectionRefused' });
+			},
+			() => 0,
+		);
+		const e1 = await refused.headers().then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(e1).toBeInstanceOf(PlaneAuthError);
+		expect((e1 as PlaneAuthError).status).toBe(0);
+		expect((e1 as PlaneAuthError).message).toBe('Plane token request → 0');
+		expect(isRetryable(e1)).toBe(true);
+		const cut = make(
+			async () =>
+				({
+					ok: true,
+					status: 200,
+					text: async () => {
+						throw new DOMException('aborted', 'AbortError');
+					},
+				}) as unknown as Response,
+			() => 0,
+		);
+		const e2 = await cut.headers().then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(e2).toBeInstanceOf(PlaneAuthError);
+		expect((e2 as PlaneAuthError).status).toBe(0);
+		// a refused token request is not cached: the next call asks again
+		expect(isRetryable(new PlaneAuthError(401))).toBe(false);
 	});
 
 	test('401 от /auth/o/token/ — PlaneAuthError 401, тела ответа в message нет', async () => {

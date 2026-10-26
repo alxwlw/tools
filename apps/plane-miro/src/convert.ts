@@ -296,10 +296,12 @@ async function attempt(
 type Resolved = { workItem: WorkItem; key: string; cardId: string | null };
 
 /**
- * The work item of a sticker. A recorded source wins, in its own project whatever the request names; its work
- * item gone from Plane forgets the source. Otherwise the item is bound (bind) or created (convert): the source
- * is recorded the moment Plane confirms the create, before any read that can fail, so a retry cannot create a
- * second item in another project. A source whose key is empty gets its key computed.
+ * The work item of a sticker. A recorded source wins, in its own project whatever the request names. When its
+ * item reads as missing, a create in that project tells deleted (created: the source is overwritten, its card
+ * link cleared) from hidden (409 on the recorded id: already_linked, source and card kept). Otherwise the item
+ * is bound (bind) or created (convert): the source is recorded the moment Plane confirms the create, before any
+ * read that can fail, so a retry cannot create a second item in another project. A source whose key is empty
+ * gets its key computed.
  */
 async function resolveWorkItem(
 	ctx: Ctx,
@@ -321,16 +323,15 @@ async function resolveWorkItem(
 	};
 
 	const recorded = store.getSource(tenantId, boardId, itemId);
+	if (recorded !== null && mode.kind === 'bind' && mode.workItemId !== recorded.workItemId)
+		throw new ItemFailure('already_linked');
 	if (recorded !== null) {
 		const live = await plane(() => rt.plane.getWorkItem(recorded.projectId, recorded.workItemId));
 		if (live !== null) {
-			if (mode.kind === 'bind' && mode.workItemId !== recorded.workItemId)
-				throw new ItemFailure('already_linked');
 			if (recorded.key !== '')
 				return { workItem: live, key: recorded.key, cardId: recorded.cardId };
 			return { workItem: live, key: await recordKey(live), cardId: null };
 		}
-		store.deleteSource(tenantId, boardId, itemId);
 	}
 
 	if (mode.kind === 'bind') {
@@ -338,11 +339,14 @@ async function resolveWorkItem(
 		if (target === null) throw new ItemFailure('not_found');
 		return { workItem: target, key: await recordKey(target), cardId: null };
 	}
+	// A recorded source whose item reads as missing stays in its project: Plane's external-id conflict is per
+	// project, and an archived item must answer 409 there instead of getting a twin elsewhere.
+	const projectId = recorded?.projectId ?? mode.projectId;
 	const tags = TAGGED.includes(item.type)
 		? await miro(() => rt.miro.getItemTags(boardId, itemId))
 		: [];
 	const created = await plane(() =>
-		rt.plane.createWorkItem(mode.projectId, {
+		rt.plane.createWorkItem(projectId, {
 			name: truncate(lines[0] as string, NAME_MAX),
 			description_html: descriptionOf(lines, tags, ctx.author),
 			external_source: SOURCE,
@@ -350,13 +354,11 @@ async function resolveWorkItem(
 		}),
 	);
 	if (created.created)
-		store.putSource(tenantId, boardId, itemId, {
-			workItemId: created.id,
-			projectId: mode.projectId,
-			key: '',
-		});
-	const workItem = await plane(() => rt.plane.getWorkItem(mode.projectId, created.id));
-	// null after a 409: the external id belongs to an item Plane hides from reads (archived, draft, triage)
+		store.putSource(tenantId, boardId, itemId, { workItemId: created.id, projectId, key: '' });
+	// the recorded item is hidden from reads (archived, draft, triage), not gone: its source and card stay
+	else if (created.id === recorded?.workItemId) throw new ItemFailure('already_linked');
+	const workItem = await plane(() => rt.plane.getWorkItem(projectId, created.id));
+	// null after a 409: the external id belongs to an item Plane hides from reads
 	if (workItem === null) throw new ItemFailure('already_linked');
 	return { workItem, key: await recordKey(workItem), cardId: null };
 }

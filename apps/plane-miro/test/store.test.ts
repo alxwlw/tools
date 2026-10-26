@@ -161,26 +161,6 @@ describe('Store: источники, карточки, токены', () => {
 	});
 });
 
-describe('Store: deleteSource', () => {
-	test('удаляет источник только этого стикера', () => {
-		const store = new Store(':memory:');
-		const row = { workItemId: 'w', projectId: 'p', key: 'LAB-1' };
-		store.putSource('acme', 'b1', '1', row);
-		store.putSource('acme', 'b1', '2', row);
-		store.putSource('acme', 'b2', '1', row);
-		store.putSource('beta', 'b1', '1', row);
-		store.deleteSource('acme', 'b1', '1');
-		expect(store.getSource('acme', 'b1', '1')).toBeNull();
-		for (const [t, b, i] of [
-			['acme', 'b1', '2'],
-			['acme', 'b2', '1'],
-			['beta', 'b1', '1'],
-		] as const)
-			expect(store.getSource(t, b, i)).not.toBeNull();
-		store.deleteSource('acme', 'b1', '1');
-	});
-});
-
 describe('Store: файл', () => {
 	test('файл базы переживает переоткрытие', () => {
 		const path = tmpPath();

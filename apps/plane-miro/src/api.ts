@@ -5,7 +5,7 @@ import { verifyIdToken } from './miro/jwt.ts';
 import { MiroApiError, MiroNotConnected } from './miro/rest.ts';
 import { PlaneAuthError } from './plane/auth.ts';
 import { PlaneApiError, type SearchHit } from './plane/client.ts';
-import type { TenantRuntime } from './runtime.ts';
+import { type TenantRuntime, UnknownProject } from './runtime.ts';
 import { readBounded } from './server.ts';
 import type { Store } from './store.ts';
 
@@ -164,7 +164,10 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 		const workItem = await rt.plane.getWorkItem(row.projectId, row.workItemId);
 		if (workItem === null) throw unknown;
 		const [key, state, assignees] = await Promise.all([
-			rt.keyOf(workItem.projectId, workItem.sequenceId),
+			// a card of a deleted project: nothing to show
+			rt.keyOf(workItem.projectId, workItem.sequenceId).catch((error: unknown) => {
+				throw error instanceof UnknownProject ? unknown : error;
+			}),
 			rt.state(workItem.projectId, workItem.stateId),
 			rt.memberNames(workItem.assignees),
 		]);
