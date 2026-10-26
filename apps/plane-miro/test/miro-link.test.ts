@@ -72,4 +72,10 @@ describe('findMiroLinks', () => {
 			findMiroLinks('https://miro.com/app/board/a%20b/ https://miro.com/app/board/%E0%A4%A/'),
 		).toEqual([]);
 	});
+	test('длинный хвост из точек не вешает разбор', () => {
+		const started = performance.now();
+		const found = findMiroLinks(`https://miro.com/app/board/uXjVb1=/?x=${'.'.repeat(200_000)}a`);
+		expect(found).toEqual([{ boardId: 'uXjVb1=', itemId: null }]);
+		expect(performance.now() - started).toBeLessThan(200);
+	});
 });

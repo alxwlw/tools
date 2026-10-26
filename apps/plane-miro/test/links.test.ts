@@ -196,13 +196,38 @@ describe('handleCommentLinks', () => {
 		expect(w.logs).toContainEqual({ event: 'miro.not_connected', level: 'error', tenant: 'acme' });
 	});
 
-	test('повторяемая ошибка Miro уходит наружу, неповторяемая тоже', async () => {
+	test('повторяемая ошибка Miro на первой ссылке: вторая доска получает карточку, ошибка уходит наружу', async () => {
 		const w = setup();
 		w.miro.failNext('createAppCard', new MiroApiError(503, 'POST', '/v2/boards/{board}/app_cards'));
 		await expect(
-			handleCommentLinks(w.rt, w.store, commented(href(BOARD)), w.log),
+			handleCommentLinks(w.rt, w.store, commented(href(BOARD) + href(BOARD2)), w.log),
 		).rejects.toBeInstanceOf(MiroApiError);
 		expect(w.store.cardOnBoard('acme', 'w1', BOARD)).toBeNull();
+		expect(w.miro.cardsOn(BOARD2)).toHaveLength(1);
+	});
+
+	test('неповторяемая ошибка Miro на первой ссылке → лог link.card_failed, вторая доска получает карточку', async () => {
+		const w = setup();
+		w.miro.failNext('createAppCard', new MiroApiError(403, 'POST', '/v2/boards/{board}/app_cards'));
+		await handleCommentLinks(w.rt, w.store, commented(href(BOARD) + href(BOARD2)), w.log);
+		expect(w.logs).toContainEqual({
+			event: 'link.card_failed',
+			level: 'error',
+			tenant: 'acme',
+			boardId: BOARD,
+			status: 403,
+		});
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(0);
+		expect(w.miro.cardsOn(BOARD2)).toHaveLength(1);
+	});
+
+	test('чужая ошибка (не Miro, не повторяемая) уходит сразу', async () => {
+		const w = setup();
+		w.miro.failNext('createAppCard', new RangeError('boom'));
+		await expect(
+			handleCommentLinks(w.rt, w.store, commented(href(BOARD) + href(BOARD2)), w.log),
+		).rejects.toBeInstanceOf(RangeError);
+		expect(w.miro.cardsOn(BOARD2)).toHaveLength(0);
 	});
 
 	test('фикстура пробы plane-comment-miro-link.json → карточка на доске из ссылки', async () => {

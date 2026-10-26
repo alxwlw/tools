@@ -2,9 +2,10 @@ import { boardLink, cardFor, fieldsHash, linkTitle } from './card.ts';
 import { besidePlace } from './convert.ts';
 import type { Log } from './log.ts';
 import { findMiroLinks, type MiroLink } from './miro/link.ts';
-import { MiroNotConnected } from './miro/rest.ts';
+import { MiroApiError, MiroNotConnected } from './miro/rest.ts';
 import type { WorkItem } from './plane/client.ts';
 import type { PlaneEvent } from './plane/webhook.ts';
+import { isRetryable } from './queue.ts';
 import type { TenantRuntime } from './runtime.ts';
 import type { Store } from './store.ts';
 
@@ -33,7 +34,29 @@ async function placeAll(
 ): Promise<void> {
 	const workItem = await eligible(rt, event, links);
 	if (workItem === null) return;
-	for (const link of links) await placeCardForLink(rt, store, workItem, link, log);
+	// One link's failure must not cost the others their card; a retryable one is thrown after the rest were tried
+	// (the boards already placed are idempotent on the retry).
+	let retry: unknown;
+	let failed = false;
+	for (const link of links) {
+		try {
+			await placeCardForLink(rt, store, workItem, link, log);
+		} catch (error) {
+			if (isRetryable(error)) {
+				if (!failed) retry = error;
+				failed = true;
+			} else if (error instanceof MiroApiError) {
+				log({
+					event: 'link.card_failed',
+					level: 'error',
+					tenant: rt.tenant.id,
+					boardId: link.boardId,
+					status: error.status,
+				});
+			} else throw error;
+		}
+	}
+	if (failed) throw retry;
 }
 
 export function handleCommentLinks(

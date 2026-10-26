@@ -7,7 +7,7 @@ const LINK =
 const BOARD_ID = /^[A-Za-z0-9_=-]{1,64}$/;
 const WIDGET_ID = /^\d{1,24}$/;
 /** Punctuation that ends a sentence, not a URL. */
-const TRAILING = /[.,;:!)]+$/;
+const TRAILING = '.,;:!)';
 
 function decode(raw: string): string | null {
 	try {
@@ -24,7 +24,11 @@ export function findMiroLinks(html: string): MiroLink[] {
 		const boardId = decode(match[1] as string);
 		if (boardId === null || !BOARD_ID.test(boardId)) continue;
 		if (out.some((l) => l.boardId === boardId)) continue;
-		const rest = (match[2] as string).replace(TRAILING, '');
+		let rest = match[2] as string;
+		// A loop from the end: a regex over a 4 MiB tail of dots is quadratic.
+		let end = rest.length;
+		while (end > 0 && TRAILING.includes(rest[end - 1] as string)) end--;
+		rest = rest.slice(0, end);
 		const query = rest.split('#')[0]?.split('?')[1] ?? '';
 		const widget = new URLSearchParams(query).get('moveToWidget');
 		out.push({ boardId, itemId: widget !== null && WIDGET_ID.test(widget) ? widget : null });
