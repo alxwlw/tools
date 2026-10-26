@@ -26,8 +26,20 @@ paths = [
   '''\.github/workflows/plane-discord-image\.yml''',
   '''apps/plane-discord/test/index\.test\.ts''',
   '''apps/plane-discord/test/index-process\.test\.ts''',
+  '''apps/plane-discord/test/index-world\.ts''',
 ]
 regexes = ['''^123456789012345678$''']
+
+# Fake bot token of the fake Gateway (generic-api-key rule). gateway.test.ts
+# held it before the harness was split out; the path stays for history scans.
+[[allowlists]]
+description = "fake bot token in plane-discord gateway tests"
+condition = "AND"
+paths = [
+  '''apps/plane-discord/test/gateway-harness\.ts''',
+  '''apps/plane-discord/test/gateway\.test\.ts''',
+]
+regexes = ['''^tok-SECRET-9f3a$''']
 
 # The list of required env names in plane-discord's config: the
 # discord-client-secret rule reads the next name as a secret.
