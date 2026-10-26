@@ -148,7 +148,8 @@ export async function startService(
 		now,
 	});
 
-	/** A signed-in front's convert or bind: only these may outlive the idle timeout, so an anonymous stalled body cannot. */
+	/** A signed-in front's convert or bind: only these may outlive the idle timeout, so an anonymous stalled body cannot.
+	 * The API also answers 401/403/405 before it reads a body, which keeps an anonymous stalled body under the timeout. */
 	const longCall = (req: Request): boolean => {
 		if (req.method !== 'POST' || !LONG_ROUTES.includes(new URL(req.url).pathname)) return false;
 		const token = BEARER.exec(req.headers.get('authorization') ?? '')?.[1];

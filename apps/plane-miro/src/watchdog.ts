@@ -11,7 +11,7 @@ const errorName = (error: unknown): string => (error instanceof Error ? error.na
 
 /**
  * Per tenant: Plane silence (log only) and the Miro service token. One tenant's failure never stops the others.
- * Plane's own webhook status is not readable with a bot token (403, design §10), so silence is all there is.
+ * Plane's own webhook status is not readable with a bot token (403, discord design §10), so silence is all there is.
  */
 export async function checkHealth(deps: {
 	runtimes: ReadonlyMap<string, TenantRuntime>;

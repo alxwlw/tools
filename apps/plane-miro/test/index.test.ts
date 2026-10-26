@@ -439,16 +439,47 @@ describe('startService: таймеры', () => {
 		expect(w.ticks.map((t) => t.ms)).toEqual([15 * 60_000, 24 * 60 * 60_000]);
 	});
 
-	test('тик сторожа: нет токена Miro → miro.not_connected; сбой сторожа не роняет сервис', async () => {
+	test('тик сторожа: нет токена Miro → miro.not_connected один раз за два тика', async () => {
 		const w = world();
 		w.miro.failNext('tokenValid', new MiroNotConnected());
+		w.miro.failNext('tokenValid', new MiroNotConnected());
 		await start(w);
-		w.ticks[0]?.tick();
-		await new Promise((resolve) => setImmediate(resolve));
-		await new Promise((resolve) => setImmediate(resolve));
-		expect(w.entries().find((e) => e.event === 'miro.not_connected')).toMatchObject({
+		for (let i = 0; i < 2; i++) {
+			w.ticks[0]?.tick();
+			for (let j = 0; j < 4; j++) await new Promise((resolve) => setImmediate(resolve));
+		}
+		expect(w.miro.calls.filter((c) => c === 'tokenValid')).toHaveLength(2);
+		expect(w.entries().filter((e) => e.event === 'miro.not_connected')).toMatchObject([
+			{ level: 'error', tenant: 'acme' },
+		]);
+	});
+
+	test('задача очереди не выполнена → job.dropped на уровне error с меткой <kind>:<tenant>', async () => {
+		const w = world();
+		w.options.runtimeFor = (tenant, store) => {
+			store.putCard({
+				tenant: 'acme',
+				boardId: BOARD,
+				cardId: '900',
+				workItemId: ITEM,
+				projectId: PROJECT,
+				fieldsHash: 'x',
+			});
+			const rt = createRuntime(tenant, {
+				planeUrl: 'https://plane.example.com',
+				store,
+				plane: w.plane,
+				miro: w.miro,
+			});
+			rt.state = () => Promise.reject(new Error('x'));
+			return rt;
+		};
+		const { service, url } = await start(w);
+		await fetch(url('/plane/webhook'), stateDelivery());
+		await service.idle();
+		expect(w.entries().find((e) => e.event === 'job.dropped')).toMatchObject({
 			level: 'error',
-			tenant: 'acme',
+			label: 'workitem.changed:acme',
 		});
 	});
 
@@ -460,10 +491,14 @@ describe('startService: таймеры', () => {
 		await start(w);
 		const store = w.stores[0] as Store;
 		expect(store.claim('old', clock)).toBe(true);
-		clock += 3 * DAY;
+		clock += DAY + 3_600_000;
+		expect(store.claim('edge', clock)).toBe(true);
+		clock += 2 * DAY - 3_600_000;
 		expect(store.claim('young', clock)).toBe(true);
 		clock += 28 * DAY;
 		w.ticks[1]?.tick();
+		// aged 29 d 23 h: still inside the window
+		expect(store.claim('edge', clock)).toBe(false);
 		expect(store.claim('old', clock)).toBe(true);
 		expect(store.claim('young', clock)).toBe(false);
 	});
@@ -487,6 +522,7 @@ describe('startService: остановка', () => {
 		running.pop();
 		await service.stop();
 		expect(cancelled).toBe(2);
+		expect(() => (w.stores[0] as Store).claim('k')).toThrow();
 		await new Promise<void>((resolve, reject) => {
 			const socket = connect(service.port, '127.0.0.1');
 			socket.on('connect', () => {
