@@ -267,6 +267,18 @@ describe('PlaneClient: чтение', () => {
 		expect(String(await failure(client.searchWorkItems('q')))).toContain('project__identifier');
 	});
 
+	test('searchWorkItems: не-объекты в issues отбрасываются; строка без sequence_id — ошибка, а не NaN', async () => {
+		const row = { id: 'a', name: 'n', sequence_id: 1, project__identifier: 'DX', project_id: 'p' };
+		const { client } = stub([
+			{ status: 200, body: { issues: [null, 'x', [], row] } },
+			{ status: 200, body: { issues: [{ ...row, sequence_id: '1' }] } },
+		]);
+		expect(await client.searchWorkItems('q')).toEqual([
+			{ id: 'a', projectId: 'p', key: 'DX-1', name: 'n' },
+		]);
+		expect(String(await failure(client.searchWorkItems('q')))).toContain('sequence_id');
+	});
+
 	test('findCommentByExternalId находит на второй странице', async () => {
 		const { calls, client } = stub([
 			{
@@ -358,6 +370,7 @@ describe('PlaneClient: чтение', () => {
 					},
 					{ id: 'u3', display_name: 'cy', avatar: '/media/c.png' },
 					{ id: 'u4', display_name: 'di', avatar_url: null },
+					{ id: 'u5', display_name: 'ed', avatar_url: '', avatar: '/media/e.png' },
 				],
 			},
 		]);
@@ -372,6 +385,7 @@ describe('PlaneClient: чтение', () => {
 			{ id: 'u2', displayName: 'bo', avatarUrl: 'https://cdn.example.com/a.png' },
 			{ id: 'u3', displayName: 'cy', avatarUrl: '/media/c.png' },
 			{ id: 'u4', displayName: 'di', avatarUrl: null },
+			{ id: 'u5', displayName: 'ed', avatarUrl: '/media/e.png' },
 		]);
 		expect(calls[1]?.url).toBe(`${ROOT}/projects/p1/states/?per_page=100`);
 		expect(calls[2]?.url).toBe(`${ROOT}/members/?per_page=100`);
