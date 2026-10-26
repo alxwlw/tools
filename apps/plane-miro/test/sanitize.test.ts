@@ -258,13 +258,83 @@ test('уже очищенные id Miro и обычные длинные чис�
 	const input = {
 		item: '3458764500000000042',
 		board: 'uXjVexample3=',
-		other: '1234567890123456789',
+		other: '123456789012345678',
 		longer: '34587645123456789012',
 	};
 	expect(JSON.parse(sanitize(JSON.stringify(input)))).toEqual({
 		item: '3458764500000000042',
 		board: 'uXjVexample3=',
-		other: '1234567890123456789',
+		other: '123456789012345678',
 		longer: '34587645123456789012',
 	});
+});
+
+const USER_ID = '3074457999888777666';
+const TEAM_ID = '3458764555444333222';
+
+test('любой 19-значный id (пользователь, команда, элемент) заменяется стабильно, 18 и 20 цифр — нет', () => {
+	const sanitize = createSanitizer({ slugs: [], hosts: [] });
+	const out = JSON.parse(
+		sanitize(
+			JSON.stringify({ u: USER_ID, t: TEAM_ID, again: USER_ID, short: '307445799988877766' }),
+		),
+	);
+	expect(out).toEqual({
+		u: '3458764500000000001',
+		t: '3458764500000000002',
+		again: '3458764500000000001',
+		short: '307445799988877766',
+	});
+});
+
+const MIRO_BOARD_RESPONSE = {
+	id: 'RealBoardId9x',
+	name: 'Секретная доска',
+	team: { id: TEAM_ID, name: 'Real Team' },
+	createdBy: { id: USER_ID, name: 'Ivan Real', type: 'user' },
+	owner: { id: USER_ID, name: 'Ivan Real' },
+	viewLink: 'https://miro.com/app/board/RealBoardId9x=/',
+	data: { content: '<p>тайный текст</p>', title: 'Заголовок фрейма' },
+};
+
+test('raw Miro: имена, тексты, создатели и доска без uXjV --board не доживают до выхода', () => {
+	const out = createSanitizer({
+		slugs: [],
+		hosts: [],
+		miro: true,
+		boards: ['RealBoardId9x='],
+	})(JSON.stringify(MIRO_BOARD_RESPONSE));
+	for (const secret of [
+		'RealBoardId9x',
+		'Секретная',
+		'Real Team',
+		'Ivan Real',
+		'тайный',
+		'Заголовок',
+		USER_ID,
+		TEAM_ID,
+	]) {
+		expect(out).not.toContain(secret);
+	}
+	const parsed = JSON.parse(out);
+	expect(parsed.id).toBe('uXjVexample1');
+	expect(parsed.viewLink).toBe('https://miro.com/app/board/uXjVexample1=/');
+	expect(parsed.createdBy).toEqual({ id: '3458764500000000002', name: 'Name3', type: 'user' });
+	expect(parsed.owner.name).toBe('Name3');
+});
+
+test('без miro: name и title остаются (Plane-доставки)', () => {
+	const out = JSON.parse(
+		createSanitizer({ slugs: [], hosts: [] })('{"name":"Задача","title":"T"}'),
+	);
+	expect(out).toEqual({ name: 'Задача', title: 'T' });
+});
+
+test('cli --miro: без обёртки Plane, --board повторяется', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sanitize-'));
+	const file = join(dir, 'board.json');
+	writeFileSync(file, JSON.stringify({ a: 'ForeignOne=', b: 'ForeignTwo=', name: 'N' }));
+	const out = JSON.parse(cli(['--miro', file, '--board', 'ForeignOne=', '--board', 'ForeignTwo=']));
+	expect(out).toEqual({ a: 'uXjVexample1=', b: 'uXjVexample2=', name: 'Name1' });
+	expect(() => cli(['--miro'])).toThrow(/usage/);
 });

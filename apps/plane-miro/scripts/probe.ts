@@ -21,9 +21,6 @@ const PLANE_SCOPES = [
 ];
 
 const MIRO = 'https://api.miro.com';
-// Boards the access probe asks about: someone else's public board and one that does not exist.
-const FOREIGN_BOARD = 'o9J_kkQxX78=';
-const MISSING_BOARD = 'uXjVnotexist0=';
 
 const STATUS_FILL: Record<string, string> = {
 	backlog: '#e6e6e6',
@@ -46,9 +43,11 @@ Plane (tenant liq by default for single-workspace subcommands):
   plane-delete <project-uuid> <id>                  DELETE the work item
 Miro (board from PROBE_MIRO_BOARD_ID):
   miro-setup                       two stickies and a connector between them; prints the ids
-  miro-replace <sticker-id>        GET sticker, tags, connectors; POST app_card in its place
-                                   (status connected); PATCH connectors onto it; DELETE the sticker
-  miro-access                      GET two boards that are not ours: a foreign public one and a missing one
+  miro-replace <sticker-id>        GET sticker (must be a sticky_note), tags, the board's connectors (paged,
+                                   ours kept); POST app_card in its place (status connected); PATCH our
+                                   connectors onto it; DELETE the sticker. Any non-2xx before the DELETE
+                                   stops the run with the sticker left in place (exit 1).
+  miro-access --board <id> [--board <id>...]   GET each named board (e.g. a foreign public one, a missing one)
 
 env, Plane:
   PROBE_PLANE_URL                  e.g. https://plane.example.com
@@ -59,6 +58,8 @@ env, Miro:
   PROBE_MIRO_TOKEN                 access token of the service account
   PROBE_MIRO_BOARD_ID              probe board
 
+--step <name> (any single-workspace Plane subcommand) replaces the default step in the file name,
+so a repeated run keeps both answers.
 --out <dir> is required: one raw response file per call, named <subcommand>-<step>.json.`;
 
 type Env = Record<string, string | undefined>;
@@ -220,6 +221,7 @@ const listOf = (v: unknown): Record<string, unknown>[] => {
 	const rows = Array.isArray(v) ? v : Array.isArray(r.data) ? r.data : [];
 	return rows.map(asRecord);
 };
+const is2xx = (status: number): boolean => status >= 200 && status < 300;
 const seg = (s: string): string => encodeURIComponent(s);
 
 function tenantOf(raw: string | undefined): Tenant {
@@ -228,7 +230,13 @@ function tenantOf(raw: string | undefined): Tenant {
 	throw new Error(`--tenant must be liq or yulii, got ${raw}`);
 }
 
-async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, string | undefined>) {
+async function run(
+	p: Probe,
+	cmd: string,
+	pos: string[],
+	opt: Record<string, string | undefined>,
+	boards: string[],
+) {
 	const tenant = tenantOf(opt.tenant);
 	const want = (i: number, what: string): string => {
 		const v = pos[i];
@@ -240,6 +248,8 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 		if (v === undefined) throw new Error(`missing --${name}\n${USAGE}`);
 		return v;
 	};
+	// --step renames the output file, so a repeated run does not overwrite the first answer.
+	const step = (dflt: string): string => opt.step ?? dflt;
 	const item = (project: string, id: string): string =>
 		`/projects/${seg(project)}/work-items/${seg(id)}/`;
 
@@ -254,7 +264,7 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 		case 'plane-search':
 			await p.plane(
 				tenant,
-				'search',
+				step('search'),
 				'GET',
 				`/work-items/search/?search=${encodeURIComponent(flag('q'))}`,
 			);
@@ -262,7 +272,7 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 		case 'plane-item':
 			await p.plane(
 				tenant,
-				'create',
+				step('create'),
 				'POST',
 				`/projects/${seg(flag('project'))}/work-items/`,
 				{ name: opt.name ?? 'probe: plane-miro' },
@@ -270,12 +280,12 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 			);
 			return;
 		case 'plane-read':
-			await p.plane(tenant, 'read', 'GET', item(want(0, 'project-uuid'), want(1, 'id')));
+			await p.plane(tenant, step('read'), 'GET', item(want(0, 'project-uuid'), want(1, 'id')));
 			return;
 		case 'plane-write-desc':
 			await p.plane(
 				tenant,
-				'write-desc',
+				step('write-desc'),
 				'PATCH',
 				item(want(0, 'project-uuid'), want(1, 'id')),
 				{ description_html: readFileSync(flag('html-file'), 'utf8') },
@@ -283,11 +293,10 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 			);
 			return;
 		case 'plane-link':
-			// A second run with the same URL records the duplicate answer; the file is overwritten,
-			// so the second step name carries a counter via --step.
+			// A second run with the same URL records the duplicate answer (use --step link-dup).
 			await p.plane(
 				tenant,
-				opt.step ?? 'link',
+				step('link'),
 				'POST',
 				`${item(want(0, 'project-uuid'), want(1, 'id'))}links/`,
 				{ url: flag('url'), title: flag('title') },
@@ -295,7 +304,7 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 			);
 			return;
 		case 'plane-delete':
-			await p.plane(tenant, 'delete', 'DELETE', item(want(0, 'project-uuid'), want(1, 'id')));
+			await p.plane(tenant, step('delete'), 'DELETE', item(want(0, 'project-uuid'), want(1, 'id')));
 			return;
 		case 'miro-setup': {
 			const b = p.board();
@@ -326,26 +335,44 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 		case 'miro-replace': {
 			const b = p.board();
 			const sid = want(0, 'sticker-id');
+			const keep = (what: string): never => {
+				throw new Error(`${what}; sticker left in place`);
+			};
 			const sticker = await p.miro(
 				'get-sticker',
 				'GET',
 				`/v2/boards/${b}/items/${seg(sid)}`,
 				undefined,
-				(r) => ({
-					type: asRecord(r).type,
-				}),
+				(r) => ({ type: asRecord(r).type }),
 			);
+			if (!is2xx(sticker.status)) keep(`get-sticker → ${sticker.status}`);
+			if (asRecord(sticker.body).type !== 'sticky_note') keep('item is not a sticky_note');
 			await p.miro('get-tags', 'GET', `/v2/boards/${b}/items/${seg(sid)}/tags`, undefined, (r) => ({
 				count: listOf(r).length,
 			}));
-			const conns = await p.miro(
-				'get-connectors',
-				'GET',
-				`/v2/boards/${b}/items/${seg(sid)}/connectors`,
-				undefined,
-				(r) => ({ count: listOf(r).length }),
-			);
+			// The spec has no item-level connectors path: list the board's connectors and keep ours.
+			const ours: Record<string, unknown>[] = [];
+			let cursor: string | undefined;
+			for (let page = 1; page <= 100; page++) {
+				const query = new URLSearchParams({ limit: '50' });
+				if (cursor !== undefined) query.set('cursor', cursor);
+				const res = await p.miro(
+					`get-connectors-${page}`,
+					'GET',
+					`/v2/boards/${b}/connectors?${query.toString()}`,
+					undefined,
+					(r) => ({ count: listOf(r).length }),
+				);
+				if (!is2xx(res.status)) keep(`get-connectors → ${res.status}`);
+				for (const c of listOf(res.body)) {
+					if (idOf(c.startItem) === sid || idOf(c.endItem) === sid) ours.push(c);
+				}
+				const next = asRecord(res.body).cursor;
+				if (typeof next !== 'string' || next === '') break;
+				cursor = next;
+			}
 			const parent = asRecord(asRecord(sticker.body).parent);
+			const at = asRecord(asRecord(sticker.body).position);
 			const card = await p.miro(
 				'post-app-card',
 				'POST',
@@ -360,35 +387,38 @@ async function run(p: Probe, cmd: string, pos: string[], opt: Record<string, str
 							{ value: '—', textColor: '#1a1a1a' },
 						],
 					},
-					position: asRecord(asRecord(sticker.body).position),
+					position: { x: at.x, y: at.y },
 					...(typeof parent.id === 'string' ? { parent: { id: parent.id } } : {}),
 				},
 				(r) => ({ id: idOf(r) }),
 			);
 			const cardId = idOf(card.body);
-			if (cardId === '') throw new Error('app card was not created; sticker left in place');
-			for (const c of listOf(conns.body)) {
+			if (!is2xx(card.status) || cardId === '') keep('app card was not created');
+			for (const c of ours) {
 				const id = idOf(c);
-				const start = idOf(c.startItem);
-				const patch = start === sid ? { startItem: { id: cardId } } : { endItem: { id: cardId } };
-				await p.miro(
+				const patch =
+					idOf(c.startItem) === sid ? { startItem: { id: cardId } } : { endItem: { id: cardId } };
+				const res = await p.miro(
 					`patch-connector-${id}`,
 					'PATCH',
 					`/v2/boards/${b}/connectors/${seg(id)}`,
 					patch,
 				);
+				if (!is2xx(res.status)) keep(`patch-connector → ${res.status}`);
 			}
 			await p.miro('delete-sticker', 'DELETE', `/v2/boards/${b}/items/${seg(sid)}`);
 			return;
 		}
-		case 'miro-access':
-			await p.miro('foreign', 'GET', `/v2/boards/${seg(FOREIGN_BOARD)}`, undefined, (r) => ({
-				keys: Object.keys(asRecord(r)),
-			}));
-			await p.miro('missing', 'GET', `/v2/boards/${seg(MISSING_BOARD)}`, undefined, (r) => ({
-				keys: Object.keys(asRecord(r)),
-			}));
+		case 'miro-access': {
+			if (boards.length === 0)
+				throw new Error(`miro-access needs at least one --board <id>\n${USAGE}`);
+			for (const [i, board] of boards.entries()) {
+				await p.miro(`board-${i + 1}`, 'GET', `/v2/boards/${seg(board)}`, undefined, (r) => ({
+					keys: Object.keys(asRecord(r)),
+				}));
+			}
 			return;
+		}
 		default:
 			throw new Error(`unknown subcommand ${cmd}\n${USAGE}`);
 	}
@@ -409,6 +439,7 @@ export async function main(argv: string[], env: Env, fetchFn: Fetch = fetch): Pr
 			url: { type: 'string' },
 			title: { type: 'string' },
 			step: { type: 'string' },
+			board: { type: 'string', multiple: true },
 		},
 	});
 	const [cmd, ...pos] = positionals;
@@ -419,8 +450,17 @@ export async function main(argv: string[], env: Env, fetchFn: Fetch = fetch): Pr
 	try {
 		if (values.out === undefined) throw new Error(`missing --out\n${USAGE}`);
 		mkdirSync(values.out, { recursive: true });
-		const opts: Record<string, string | undefined> = { ...values, help: undefined };
-		await run(new Probe(env, values.out, cmd, fetchFn), cmd, pos, opts);
+		const rest: Record<string, string | undefined> = {
+			tenant: values.tenant,
+			q: values.q,
+			project: values.project,
+			name: values.name,
+			'html-file': values['html-file'],
+			url: values.url,
+			title: values.title,
+			step: values.step,
+		};
+		await run(new Probe(env, values.out, cmd, fetchFn), cmd, pos, rest, values.board ?? []);
 		return 0;
 	} catch (err) {
 		console.error(err instanceof Error ? err.message : String(err));
