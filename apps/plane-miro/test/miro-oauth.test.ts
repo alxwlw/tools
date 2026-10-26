@@ -24,9 +24,14 @@ const ok = (body: unknown): Reply => ({ status: 200, text: JSON.stringify(body) 
 function setup(reply: Reply = ok({ access_token: 'at-1', team_id: TEAM, user_id: '42' })) {
 	const store = new Store(':memory:');
 	const logs: LogEntry[] = [];
-	const fetched: { url: string; method: string }[] = [];
+	const fetched: { url: string; method: string; accept: string; timeoutSignal: boolean }[] = [];
 	const fetchFn = async (url: string, init: RequestInit) => {
-		fetched.push({ url, method: String(init.method) });
+		fetched.push({
+			url,
+			method: String(init.method),
+			accept: String((init.headers as Record<string, string>).accept),
+			timeoutSignal: init.signal instanceof AbortSignal,
+		});
 		if (reply instanceof Error) throw reply;
 		return new Response(reply.text, { status: reply.status });
 	};
@@ -51,6 +56,9 @@ describe('state', () => {
 			`beta.${exp}.${mac}`,
 			`acme.${Number(exp) + 1}.${mac}`,
 			`acme.${exp}.${mac.slice(0, -1)}0`,
+			`acme.${exp}.abcd`,
+			`acme.12ab.${mac}`,
+			`acme.${exp}.${'z'.repeat(64)}`,
 			`acme.${exp}`,
 			`acme.${exp}.${mac}.x`,
 			'',
@@ -123,6 +131,8 @@ describe('miroOauthCallback', () => {
 		expect(JSON.stringify(logs)).not.toContain('at-1');
 		expect(fetched.length).toBe(1);
 		expect(fetched[0]!.method).toBe('POST');
+		expect(fetched[0]!.accept).toBe('application/json');
+		expect(fetched[0]!.timeoutSignal).toBe(true);
 		const sent = new URL(fetched[0]!.url);
 		expect(`${sent.origin}${sent.pathname}`).toBe('https://api.miro.com/v1/oauth/token');
 		expect(Object.fromEntries(sent.searchParams)).toEqual({
@@ -141,12 +151,20 @@ describe('miroOauthCallback', () => {
 		const res = await miroOauthCallback(cb(`code=c1&state=${good()}`), deps);
 		expect(res.status).toBe(400);
 		expect(await res.text()).toBe('Это не та команда Miro');
+		expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
 		expect(store.getMiroToken(TEAM)).toBeNull();
 		expect(store.getMiroToken('3458764500000000777')).toBeNull();
 		expect(logs).toEqual([
 			{ event: 'miro.wrong_team', level: 'error', tenant: 'acme', team: '3458764500000000777' },
 		]);
 		expect(JSON.stringify(logs)).not.toContain('at-9');
+	});
+
+	test('callback без state: team берётся и из параметра team', async () => {
+		const { deps, logs } = setup();
+		const res = await miroOauthCallback(cb(`code=c1&team=${TEAM}`), deps);
+		expect(res.headers.get('location')).toBe(DONE(TEAM));
+		expect(logs).toEqual([{ event: 'miro.installed', team: TEAM }]);
 	});
 
 	test('state просрочен или подделан → как без state', async () => {
@@ -190,6 +208,7 @@ describe('miroOauthCallback', () => {
 	test('ответ обмена без токена или с неточным числовым team_id → 502', async () => {
 		for (const body of [
 			{ team_id: TEAM, user_id: '1' },
+			{ access_token: '', team_id: TEAM, user_id: '1' },
 			{ access_token: 'a', team_id: 3458764500000000001, user_id: '1' },
 			{ access_token: 'a', team_id: TEAM },
 			'nope',

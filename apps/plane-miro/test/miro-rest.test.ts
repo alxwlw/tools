@@ -4,7 +4,13 @@ import { MiroApiError, MiroClient, MiroNotConnected, type AppCardInput } from '.
 import { apiFixture } from './fixtures.ts';
 
 const BOARD = 'uXjVb1=';
-type Sent = { url: string; method: string; headers: Record<string, string>; body: unknown };
+type Sent = {
+	url: string;
+	method: string;
+	headers: Record<string, string>;
+	body: unknown;
+	timeoutSignal: boolean;
+};
 type Spec = { status: number; text: string };
 type Reply = Spec | Error;
 const json = (body: unknown, status = 200): Spec => ({ status, text: JSON.stringify(body) });
@@ -20,6 +26,7 @@ function client(replies: Reply[], token: string | null = 'tok') {
 				method: String(init.method),
 				headers: init.headers as Record<string, string>,
 				body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
+				timeoutSignal: init.signal instanceof AbortSignal,
 			});
 			const r = replies[Math.min(sent.length, replies.length) - 1]!;
 			if (r instanceof Error) throw r;
@@ -43,6 +50,8 @@ describe('MiroClient', () => {
 		const { c, sent } = client([json(apiFixture('miro-board'))]);
 		await c.getBoard(BOARD);
 		expect(sent[0]!.headers.authorization).toBe('Bearer tok');
+		expect(sent[0]!.headers.accept).toBe('application/json');
+		expect(sent[0]!.timeoutSignal).toBe(true);
 		expect(sent[0]!.method).toBe('GET');
 		expect(sent[0]!.url).toBe('https://api.miro.com/v2/boards/uXjVb1%3D');
 	});
@@ -257,5 +266,82 @@ describe('MiroClient', () => {
 		});
 		const timeout = await err(slow.getBoard(BOARD));
 		expect([timeout.status, timeout.message]).toEqual([0, 'Miro GET /v2/boards/{board} → 0']);
+	});
+
+	test('пустой токен — как отсутствующий', async () => {
+		const { c, sent } = client([json({})], '');
+		await expect(c.getBoard(BOARD)).rejects.toBeInstanceOf(MiroNotConnected);
+		expect(sent.length).toBe(0);
+	});
+
+	test('ответ без полей: значения по умолчанию, не undefined', async () => {
+		expect(await client([json({})]).c.getItem(BOARD, '1')).toEqual({
+			id: '',
+			type: '',
+			html: '',
+			x: 0,
+			y: 0,
+			width: null,
+			height: null,
+			parentId: null,
+		});
+		expect(await client([json({ type: 'app_card' })]).c.getItem(BOARD, '1')).toMatchObject({
+			type: 'app_card',
+			html: '',
+		});
+		expect(await client([json({ type: 'text', data: {} })]).c.getItem(BOARD, '1')).toMatchObject({
+			html: '',
+		});
+		expect(await client([json({})]).c.getBoard(BOARD)).toEqual({ id: BOARD, name: '' });
+		expect(await client([json({})]).c.getFrameTitle(BOARD, '7')).toBe('');
+		expect(await client([json({})]).c.getItemTags(BOARD, '7')).toEqual([]);
+		expect(await client([json({})]).c.listConnectors(BOARD)).toEqual([]);
+	});
+
+	test('app_card: заголовок и описание, как у card', async () => {
+		const body = { type: 'app_card', data: { title: 'T', description: 'D' } };
+		expect((await client([json(body)]).c.getItem(BOARD, '1'))!.html).toBe('T<p>D');
+	});
+
+	test('updateAppCard: title и fields уходят, когда заданы', async () => {
+		const { c, sent } = client([json({})]);
+		await c.updateAppCard(BOARD, '9', card);
+		expect(sent[0]!.body).toEqual({ data: card });
+		await c.updateAppCard(BOARD, '9', { title: 'only' });
+		expect(sent[1]!.body).toEqual({ data: { title: 'only' } });
+		await c.updateAppCard(BOARD, '9', { fields: [] });
+		expect(sent[2]!.body).toEqual({ data: { fields: [] } });
+	});
+
+	test('createAppCard: пустой id в ответе — ошибка', async () => {
+		const place = { x: 0, y: 0, parentId: null };
+		await expect(
+			client([json({ id: '' }, 201)]).c.createAppCard(BOARD, card, place),
+		).rejects.toThrow('no id');
+	});
+
+	test('граница 2xx: 299 — успех, 300 — ошибка', async () => {
+		expect(await client([{ status: 299, text: '{}' }]).c.updateAppCard(BOARD, '9', card)).toBe(
+			'ok',
+		);
+		for (const status of [300])
+			expect(
+				(await err(client([{ status, text: '{}' }]).c.updateAppCard(BOARD, '9', card))).status,
+			).toBe(status);
+	});
+
+	test('listConnectors: пустой cursor — конец; каждая страница одним запросом', async () => {
+		const { c, sent } = client([json({ data: [{ id: 'c1' }], cursor: '' })]);
+		expect((await c.listConnectors(BOARD)).length).toBe(1);
+		expect(sent.length).toBe(1);
+	});
+
+	test('число в position вместо строки или NaN не принимается', async () => {
+		const body = { id: '1', position: { x: 'a', y: null }, geometry: { width: '5' } };
+		expect(await client([json(body)]).c.getItem(BOARD, '1')).toMatchObject({
+			x: 0,
+			y: 0,
+			width: null,
+		});
 	});
 });

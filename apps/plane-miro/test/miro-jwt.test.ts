@@ -13,6 +13,10 @@ const good = {
 	user: '42',
 };
 
+function signed(h: string, p: string): string {
+	return `${h}.${p}.${createHmac('sha256', opts.clientSecret).update(`${h}.${p}`).digest('base64url')}`;
+}
+
 function tok(
 	over: Record<string, unknown> = {},
 	{ secret = opts.clientSecret, header = { alg: 'HS256', typ: 'JWT' } as unknown } = {},
@@ -56,6 +60,10 @@ describe('verifyIdToken', () => {
 			'команда не помещается в число': tok({ team: 3458764500000000001 }),
 			'отрицательный пользователь': tok({ user: -1 }),
 			'без пользователя': tok({ user: undefined }),
+			'payload null': signed(b64({ alg: 'HS256' }), b64('null')),
+			'payload массив': signed(b64({ alg: 'HS256' }), b64('[]')),
+			'payload число': signed(b64({ alg: 'HS256' }), b64('5')),
+			'команда — true': tok({ team: true }),
 			'две части': 'a.b',
 			'четыре части': `${tok()}.x`,
 			пустая: '',
