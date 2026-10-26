@@ -1,0 +1,42 @@
+{
+  "id": "3458764500000000001",
+  "type": "sticky_note",
+  "data": {
+    "content": "Name1",
+    "shape": "square"
+  },
+  "style": {
+    "fillColor": "light_yellow",
+    "textAlign": "center",
+    "textAlignVertical": "middle"
+  },
+  "geometry": {
+    "width": 199,
+    "height": 228
+  },
+  "parent": {
+    "links": {
+      "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/items/3458764500000000002"
+    },
+    "id": "3458764500000000002"
+  },
+  "position": {
+    "x": 158.30241762547712,
+    "y": 160,
+    "origin": "center",
+    "relativeTo": "parent_top_left"
+  },
+  "links": {
+    "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/sticky_notes/3458764500000000001"
+  },
+  "createdAt": "2026-10-26T10:42:10Z",
+  "createdBy": {
+    "id": "3458764500000000003",
+    "type": "user"
+  },
+  "modifiedAt": "2026-10-26T11:00:19Z",
+  "modifiedBy": {
+    "id": "3458764500000000003",
+    "type": "user"
+  }
+}

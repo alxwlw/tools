@@ -8,7 +8,8 @@ const DIR = join(import.meta.dir, 'fixtures');
 const FAKE_ITEM = /^3458764500000000\d{3}$/;
 const FAKE_BOARD = /^uXjVexample\d+(?:=|%3D)$/;
 const FAKE_UUID = /^00000000-0000-4000-8000-\d{12}$/;
-const FAKE_HOST = /^(?:(?:[a-z0-9-]+\.)*example\.(?:com|org)|(?:[a-z0-9-]+\.)*miro\.com)$/i;
+const FAKE_HOST =
+	/^(?:(?:[a-z0-9-]+\.)*example\.(?:com|org)|(?:[a-z0-9-]+\.)*miro(?:static)?\.com)$/i;
 
 /** Shapes a committed fixture must not contain: whatever the sanitizer would have replaced. */
 export function forbiddenIn(text: string): string[] {
