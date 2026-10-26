@@ -432,6 +432,20 @@ describe('convertItems', () => {
 		expect(w.plane.descriptions.get('fake-w-1')!.split('moveToWidget')).toHaveLength(2);
 	});
 
+	test('created:true никогда не читается как «скрытая записанная задача», даже с тем же id', async () => {
+		const w = world({ keepSource: true });
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		w.plane.items.delete('fake-w-1');
+		const create = w.plane.createWorkItem.bind(w.plane);
+		// the answer a recreate would give if Plane reused the id: still a creation
+		w.plane.createWorkItem = async (projectId, item) => {
+			const answer = await create(projectId, item);
+			w.plane.items.set('fake-w-1', { ...w.plane.items.get(answer.id)!, id: 'fake-w-1' });
+			return { id: 'fake-w-1', created: true };
+		};
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({ ok: true });
+	});
+
 	test('архив и возврат: после un-archive повтор берёт первую карточку, ссылка и Embed не дублируются', async () => {
 		const w = world({ keepSource: true, embed: true });
 		const first = (await convertItems(w.rt, w.store, req(['101']), w.log))[0] as { cardId: string };
