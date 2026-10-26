@@ -355,10 +355,9 @@ async function resolveWorkItem(
 	);
 	if (created.created)
 		store.putSource(tenantId, boardId, itemId, { workItemId: created.id, projectId, key: '' });
-	// the recorded item is hidden from reads (archived, draft, triage), not gone: its source and card stay
-	else if (created.id === recorded?.workItemId) throw new ItemFailure('already_linked');
 	const workItem = await plane(() => rt.plane.getWorkItem(projectId, created.id));
-	// null after a 409: the external id belongs to an item Plane hides from reads
+	// null after a 409: the external id belongs to an item Plane hides from reads (archived, draft, triage); when
+	// that is the recorded item, the source and its card stay as they are
 	if (workItem === null) throw new ItemFailure('already_linked');
 	return { workItem, key: await recordKey(workItem), cardId: null };
 }
