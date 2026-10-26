@@ -5,6 +5,7 @@ import type { Tenant } from '../src/config.ts';
 import { jsonLog, type LogEntry } from '../src/log.ts';
 import type { PlaneEvent } from '../src/plane/webhook.ts';
 import { createHandler, MAX_PLANE_BODY, type ServerDeps } from '../src/server.ts';
+import { miroOauthHandler } from '../src/miro/oauth.ts';
 import { Store } from '../src/store.ts';
 import { fixture } from './fixtures.ts';
 import { configOf } from './config-fixture.ts';
@@ -584,6 +585,41 @@ describe('маршруты Miro', () => {
 		// other /miro/ paths do not reach it
 		expect((await get(handler, '/miro/oauthx')).status).toBe(404);
 		expect(seen).toHaveLength(2);
+	});
+
+	test('createHandler с miroOauthHandler: setup — 302, callback — токен, другой метод — 405', async () => {
+		const config = configOf();
+		const store = new Store(':memory:');
+		const fetched: string[] = [];
+		const { handler } = build({
+			miroOauth: miroOauthHandler({
+				config,
+				store,
+				log: () => {},
+				fetch: async (url) => {
+					fetched.push(url);
+					return Response.json({
+						access_token: 'at-1',
+						team_id: '3458764500000000001',
+						user_id: '42',
+					});
+				},
+			}),
+		});
+		const setupRes = await get(handler, '/miro/setup?tenant=acme');
+		expect(setupRes.status).toBe(302);
+		const state = new URL(setupRes.headers.get('location')!).searchParams.get('state')!;
+		const done = await get(
+			handler,
+			`/miro/oauth/callback?code=c1&state=${encodeURIComponent(state)}`,
+		);
+		expect(done.status).toBe(302);
+		expect(done.headers.get('location')).toBe(
+			`https://miro.com/app-install-completed/?client_id=${config.miro.clientId}&team_id=3458764500000000001`,
+		);
+		expect(store.getMiroToken('3458764500000000001')).toBe('at-1');
+		expect((await get(handler, '/miro/oauth/callback?code=c1', 'POST')).status).toBe(405);
+		expect(fetched.length).toBe(1);
 	});
 
 	test('api получает все методы под /miro/api/, и только их', async () => {
