@@ -63,6 +63,12 @@ describe('handleCommentLinks', () => {
 			cardId,
 			projectId: 'p1',
 		});
+		expect(w.logs).toContainEqual({
+			event: 'link.card_placed',
+			tenant: 'acme',
+			boardId: BOARD,
+			cardId,
+		});
 		expect(w.store.cardOnBoard('acme', 'w1', BOARD)?.fieldsHash).toMatch(/^[0-9a-f]{64}$/);
 	});
 
