@@ -158,3 +158,31 @@ test('--step переименовывает файл plane-read: два запу
 	expect(existsSync(join(out, 'plane-read-read.json'))).toBe(false);
 	expect(logs.join('\n')).not.toContain('"t"');
 });
+
+test('miro-replace: PATCH переводит нужный конец коннектора на карточку (start и end)', async () => {
+	const patched: Record<string, unknown> = {};
+	const ends = { id: 'c2', startItem: { id: 's3' }, endItem: { id: 's1' } };
+	const w = world((m, p) => {
+		if (p === `${B}/connectors?limit=50`) return { status: 200, body: { data: [connector, ends] } };
+		if (m === 'PATCH') return { status: 200, body: {} };
+		return happy(m, p);
+	});
+	const f = (url: string, init: RequestInit) => {
+		if (init.method === 'PATCH')
+			patched[url.split('/').pop() as string] = JSON.parse(init.body as string);
+		return w.fetchFn(url, init);
+	};
+	expect(await main(['miro-replace', 's1', '--out', out], ENV, f)).toBe(0);
+	expect(patched).toEqual({ c1: { startItem: { id: 'card1' } }, c2: { endItem: { id: 'card1' } } });
+});
+
+test('miro-replace: карточка не создана (500 или без id) → код 1, стикер не удалён', async () => {
+	for (const reply of [
+		{ status: 500, body: { id: 'card1' } },
+		{ status: 201, body: {} },
+	]) {
+		const w = world((m, p) => (m === 'POST' ? reply : happy(m, p)));
+		expect(await main(['miro-replace', 's1', '--out', out], ENV, w.fetchFn)).toBe(1);
+		expect(w.calls.some((c) => c.startsWith('DELETE'))).toBe(false);
+	}
+});
