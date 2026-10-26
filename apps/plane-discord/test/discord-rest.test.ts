@@ -579,12 +579,14 @@ describe('DiscordRest: recentMessages', () => {
 				body: [
 					{ id: 'm2', webhook_id: 'w1', content: 'привет', extra: 1 },
 					{ id: 'm1', content: 'без webhook' },
+					{ id: 'm0' },
 				],
 			},
 		]);
 		expect(await rest.recentMessages('t1', 10)).toEqual([
 			{ id: 'm2', webhookId: 'w1', content: 'привет' },
 			{ id: 'm1', webhookId: null, content: 'без webhook' },
+			{ id: 'm0', webhookId: null, content: '' },
 		]);
 		expect(calls[0]).toMatchObject({ url: `${API}/channels/t1/messages?limit=10`, method: 'GET' });
 	});
