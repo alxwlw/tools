@@ -269,7 +269,13 @@ describe('PlaneClient: чтение', () => {
 	});
 
 	test('searchWorkItems: не-объекты в issues отбрасываются; строка без sequence_id — ошибка, а не NaN', async () => {
-		const row = { id: 'a', name: 'n', sequence_id: 1, project__identifier: 'ACME', project_id: 'p' };
+		const row = {
+			id: 'a',
+			name: 'n',
+			sequence_id: 1,
+			project__identifier: 'ACME',
+			project_id: 'p',
+		};
 		const { client } = stub([
 			{ status: 200, body: { issues: [null, 'x', [], row] } },
 			{ status: 200, body: { issues: [{ ...row, sequence_id: '1' }] } },

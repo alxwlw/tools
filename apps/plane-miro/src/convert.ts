@@ -341,7 +341,8 @@ async function resolveWorkItem(
 
 	const recorded = store.getSource(tenantId, boardId, itemId);
 	// A project hidden after the sticker was converted: its item is not read, and no card or link is made for it.
-	if (recorded !== null && rt.isHidden(recorded.projectId)) throw new ItemFailure('unknown_project');
+	if (recorded !== null && rt.isHidden(recorded.projectId))
+		throw new ItemFailure('unknown_project');
 	if (recorded !== null && mode.kind === 'bind' && mode.workItemId !== recorded.workItemId)
 		throw new ItemFailure('already_linked');
 	if (recorded !== null) {

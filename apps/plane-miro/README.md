@@ -15,13 +15,15 @@ What it does:
   of that place in its description.
 - **Status on the cards.** A change of state, title or assignees in Plane updates the cards of the work item on
   every board; a deleted work item turns its cards `disabled`. A card deleted by hand on the board is forgotten.
-- **A Miro link in a comment or in «Ссылки»** puts the work item's card on that board.
+- **A Miro link in a comment or in «Ссылки»** puts the work item's card on that board, if the board belongs to the
+  tenant's Miro team; a board of another team gets nothing (`link.board_other_team` in the log).
 
 A sticker can also be bound to an existing work item (search by key or text) instead of creating one.
 Everything that changes the board is done by the service through the Miro REST API with the token of one
 service account; the front only reads the selection and calls the service with the user's id token.
 
-Hidden projects (`hiddenProjects`) are hidden completely: not offered, not found, never synced.
+Hidden projects (`hiddenProjects`) are hidden completely: not offered, not found, never synced; a sticker converted
+before its project was hidden is refused (`unknown_project`).
 
 ## Routes
 
@@ -78,7 +80,7 @@ every problem; the message names variables and JSON paths, never values. A faile
 Tenants: [`tenants.example.json`](tenants.example.json) shows every key (tenant id, Plane workspace and its UUID,
 the Plane App's client id and installation id, the Miro team id, `embed`, `keepSource`, `silenceHours`, hidden
 projects). The tenant id matches `^[a-z][a-z0-9]{0,15}$`; the Plane workspace and the Miro team of two tenants
-must differ.
+must differ. UUIDs may be written in any case: they are read in lower case, as Plane sends them.
 
 ## Plane App
 

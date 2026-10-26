@@ -293,7 +293,11 @@ describe('MiroClient', () => {
 		expect(await client([json({ type: 'text', data: {} })]).c.getItem(BOARD, '1')).toMatchObject({
 			html: '',
 		});
-		expect(await client([json({})]).c.getBoard(BOARD)).toEqual({ id: BOARD, name: '', teamId: null });
+		expect(await client([json({})]).c.getBoard(BOARD)).toEqual({
+			id: BOARD,
+			name: '',
+			teamId: null,
+		});
 		expect(await client([json({ team: { id: 7 } })]).c.getBoard(BOARD)).toMatchObject({
 			teamId: null,
 		});
