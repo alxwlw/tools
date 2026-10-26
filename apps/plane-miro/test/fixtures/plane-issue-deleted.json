@@ -1,0 +1,7 @@
+{
+	"headers": {
+		"x-plane-event": "issue",
+		"x-plane-signature": "3644688d8f8e073e4976002c280d317112125ff6f2f6d39a518871b77881993b"
+	},
+	"raw": "{\n  \"event\": \"issue\",\n  \"action\": \"deleted\",\n  \"webhook_id\": \"00000000-0000-4000-8000-000000000001\",\n  \"workspace_id\": \"00000000-0000-4000-8000-000000000002\",\n  \"data\": {\n    \"id\": \"00000000-0000-4000-8000-000000000003\"\n  },\n  \"activity\": {\n    \"field\": \"issue\",\n    \"new_value\": null,\n    \"old_value\": null,\n    \"actor\": {\n      \"id\": \"00000000-0000-4000-8000-000000000004\",\n      \"first_name\": \"User1\",\n      \"last_name\": \"\",\n      \"email\": \"user2@example.com\",\n      \"avatar\": null,\n      \"avatar_url\": null,\n      \"display_name\": \"User1\"\n    },\n    \"old_identifier\": null,\n    \"new_identifier\": null\n  }\n}"
+}

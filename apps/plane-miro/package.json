@@ -1,0 +1,11 @@
+{
+	"name": "@alxwlw/plane-miro",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"devDependencies": {
+		"@alxwlw/tsconfig": "catalog:dev",
+		"@types/bun": "catalog:dev",
+		"typescript": "catalog:dev"
+	}
+}

@@ -1,0 +1,13 @@
+{
+	"tags": [
+		{
+			"id": "3458764500000000001",
+			"type": "tag",
+			"title": "Name1",
+			"links": {
+				"self": "https://api.miro.com/v2/boards/uXjVexample1%3D/tags/3458764500000000001"
+			},
+			"fillColor": "red"
+		}
+	]
+}

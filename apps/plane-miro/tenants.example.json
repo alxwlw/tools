@@ -1,0 +1,30 @@
+{
+	"tenants": [
+		{
+			"id": "acme",
+			"workspace": "example-ws",
+			"workspaceId": "00000000-0000-4000-8000-000000000001",
+			"plane": {
+				"clientId": "example-client-id",
+				"appInstallationId": "00000000-0000-4000-8000-000000000002"
+			},
+			"miro": { "teamId": "3458764500000000001" },
+			"embed": true,
+			"keepSource": true,
+			"silenceHours": 72,
+			"hiddenProjects": []
+		},
+		{
+			"id": "beta",
+			"workspace": "example-ws-two",
+			"workspaceId": "00000000-0000-4000-8000-000000000011",
+			"plane": {
+				"clientId": "example-client-id",
+				"appInstallationId": "00000000-0000-4000-8000-000000000012"
+			},
+			"miro": { "teamId": "3458764500000000002" },
+			"embed": false,
+			"hiddenProjects": ["00000000-0000-4000-8000-000000000013"]
+		}
+	]
+}
