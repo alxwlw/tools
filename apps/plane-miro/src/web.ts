@@ -20,14 +20,13 @@ const ASSET_HEADERS = {
 export async function buildWeb(webDir: string): Promise<WebAssets> {
 	const assets = new Map<string, string>();
 	for (const name of NAMES) {
+		// Throws on a build error: that is the failure signal.
 		const result = await Bun.build({
 			entrypoints: [join(webDir, `${name}.ts`)],
 			target: 'browser',
 			minify: true,
 			splitting: false,
 		});
-		if (!result.success || result.outputs.length !== 1)
-			throw new Error(`web build failed: ${name}`);
 		assets.set(name, await (result.outputs[0] as Blob).text());
 	}
 	return assets;

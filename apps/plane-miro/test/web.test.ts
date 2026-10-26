@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWeb, createWeb, type WebAssets } from '../src/web.ts';
 
@@ -39,6 +41,8 @@ describe('бандлы', () => {
 			const code = assets.get(name);
 			expect(code?.length).toBeGreaterThan(100);
 			expect(code).not.toMatch(/from ?["'](bun|node):/);
+			// minified: one line
+			expect(code?.trim()).not.toContain('\n');
 		}
 	});
 
@@ -60,8 +64,15 @@ describe('бандлы', () => {
 		expect(assets.get('app')).toContain('/miro/panel');
 	});
 
-	test('ошибка сборки — исключение', async () => {
-		await expect(buildWeb(join(import.meta.dir, 'fixtures'))).rejects.toThrow();
+	test('ошибка сборки — исключение, а не пустой бандл', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-miro-web-'));
+		try {
+			for (const name of ['app', 'panel', 'card'])
+				writeFileSync(join(dir, `${name}.ts`), 'const = ;');
+			await expect(buildWeb(dir)).rejects.toThrow();
+		} finally {
+			rmSync(dir, { recursive: true });
+		}
 	});
 });
 
