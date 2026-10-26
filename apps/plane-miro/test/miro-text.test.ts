@@ -29,4 +29,10 @@ describe('plainText', () => {
 		expect(plainText('&lt;b&gt;x&lt;/b&gt;')).toBe('<b>x</b>');
 		expect(plainText('&amp;lt;')).toBe('&lt;');
 	});
+
+	test('имя сущности — не свойство прототипа', () => {
+		expect(plainText('&Constructor; &toString; &__proto__;')).toBe(
+			'&Constructor; &toString; &__proto__;',
+		);
+	});
 });

@@ -104,6 +104,22 @@ describe('miroOauthCallback', () => {
 		expect(fetched.length).toBe(0);
 	});
 
+	test('отказ на согласии Miro (error без code) → 400 и строка miro.oauth_denied с кодом', async () => {
+		const { deps, fetched, logs } = setup();
+		const res = await miroOauthCallback(cb(`error=access_denied&state=${good()}`), deps);
+		expect(res.status).toBe(400);
+		expect(logs).toEqual([{ event: 'miro.oauth_denied', level: 'warn', error: 'access_denied' }]);
+		await miroOauthCallback(cb('error=Bad%20%3Cvalue%3E'), deps);
+		expect(logs[1]).toEqual({ event: 'miro.oauth_denied', level: 'warn', error: '' });
+		expect(fetched.length).toBe(0);
+	});
+
+	test('без code и без error — 400 без строки в логе', async () => {
+		const { deps, logs } = setup();
+		await miroOauthCallback(cb(`state=${good()}`), deps);
+		expect(logs).toEqual([]);
+	});
+
 	test('callback без state: код не обменивается, токена нет, 302 на app-install-completed', async () => {
 		const { deps, fetched, store, logs } = setup();
 		const res = await miroOauthCallback(cb(`code=c1&team_id=${TEAM}`), deps);
@@ -167,7 +183,7 @@ describe('miroOauthCallback', () => {
 		expect(logs).toEqual([{ event: 'miro.installed', team: TEAM }]);
 	});
 
-	test('state просрочен или подделан → как без state', async () => {
+	test('state просрочен или подделан → тот же ответ, но в логе miro.state_invalid', async () => {
 		for (const state of [
 			signState('acme', NOW, SECRET),
 			signState('acme', NOW + 60_000, 'other'),
@@ -180,12 +196,15 @@ describe('miroOauthCallback', () => {
 			expect(res.headers.get('location')).toBe(DONE(TEAM));
 			expect(fetched.length).toBe(0);
 			expect(store.getMiroToken(TEAM)).toBeNull();
-			expect(logs).toEqual([{ event: 'miro.installed', team: TEAM }]);
+			expect(logs).toEqual([{ event: 'miro.state_invalid', level: 'warn', team: TEAM }]);
 		}
 	});
 
 	test('обмен не 2xx → 502, лог со статусом, токена нет', async () => {
-		const { deps, store, logs } = setup({ status: 400, text: 'SECRET-BODY' });
+		const { deps, store, logs } = setup({
+			status: 400,
+			text: JSON.stringify({ access_token: 'at-x', team_id: TEAM, user_id: '42' }),
+		});
 		const res = await miroOauthCallback(cb(`code=c1&state=${good()}`), deps);
 		expect(res.status).toBe(502);
 		expect(store.getMiroToken(TEAM)).toBeNull();
@@ -211,6 +230,7 @@ describe('miroOauthCallback', () => {
 			{ access_token: '', team_id: TEAM, user_id: '1' },
 			{ access_token: 'a', team_id: 3458764500000000001, user_id: '1' },
 			{ access_token: 'a', team_id: TEAM },
+			{ access_token: 'a', team_id: TEAM, user_id: -1 },
 			'nope',
 		]) {
 			const { deps, store, logs } = setup({

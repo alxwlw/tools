@@ -24,7 +24,8 @@ export function plainText(html: string): string {
 			(all: string, dec?: string, hex?: string, name?: string) => {
 				if (dec !== undefined) return codePoint(Number(dec));
 				if (hex !== undefined) return codePoint(parseInt(hex, 16));
-				return ENTITIES[(name ?? '').toLowerCase()] ?? all;
+				const key = (name ?? '').toLowerCase();
+				return Object.hasOwn(ENTITIES, key) ? ENTITIES[key]! : all;
 			},
 		)
 		.replace(/\u00a0/g, ' ');

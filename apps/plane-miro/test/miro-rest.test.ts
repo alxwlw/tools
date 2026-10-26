@@ -261,7 +261,7 @@ describe('MiroClient', () => {
 			timeoutMs: 5,
 			fetch: (_url, init) =>
 				new Promise((_resolve, reject) => {
-					init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+					init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
 				}),
 		});
 		const timeout = await err(slow.getBoard(BOARD));
@@ -275,8 +275,8 @@ describe('MiroClient', () => {
 	});
 
 	test('ответ без полей: значения по умолчанию, не undefined', async () => {
-		expect(await client([json({})]).c.getItem(BOARD, '1')).toEqual({
-			id: '',
+		expect(await client([json({ parent: null })]).c.getItem(BOARD, '1')).toEqual({
+			id: '1',
 			type: '',
 			html: '',
 			x: 0,
@@ -334,6 +334,11 @@ describe('MiroClient', () => {
 		const { c, sent } = client([json({ data: [{ id: 'c1' }], cursor: '' })]);
 		expect((await c.listConnectors(BOARD)).length).toBe(1);
 		expect(sent.length).toBe(1);
+	});
+
+	test('Infinity из 1e999 в position не принимается', async () => {
+		const raw = { status: 200, text: '{"id":"1","position":{"x":1e999,"y":1}}' };
+		expect(await client([raw]).c.getItem(BOARD, '1')).toMatchObject({ x: 0, y: 1 });
 	});
 
 	test('число в position вместо строки или NaN не принимается', async () => {

@@ -4,6 +4,7 @@ import type { Config } from '../config.ts';
 import type { Log } from '../log.ts';
 import type { Fetch } from '../plane/auth.ts';
 import type { Store } from '../store.ts';
+import { idOf } from './jwt.ts';
 
 const STATE_TTL_MS = 15 * 60_000;
 const EXCHANGE_TIMEOUT_MS = 10_000;
@@ -47,12 +48,6 @@ export function miroSetupRedirect(config: Config, url: URL, nowMs: number): Resp
 	);
 	target.searchParams.set('team_id', tenant.miroTeamId);
 	return new Response(null, { status: 302, headers: { location: target.toString() } });
-}
-
-/** A team or user id of the token reply: a string, or a safe integer (a larger one lost digits in JSON.parse). */
-function idOf(v: unknown): string | null {
-	if (typeof v === 'string') return v === '' ? null : v;
-	return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? String(v) : null;
 }
 
 type Exchange =
@@ -102,7 +97,17 @@ export async function miroOauthCallback(
 ): Promise<Response> {
 	const { config, store, log } = deps;
 	const code = url.searchParams.get('code');
-	if (code === null || code === '') return text(400, 'Нет параметра code');
+	if (code === null || code === '') {
+		const denied = url.searchParams.get('error');
+		// Miro's consent-declined redirect: leave a trace of the error code only
+		if (denied !== null)
+			log({
+				event: 'miro.oauth_denied',
+				level: 'warn',
+				error: /^[a-z_]{1,40}$/.test(denied) ? denied : '',
+			});
+		return text(400, 'Нет параметра code');
+	}
 	const rawTeam = url.searchParams.get('team_id') ?? url.searchParams.get('team');
 	const queryTeam = rawTeam !== null && TEAM_ID.test(rawTeam) ? rawTeam : '';
 	const done = (team: string): Response => {
@@ -116,8 +121,9 @@ export async function miroOauthCallback(
 	const tenantId = state === null ? null : readState(state, config.miro.clientSecret, deps.nowMs);
 	const tenant = config.tenants.find((t) => t.id === tenantId);
 	if (tenant === undefined) {
-		// An ordinary person's install: nothing is exchanged, nothing is stored.
-		log({ event: 'miro.installed', team: queryTeam });
+		// Nothing is exchanged or stored. A state that was sent but does not read is an owner setup gone wrong.
+		if (state === null) log({ event: 'miro.installed', team: queryTeam });
+		else log({ event: 'miro.state_invalid', level: 'warn', team: queryTeam });
 		return done(queryTeam);
 	}
 

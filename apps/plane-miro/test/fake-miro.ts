@@ -16,7 +16,7 @@ export type FakeBoard = {
 	cards: Map<string, { card: AppCardInput; place: Place }>;
 };
 
-/** In-memory MiroApi: a board in `noAccess` reads as null and refuses writes with 403, a missing item as 404. */
+/** In-memory MiroApi with the client's outcomes (test/fake-miro.test.ts runs both against one table). */
 export class FakeMiro implements MiroApi {
 	readonly boards = new Map<string, FakeBoard>();
 	readonly noAccess = new Set<string>();
@@ -73,11 +73,18 @@ export class FakeMiro implements MiroApi {
 		if (error !== undefined) throw error;
 	}
 
+	/** Like the client: a board that is missing reads as 404, a `noAccess` one as 403. */
 	#board(boardId: string, method: string): FakeBoard {
 		const board = this.boards.get(boardId);
 		if (board === undefined) throw new MiroApiError(404, method, '/v2/boards/{board}');
 		if (this.noAccess.has(boardId)) throw new MiroApiError(403, method, '/v2/boards/{board}');
 		return board;
+	}
+
+	/** The board for a call the client maps 404 on (item, frame, card, delete): null when the board is missing. */
+	#boardOrNull(boardId: string, method: string): FakeBoard | null {
+		if (!this.boards.has(boardId)) return null;
+		return this.#board(boardId, method);
 	}
 
 	async getBoard(boardId: string): Promise<{ id: string; name: string } | null> {
@@ -89,18 +96,21 @@ export class FakeMiro implements MiroApi {
 
 	async getItem(boardId: string, itemId: string): Promise<MiroItem | null> {
 		this.#enter('getItem');
-		return this.#board(boardId, 'GET').items.get(itemId) ?? null;
+		return this.#boardOrNull(boardId, 'GET')?.items.get(itemId) ?? null;
 	}
 
 	async getFrameTitle(boardId: string, frameId: string): Promise<string | null> {
 		this.#enter('getFrameTitle');
-		const frame = this.#board(boardId, 'GET').items.get(frameId);
+		const frame = this.#boardOrNull(boardId, 'GET')?.items.get(frameId);
 		return frame === undefined || frame.type !== 'frame' ? null : frame.html;
 	}
 
 	async getItemTags(boardId: string, itemId: string): Promise<string[]> {
 		this.#enter('getItemTags');
-		return [...(this.#board(boardId, 'GET').tags.get(itemId) ?? [])];
+		const board = this.#board(boardId, 'GET');
+		if (!board.items.has(itemId))
+			throw new MiroApiError(404, 'GET', '/v2/boards/{board}/items/{id}/tags');
+		return [...(board.tags.get(itemId) ?? [])];
 	}
 
 	async createAppCard(boardId: string, card: AppCardInput, place: Place): Promise<string> {
@@ -127,12 +137,14 @@ export class FakeMiro implements MiroApi {
 		card: Partial<AppCardInput>,
 	): Promise<'ok' | 'gone'> {
 		this.#enter('updateAppCard');
-		const board = this.#board(boardId, 'PATCH');
-		const have = board.cards.get(cardId);
-		if (have === undefined) return 'gone';
-		have.card = { ...have.card, ...card };
+		const board = this.#boardOrNull(boardId, 'PATCH');
+		const have = board?.cards.get(cardId);
+		if (board === null || have === undefined) return 'gone';
+		// like the client's PATCH body: explicit undefined keys are dropped
+		const given = Object.fromEntries(Object.entries(card).filter(([, v]) => v !== undefined));
+		have.card = { ...have.card, ...given };
 		const item = board.items.get(cardId);
-		if (item !== undefined && card.title !== undefined) item.html = card.title;
+		if (item !== undefined && given.title !== undefined) item.html = have.card.title;
 		return 'ok';
 	}
 
@@ -157,9 +169,9 @@ export class FakeMiro implements MiroApi {
 
 	async deleteItem(boardId: string, itemId: string): Promise<void> {
 		this.#enter('deleteItem');
-		const board = this.#board(boardId, 'DELETE');
-		board.items.delete(itemId);
-		board.cards.delete(itemId);
+		const board = this.#boardOrNull(boardId, 'DELETE');
+		board?.items.delete(itemId);
+		board?.cards.delete(itemId);
 	}
 
 	async tokenValid(): Promise<boolean> {

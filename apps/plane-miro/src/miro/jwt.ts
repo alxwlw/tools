@@ -17,7 +17,7 @@ function json(part: string): Record<string, unknown> | null {
 }
 
 /** A non-empty string, or a safe non-negative integer (a larger one lost digits in JSON.parse: reject, never guess). */
-function idOf(v: unknown): string | null {
+export function idOf(v: unknown): string | null {
 	if (typeof v === 'string') return v === '' ? null : v;
 	if (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0) return String(v);
 	return null;

@@ -20,7 +20,7 @@ export type Connector = { id: string; startItemId: string | null; endItemId: str
 export interface MiroApi {
 	/**
 	 * 403 and 404 → null: the service account cannot see the board. Probe: a missing board is 404; a foreign *public*
-	 * board is 200, so a non-null answer does not prove write access (createAppCard 403 is handled in Task 6).
+	 * board is 200, so a non-null answer does not prove write access (the caller maps a createAppCard 403 to `board_no_access`).
 	 */
 	getBoard(boardId: string): Promise<{ id: string; name: string } | null>;
 	/** 404 → null. */
@@ -94,7 +94,7 @@ const boardRoute = (boardId: string, rest: string): Route => ({
 	label: `/v2/boards/{board}${rest}`,
 });
 
-function itemOf(raw: unknown): MiroItem {
+function itemOf(raw: unknown, itemId: string): MiroItem {
 	const o = recOf(raw);
 	const data = recOf(o.data);
 	const type = strOf(o.type) ?? '';
@@ -109,7 +109,7 @@ function itemOf(raw: unknown): MiroItem {
 	const pos = recOf(o.position);
 	const geo = recOf(o.geometry);
 	return {
-		id: strOf(o.id) ?? '',
+		id: strOf(o.id) ?? itemId,
 		type,
 		html,
 		x: numOf(pos.x) ?? 0,
@@ -148,7 +148,7 @@ export class MiroClient implements MiroApi {
 	async getItem(boardId: string, itemId: string): Promise<MiroItem | null> {
 		const res = await this.#send('GET', boardRoute(boardId, `/items/${enc(itemId)}`));
 		if (res.status === 404) return null;
-		return itemOf(this.#ok(res));
+		return itemOf(this.#ok(res), itemId);
 	}
 
 	async getFrameTitle(boardId: string, frameId: string): Promise<string | null> {
