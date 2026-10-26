@@ -86,6 +86,11 @@ export class Store {
 			.run(tenant, workItemId, channelId, threadId, projectId);
 	}
 
+	/** Drops the binding of a thread that no longer exists in Discord. */
+	deleteThread(threadId: string): void {
+		this.#db.query('DELETE FROM threads WHERE thread_id = ?').run(threadId);
+	}
+
 	/** Fills in the project of a row written before `project_id` existed; touches nothing else, so a concurrent rebinding survives. */
 	setThreadProject(threadId: string, projectId: string): void {
 		this.#db

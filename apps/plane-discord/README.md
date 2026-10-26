@@ -115,8 +115,9 @@ in threads):
 https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=309774601216&guild_id=<GUILD>&disable_guild_select=true
 ```
 
-Set the interactions endpoint URL to `https://plane-discord.example.com/discord/interactions`. No
-privileged intents are needed in this phase.
+Set the interactions endpoint URL to `https://plane-discord.example.com/discord/interactions`. Enable the
+privileged `MESSAGE_CONTENT` intent in the Developer Portal (Bot, Privileged Gateway Intents): thread sync
+(phase 3) needs it; without it only thread sync stops.
 
 ## Scripts
 
@@ -132,9 +133,13 @@ docker exec <container> bun scripts/list-channels.ts       # id, type, parent an
 - **Logs** are one JSON line per event on stdout: `{ts, event, tenant?, …ids, ms?, error?}`. Secrets and
   the text of messages, descriptions and comments never reach them.
 - **State** is one SQLite file (`/data`, a named volume): deduplication keys, links between work items and
-  Discord threads or messages, the watchdog heartbeat. It is not backed up. Losing it costs the
-  deduplication window (a retried delivery can post twice) and the thread links of existing posts (new
-  events open new posts); nothing in Plane or Discord is lost.
+  Discord threads or messages, the ids and tokens of the webhooks the bot created for thread messages, the
+  watchdog heartbeat. It is not backed up. Losing it costs the deduplication window (a retried delivery can
+  post twice), the thread links of existing posts (new events open new posts) and the links of threads bound
+  by `Создать задачу в Plane` or `/plane-link`: their sync stops until `/plane-link` is run again. The bot
+  adopts its own webhook found in a channel, or creates a new one; webhooks created earlier stay in the
+  channels (Discord allows 15 per channel, so remove stale ones by hand). Nothing in Plane or Discord is
+  lost.
 - **Queue** is in memory: a restart drops the deliveries not yet sent. A Discord form open in a modal is
   also in memory; after a restart it answers "form is stale", and the command is run again.
 

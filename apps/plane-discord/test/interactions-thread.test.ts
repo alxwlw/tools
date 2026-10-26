@@ -530,7 +530,8 @@ describe('/plane-link', () => {
 				},
 			],
 		]);
-		expect(w.discord.callsOf('deleteOriginal')).toEqual([]);
+		// the public placeholder does not stay: it is withdrawn like the refusals do
+		expect(w.discord.callsOf('deleteOriginal')).toEqual([['tok-900000000000000001']]);
 		expect(w.logs).toContainEqual({
 			event: 'ix.confirm_failed',
 			level: 'warn',
@@ -542,6 +543,24 @@ describe('/plane-link', () => {
 		});
 		expect(w.logs.filter((l) => l.event === 'ix.done').map((l) => l.result)).toEqual(['linked']);
 		expect(w.logs.map((l) => l.event)).not.toContain('ix.failed');
+	});
+
+	test('editOriginal и deleteOriginal упали → ephemeral «Тред привязан» всё равно уходит', async () => {
+		const w = await setup();
+		seed(w, { id: 'w40', seq: 40 });
+		w.discord.failures.set('editOriginal', new DiscordApiError(503, 'PATCH', '/x'));
+		w.discord.failures.set('deleteOriginal', new DiscordApiError(503, 'DELETE', '/x'));
+		await link(w, 'LAB-40');
+		await w.settle();
+		expect(w.discord.callsOf('deleteOriginal')).toHaveLength(1);
+		const followups = w.discord.callsOf('followup') as [
+			string,
+			{ content: string; ephemeral: boolean },
+		][];
+		expect(followups).toHaveLength(1);
+		expect(followups[0]![1].content).toContain('Тред привязан к');
+		expect(followups[0]![1].ephemeral).toBe(true);
+		expect(w.logs.map((l) => l.event)).toContain('ix.cleanup_failed');
 	});
 
 	test('editOriginal и followup упали → связь и ix.done linked всё равно записаны', async () => {

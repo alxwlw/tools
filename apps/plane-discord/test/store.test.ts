@@ -225,3 +225,17 @@ describe('Store: webhooks', () => {
 		store.close();
 	});
 });
+
+describe('Store: deleteThread', () => {
+	test('снимает привязку этого треда и не трогает другие', () => {
+		const store = new Store(':memory:');
+		store.putThread('t', 'i1', 'c1', 'thread-1', 'p');
+		store.putThread('t', 'i2', 'c1', 'thread-2', 'p');
+		store.deleteThread('thread-1');
+		expect(store.findByThread('thread-1')).toBeNull();
+		expect(store.findByThread('thread-2')?.workItemId).toBe('i2');
+		expect(store.threadsOfItem('t', 'i1')).toEqual([]);
+		store.deleteThread('no-such');
+		expect(store.findByThread('thread-2')?.workItemId).toBe('i2');
+	});
+});

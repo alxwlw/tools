@@ -26,6 +26,13 @@ export class FakeDiscord implements DiscordApi {
 	posted = new Map<string, { id: string; webhookId: string | null; content: string }[]>();
 	calls: DiscordCall[] = [];
 	#seq = 0;
+	/** The fake's own application id: the webhooks `createWebhook` makes carry it. */
+	applicationId = '999000000000000001';
+	/** Webhooks that exist per channel (created here, or seeded by a test). */
+	webhooks = new Map<
+		string,
+		{ id: string; token: string | null; applicationId: string | null }[]
+	>();
 	/** Clock for snowflake ids of webhook posts. */
 	now: () => number = Date.now;
 
@@ -109,7 +116,24 @@ export class FakeDiscord implements DiscordApi {
 	async createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }> {
 		this.#enter('createWebhook', channelId, name);
 		const n = this.#id();
-		return { id: `wh-${n}`, token: `tok-${n}` };
+		const made = { id: `wh-${n}`, token: `tok-${n}` };
+		this.webhooks.set(channelId, [
+			...(this.webhooks.get(channelId) ?? []),
+			{ ...made, applicationId: this.applicationId },
+		]);
+		const lost = this.lostResponse.get('createWebhook');
+		if (lost) {
+			this.lostResponse.delete('createWebhook');
+			throw lost;
+		}
+		return made;
+	}
+
+	async listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]> {
+		this.#enter('listChannelWebhooks', channelId);
+		return [...(this.webhooks.get(channelId) ?? [])];
 	}
 
 	async executeWebhook(

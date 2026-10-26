@@ -596,3 +596,30 @@ describe('DiscordRest: recentMessages', () => {
 		expect(String(await failure(rest.recentMessages('t1', 10)))).toContain('not an array');
 	});
 });
+
+describe('DiscordRest: listChannelWebhooks', () => {
+	test('GET /channels/{id}/webhooks: id, token (или null) и application_id', async () => {
+		const { calls, rest } = stub([
+			{
+				status: 200,
+				body: [
+					{ id: 'w1', token: 't1', application_id: 'app1', name: 'x' },
+					{ id: 'w2', application_id: null },
+					{ id: 'w3' },
+				],
+			},
+		]);
+		expect(await rest.listChannelWebhooks('c1')).toEqual([
+			{ id: 'w1', token: 't1', applicationId: 'app1' },
+			{ id: 'w2', token: null, applicationId: null },
+			{ id: 'w3', token: null, applicationId: null },
+		]);
+		expect(calls[0]).toMatchObject({ url: `${API}/channels/c1/webhooks`, method: 'GET' });
+		expect(calls[0]!.headers.Authorization).toBe('Bot BOTSECRET');
+	});
+
+	test('не массив → ошибка', async () => {
+		const { rest } = stub([{ status: 200, body: {} }]);
+		expect(String(await failure(rest.listChannelWebhooks('c1')))).toContain('not an array');
+	});
+});

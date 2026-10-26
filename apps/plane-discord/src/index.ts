@@ -127,6 +127,7 @@ export function startService(
 	const notify = createNotifier({
 		runtimes,
 		discord,
+		applicationId: config.discord.applicationId,
 		store,
 		planeUrl: config.planeUrl,
 		channelType,

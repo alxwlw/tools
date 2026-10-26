@@ -37,6 +37,8 @@ export type Delivery = { label: string; run: () => Promise<void> };
 export type NotifyDeps = {
 	runtimes: ReadonlyMap<string, TenantRuntime>;
 	discord: DiscordApi;
+	/** The bot's application id: the webhooks it owns carry it. */
+	applicationId: string;
 	store: Store;
 	planeUrl: string;
 	channelType: (channelId: string) => Promise<number>;
@@ -379,7 +381,16 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		message: OutMessage & { username?: string; avatarUrl?: string },
 	): Delivery {
 		const create = async () => {
-			const made = await deps.discord.createWebhook(target.channelId, WEBHOOK_NAME);
+			// createWebhook has no idempotency key: a retry after a lost response would orphan the first webhook
+			// (the channel holds 15), so one of ours that already exists is adopted instead.
+			const listed = await deps.discord.listChannelWebhooks(target.channelId);
+			let made: { id: string; token: string } | undefined;
+			for (const h of listed)
+				if (h.applicationId === deps.applicationId && h.token !== null) {
+					made = { id: h.id, token: h.token };
+					break;
+				}
+			made ??= await deps.discord.createWebhook(target.channelId, WEBHOOK_NAME);
 			// Recorded at once: the echo of this webhook's own messages is skipped by `isOwnWebhook`.
 			deps.store.putWebhook(target.channelId, made.id, made.token);
 			return made;
@@ -390,11 +401,18 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 		// those executes used (the 404 path may switch to a new one).
 		let doubt: { since: number; hooks: Set<string> } | null = null;
 		const now = deps.now ?? Date.now;
+		let threadGone = false;
 		const post = async (hook: { id: string; token: string }) => {
 			const startedAt = now();
 			try {
 				await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
 			} catch (err) {
+				if (
+					err instanceof DiscordApiError &&
+					err.status === 404 &&
+					err.code === DISCORD_ERR.UNKNOWN_CHANNEL
+				)
+					threadGone = true;
 				// Transport failure or 5xx: Discord may have taken the post. A 429 or 4xx did not.
 				if (err instanceof DiscordApiError && (err.status === 0 || err.status >= 500))
 					(doubt ??= { since: startedAt, hooks: new Set() }).hooks.add(hook.id);
@@ -447,7 +465,23 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 					});
 					return;
 				}
-				await attempt();
+				try {
+					await attempt();
+				} catch (err) {
+					if (!threadGone) throw err;
+					// The thread was deleted in Discord: the binding goes (as with a deleted forum post in `toForum`), and
+					// the next event for the item opens a new post or reaches the channel again. Retrying cannot help.
+					deps.log({
+						event: 'notify.thread_gone',
+						level: 'warn',
+						tenant: rt.tenant.id,
+						channel: target.channelId,
+						thread: target.threadId,
+					});
+					deps.store.deleteThread(target.threadId);
+					doubt = null;
+					return;
+				}
 				doubt = null;
 			},
 		};

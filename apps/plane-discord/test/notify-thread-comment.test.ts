@@ -143,9 +143,9 @@ describe('createNotifier: comment.created → тред', () => {
 		expect(webhookCalls(w)).toHaveLength(2);
 	});
 
-	test('404 другого рода (нет треда) и 5xx → ошибка как есть, webhook не пересоздаётся', async () => {
+	test('404 другого рода и 5xx → ошибка как есть, webhook не пересоздаётся', async () => {
 		for (const err of [
-			new DiscordApiError(404, 'POST', '/webhooks/x/:token', 10003),
+			new DiscordApiError(404, 'POST', '/webhooks/x/:token', 10008),
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', null),
 			// the code alone is not enough: only a 404 means the webhook is gone
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10015),
@@ -278,6 +278,8 @@ describe('createNotifier: comment.created → тред', () => {
 
 		// the same after the webhook was recreated: the new one is recorded too
 		w.discord.failOnce.set('executeWebhook', new DiscordApiError(404, 'POST', '/x', 10015));
+		// the webhook is really gone in Discord: it is no longer listed
+		w.discord.webhooks.delete(FORUM);
 		await runAll(await w.notify(comment('<p>ещё</p>')));
 		const fresh = w.store.getWebhook(FORUM)!;
 		expect(fresh.id).not.toBe(made.id);
@@ -286,6 +288,99 @@ describe('createNotifier: comment.created → тред', () => {
 		// positive control: a foreign webhook's message does become a comment
 		await sync({ ...echo('foreign-hook'), applicationId: null });
 		expect(w.plane.createdComments).toHaveLength(1);
+	});
+});
+
+describe('createNotifier: webhook канала — чужой/потерянный ответ', () => {
+	test('createWebhook принят, ответ потерян → повтор берёт созданный из списка, второго нет', async () => {
+		const w = bound();
+		w.discord.lostResponse.set(
+			'createWebhook',
+			new DiscordApiError(0, 'POST', '/channels/x/webhooks'),
+		);
+		const q = new SerialQueue({ log: () => {}, delaysMs: [0], sleep: async () => {} });
+		for (const d of await w.notify(comment('<p>раз</p>'))) q.push(d.label, d.run);
+		await q.idle();
+		expect(w.discord.callsOf('createWebhook')).toHaveLength(1);
+		const listed = w.discord.webhooks.get(FORUM)!;
+		expect(listed).toHaveLength(1);
+		expect(w.store.getWebhook(FORUM)).toEqual({ id: listed[0]!.id, token: listed[0]!.token! });
+		expect(webhookCalls(w)).toHaveLength(1);
+		expect(w.store.isOwnWebhook(listed[0]!.id)).toBe(true);
+	});
+
+	test('чужой webhook и свой без токена не берутся: создаётся новый', async () => {
+		const w = bound();
+		w.discord.webhooks.set(FORUM, [
+			{ id: 'wh-foreign', token: 'tok-f', applicationId: 'other-app' },
+			{ id: 'wh-notoken', token: null, applicationId: w.discord.applicationId },
+			{ id: 'wh-noapp', token: 'tok-n', applicationId: null },
+		]);
+		await runAll(await w.notify(comment('<p>раз</p>')));
+		expect(w.discord.callsOf('createWebhook')).toHaveLength(1);
+		const stored = w.store.getWebhook(FORUM)!;
+		expect(['wh-foreign', 'wh-notoken', 'wh-noapp']).not.toContain(stored.id);
+	});
+
+	test('наш webhook в списке есть, в store нет (чужой запуск, потеря БД) → берётся он', async () => {
+		const w = bound();
+		w.discord.webhooks.set(FORUM, [
+			{ id: 'wh-foreign', token: 'tok-f', applicationId: 'other-app' },
+			{ id: 'wh-ours', token: 'tok-o', applicationId: w.discord.applicationId },
+		]);
+		await runAll(await w.notify(comment('<p>раз</p>')));
+		expect(w.discord.callsOf('createWebhook')).toEqual([]);
+		expect(w.store.getWebhook(FORUM)).toEqual({ id: 'wh-ours', token: 'tok-o' });
+	});
+});
+
+describe('createNotifier: удалённый тред', () => {
+	const gone = () => {
+		const w = setup([route(TEXT)]);
+		w.store.putThread('initech', ITEM, TEXT, THREAD, PROJECT);
+		w.store.putWebhook(TEXT, 'wh-old', 'tok-old');
+		w.plane.members = [{ id: CAROL, displayName: 'Carol', avatarUrl: null }];
+		w.plane.comments.push({
+			id: ID(200),
+			html: '<p>привет</p>',
+			actorId: ALICE,
+			externalSource: null,
+			externalId: null,
+			projectId: PROJECT,
+			workItemId: ITEM,
+		});
+		return w;
+	};
+
+	test('executeWebhook 404/10003 → привязка снята, лог thread_gone, run() без ошибки; упоминание бота идёт в канал', async () => {
+		const w = gone();
+		// with the thread bound the mention is left to the thread sync
+		const before = await w.notify(agentMention());
+		await runAll(before);
+		expect(sent(w.discord)).toEqual([]);
+		expect(w.plane.activities.at(-1)?.body).toBe('→ Discord: в тред задачи');
+
+		w.discord.failures.set(
+			'executeWebhook',
+			new DiscordApiError(404, 'POST', '/webhooks/wh-old/:token', 10003),
+		);
+		const [d] = await w.notify(comment('<p>в пустоту</p>'));
+		await d!.run();
+		expect(w.store.findByThread(THREAD)).toBeNull();
+		expect(w.logs.filter((l) => l.event === 'notify.thread_gone')).toEqual([
+			{
+				event: 'notify.thread_gone',
+				level: 'warn',
+				tenant: 'initech',
+				channel: TEXT,
+				thread: THREAD,
+			},
+		]);
+		expect(await w.notify(comment('<p>ещё</p>'))).toEqual([]);
+
+		await runAll(await w.notify(agentMention()));
+		expect(sent(w.discord).map(([channel]) => channel)).toEqual([TEXT]);
+		expect(w.plane.activities.at(-1)?.body).toBe(`→ Discord: ${TEXT}`);
 	});
 });
 

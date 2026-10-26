@@ -141,6 +141,7 @@ export function build(plane: SpyPlane, discord: FakeDiscord, tenant: Tenant) {
 	const notify = createNotifier({
 		runtimes: new Map([[tenant.id, runtime]]),
 		discord,
+		applicationId: discord.applicationId,
 		store,
 		planeUrl: PLANE_URL,
 		// not a recorded Discord call: tests count calls

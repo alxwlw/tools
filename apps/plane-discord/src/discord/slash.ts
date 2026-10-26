@@ -219,11 +219,8 @@ export function createSlashCommands(env: SlashEnv): {
 				status: error instanceof DiscordApiError ? error.status : undefined,
 				code: error instanceof DiscordApiError ? error.code : undefined,
 			});
-			try {
-				await deps.discord.followup(token, { content: text, ephemeral: true });
-			} catch {
-				log({ event: 'ix.reply_failed', level: 'error', ...base });
-			}
+			// The public placeholder would stay "thinking": withdraw it, then tell the thread privately.
+			await withdraw(token, base, text);
 		}
 		return 'linked';
 	}

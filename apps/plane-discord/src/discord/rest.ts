@@ -60,6 +60,10 @@ export interface DiscordApi {
 	joinThread(threadId: string): Promise<void>;
 	/** Creates an application-owned webhook in a text, announcement or forum channel. */
 	createWebhook(channelId: string, name: string): Promise<{ id: string; token: string }>;
+	/** Webhooks of a channel; the token is only present for webhooks created by this application. */
+	listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]>;
 	/** Posts into a thread through a webhook, under the given name and avatar. */
 	executeWebhook(
 		webhookId: string,
@@ -262,6 +266,18 @@ export class DiscordRest implements DiscordApi {
 			name,
 		});
 		return { id: str(res, 'id'), token: str(res, 'token') };
+	}
+
+	async listChannelWebhooks(
+		channelId: string,
+	): Promise<{ id: string; token: string | null; applicationId: string | null }[]> {
+		const rows = await this.#bot('GET', `/channels/${encodeURIComponent(channelId)}/webhooks`);
+		if (!Array.isArray(rows)) throw new Error('Discord response: webhook list is not an array');
+		return rows.map((row) => ({
+			id: str(row, 'id'),
+			token: optStr(row, 'token'),
+			applicationId: optStr(row, 'application_id'),
+		}));
 	}
 
 	async executeWebhook(

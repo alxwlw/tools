@@ -86,6 +86,7 @@ function world(opts: { staleProjects: ProjectSummary[]; freshProjects: ProjectSu
 	const notify = createNotifier({
 		runtimes: new Map([['initech', runtime]]),
 		discord,
+		applicationId: discord.applicationId,
 		store: new Store(':memory:'),
 		planeUrl: 'https://plane.example.com',
 		channelType: async () => CHANNEL.TEXT,
