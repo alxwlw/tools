@@ -9,6 +9,7 @@ import { miroOauthHandler } from '../src/miro/oauth.ts';
 import { Store } from '../src/store.ts';
 import { fixture } from './fixtures.ts';
 import { configOf } from './config-fixture.ts';
+import { jwt, world } from './world.ts';
 
 const WORKSPACE = '00000000-0000-4000-8000-000000000002';
 const SECRET = 'test-secret';
@@ -641,6 +642,28 @@ describe('маршруты Miro', () => {
 		for (const path of ['/miro/api', '/miro/apix/projects', '/miro/app/api/x'])
 			expect((await get(handler, path)).status, path).toBe(404);
 		expect(seen).toHaveLength(3);
+	});
+
+	test('createHandler с createApi: JWT в заголовке → JSON, без него → 401 и ни одного вызова Plane', async () => {
+		const w = world();
+		const { handler } = build({ api: w.api });
+		const ok = await handler(
+			new Request('http://x/miro/api/projects', { headers: { authorization: `Bearer ${jwt()}` } }),
+		);
+		expect(ok.status).toBe(200);
+		expect(ok.headers.get('content-type')).toBe('application/json; charset=utf-8');
+		expect(((await ok.json()) as { projects: { id: string }[] }).projects.map((p) => p.id)).toEqual(
+			['p1'],
+		);
+		const calls = w.plane.calls.length;
+		const denied = await handler(new Request('http://x/miro/api/projects'));
+		expect([denied.status, await denied.json()]).toEqual([401, { error: 'unauthorized' }]);
+		expect(w.plane.calls).toHaveLength(calls);
+		const post = await handler(
+			new Request('http://x/miro/api/convert', { method: 'POST', body: '{}' }),
+		);
+		expect(post.status).toBe(401);
+		expect(w.miro.calls).toEqual([]);
 	});
 
 	test('web: страница из хука; null → 404; не GET → 405 без вызова хука', async () => {

@@ -31,17 +31,20 @@ export type ServerDeps = {
 
 const ok = () => new Response('ok', { status: 200 });
 
-/** Reads at most MAX_PLANE_BODY bytes; null when the body is larger (the stream is cancelled). */
-export async function readBounded(req: Request): Promise<Uint8Array | null> {
+/** Reads at most `max` bytes (default MAX_PLANE_BODY); null when the body is larger (the stream is cancelled). */
+export async function readBounded(
+	req: Request,
+	max: number = MAX_PLANE_BODY,
+): Promise<Uint8Array | null> {
 	const declared = Number(req.headers.get('content-length'));
-	if (Number.isFinite(declared) && declared > MAX_PLANE_BODY) return null;
+	if (Number.isFinite(declared) && declared > max) return null;
 	if (!req.body) return new Uint8Array();
 	const chunks: Uint8Array[] = [];
 	let size = 0;
 	// Leaving the loop early cancels the stream.
 	for await (const chunk of req.body as AsyncIterable<Uint8Array>) {
 		size += chunk.byteLength;
-		if (size > MAX_PLANE_BODY) return null;
+		if (size > max) return null;
 		chunks.push(chunk);
 	}
 	const out = new Uint8Array(size);
