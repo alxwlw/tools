@@ -198,8 +198,15 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 		}
 		const route = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) : '';
 		const method = Object.hasOwn(METHODS, route) ? METHODS[route] : undefined;
-		if (method === undefined) return reply(404, { error: 'not_found' });
-		if (req.method !== method) return reply(405, { error: 'method_not_allowed' });
+		// The line leaves an unknown route out: the path is whatever the caller typed.
+		if (method === undefined) {
+			deps.log({ event: 'api.rejected', tenant: rt.tenant.id, error: 'not_found' });
+			return reply(404, { error: 'not_found' });
+		}
+		if (req.method !== method) {
+			deps.log({ event: 'api.rejected', tenant: rt.tenant.id, route, error: 'method_not_allowed' });
+			return reply(405, { error: 'method_not_allowed' });
+		}
 		try {
 			switch (route) {
 				case 'projects':
@@ -218,7 +225,16 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 				deps.log({ event: 'api.rejected', tenant: rt.tenant.id, route, error: error.code });
 				return reply(error.status, { error: error.code });
 			}
-			if (error instanceof MiroNotConnected) return reply(503, { error: 'miro_not_connected' });
+			if (error instanceof MiroNotConnected) {
+				deps.log({
+					event: 'api.failed',
+					level: 'error',
+					tenant: rt.tenant.id,
+					route,
+					error: 'miro_not_connected',
+				});
+				return reply(503, { error: 'miro_not_connected' });
+			}
 			const code =
 				error instanceof MiroApiError
 					? 'miro_failed'

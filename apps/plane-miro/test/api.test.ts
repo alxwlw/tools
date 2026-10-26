@@ -69,7 +69,7 @@ describe('JWT и команда', () => {
 		expect(w.miro.calls).toEqual([]);
 	});
 
-	test('неизвестный путь → 404, чужой метод → 405', async () => {
+	test('неизвестный путь → 404, чужой метод → 405; по строке api.rejected, неизвестный путь в строку не попадает', async () => {
 		const w = world();
 		expect((await json(await w.call('GET', '/miro/api/nothing'))).status).toBe(404);
 		expect(await json(await w.call('GET', '/miro/api/convert'))).toEqual({
@@ -80,6 +80,20 @@ describe('JWT и команда', () => {
 		expect((await w.call('POST', '/miro/api/search?q=a', { body: {} })).status).toBe(405);
 		expect((await w.call('POST', '/miro/api/card', { body: {} })).status).toBe(405);
 		expect((await w.call('GET', '/miro/api/bind')).status).toBe(405);
+		const rejected = (route: string) => ({
+			event: 'api.rejected',
+			tenant: 'acme',
+			route,
+			error: 'method_not_allowed',
+		});
+		expect(w.logs).toEqual([
+			{ event: 'api.rejected', tenant: 'acme', error: 'not_found' },
+			rejected('convert'),
+			rejected('projects'),
+			rejected('search'),
+			rejected('card'),
+			rejected('bind'),
+		]);
 	});
 });
 
@@ -395,7 +409,7 @@ describe('POST /miro/api/convert', () => {
 		}
 	});
 
-	test('три кода отказа после JWT пишут по строке api.rejected без текста; неизвестный маршрут не пишет', async () => {
+	test('коды отказа после JWT пишут по строке api.rejected без текста; у неизвестного маршрута — без пути', async () => {
 		const w = world();
 		w.miro.noAccess.add(BOARD);
 		await w.call('POST', '/miro/api/convert', { body: convertBody() });
@@ -406,6 +420,43 @@ describe('POST /miro/api/convert', () => {
 			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'board_no_access' },
 			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'unknown_project' },
 			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'bad_request' },
+			{ event: 'api.rejected', tenant: 'acme', error: 'not_found' },
+		]);
+	});
+
+	test('служебный аккаунт Miro не подключён (токена нет) → 503 и одна строка api.failed miro_not_connected', async () => {
+		const w = world();
+		// the real MiroClient over an empty store: no token for the team
+		const rt = createRuntime(w.tenant, {
+			planeUrl: w.config.planeUrl,
+			store: w.store,
+			plane: w.plane,
+		});
+		const api = createApi({
+			config: w.config,
+			runtimes: new Map([[w.tenant.id, rt]]),
+			store: w.store,
+			log: w.log,
+			nowSec: () => NOW_SEC,
+		});
+		const url = 'http://x/miro/api/convert';
+		const res = await api(
+			new Request(url, {
+				method: 'POST',
+				headers: { authorization: `Bearer ${jwt()}` },
+				body: JSON.stringify(convertBody()),
+			}),
+			new URL(url),
+		);
+		expect(await json(res)).toEqual({ status: 503, body: { error: 'miro_not_connected' } });
+		expect(w.logs).toEqual([
+			{
+				event: 'api.failed',
+				level: 'error',
+				tenant: 'acme',
+				route: 'convert',
+				error: 'miro_not_connected',
+			},
 		]);
 	});
 
