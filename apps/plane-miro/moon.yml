@@ -12,7 +12,7 @@ fileGroups:
     - 'scripts/**/*'
     - 'web/**/*'
 
-# The skeleton has no src/ yet (lint targets src only); lint scripts/ until it does.
+# The canon lint targets src only; the appended arg adds scripts/.
 tasks:
   lint:
     args: 'scripts'
