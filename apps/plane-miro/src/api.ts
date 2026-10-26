@@ -63,10 +63,10 @@ async function readJson(req: Request): Promise<Body> {
 	try {
 		parsed = JSON.parse(new TextDecoder().decode(bytes));
 	} catch {
-		throw badRequest();
+		// Not JSON: handled as a body without fields.
 	}
-	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw badRequest();
-	return parsed as Body;
+	// Anything but an object has no fields, and a missing field is a bad_request in the checks that follow.
+	return parsed instanceof Object ? (parsed as Body) : {};
 }
 
 function text(value: unknown, pattern: RegExp): string {
@@ -153,10 +153,10 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 	}
 
 	async function card(rt: TenantRuntime, url: URL): Promise<Response> {
-		const board = url.searchParams.get('board');
-		const item = url.searchParams.get('item');
-		if (board === null || item === null) throw badRequest();
-		const row = deps.store.findCard(text(board, BOARD_ID), text(item, ITEM_ID));
+		const row = deps.store.findCard(
+			text(url.searchParams.get('board'), BOARD_ID),
+			text(url.searchParams.get('item'), ITEM_ID),
+		);
 		const unknown = new Reject(404, 'unknown_card');
 		if (row === null || row.tenant !== rt.tenant.id || rt.isHidden(row.projectId)) throw unknown;
 		const workItem = await rt.plane.getWorkItem(row.projectId, row.workItemId);
@@ -176,19 +176,18 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 	}
 
 	return async (req, url) => {
-		const auth = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '');
+		const token = req.headers.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
 		const identity =
-			auth === null
+			token === undefined
 				? null
-				: verifyIdToken(auth[1] as string, {
+				: verifyIdToken(token, {
 						clientId: deps.config.miro.clientId,
 						clientSecret: deps.config.miro.clientSecret,
 						nowSec: nowSec(),
 					});
 		if (identity === null) return reply(401, { error: 'unauthorized' });
-		const tenant = deps.config.tenants.find((t) => t.miroTeamId === identity.teamId);
-		const rt = tenant === undefined ? undefined : deps.runtimes.get(tenant.id);
-		if (tenant === undefined || rt === undefined) {
+		const rt = [...deps.runtimes.values()].find((r) => r.tenant.miroTeamId === identity.teamId);
+		if (rt === undefined) {
 			deps.log({ event: 'api.unknown_team', team: identity.teamId });
 			return reply(403, { error: 'unknown_team' });
 		}
@@ -222,7 +221,7 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 			deps.log({
 				event: 'api.failed',
 				level: 'error',
-				tenant: tenant.id,
+				tenant: rt.tenant.id,
 				route,
 				error: code,
 				detail: (error as Error).message,

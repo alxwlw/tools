@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import { boardLink } from '../src/card.ts';
-import { besidePlace, CARD_WIDTH, convertItems, type ConvertRequest } from '../src/convert.ts';
+import {
+	besidePlace,
+	CARD_WIDTH,
+	convertItems,
+	type ConvertRequest,
+	lockedItems,
+} from '../src/convert.ts';
 import { MiroApiError, MiroNotConnected } from '../src/miro/rest.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
 import { BOARD, MIRO_WRITES, seedItem, sticky, world } from './world.ts';
@@ -369,6 +375,51 @@ describe('convertItems', () => {
 		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
 		expect([a[0]?.ok, b[0]?.ok]).toEqual([true, false]);
 		expect(b[0]).toMatchObject({ error: 'not_found' });
+	});
+
+	test('403, пришедший не от Miro, не становится board_no_access', async () => {
+		const w = world();
+		w.miro.failNext('createAppCard', new PlaneApiError(403, 'POST', '/x'));
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: false,
+			error: 'miro_failed',
+		});
+	});
+
+	test('замки снимаются, когда запросы закончились (успех, ошибка, не найден)', async () => {
+		const w = world({ keepSource: false });
+		w.plane.failNext('createWorkItem', new PlaneApiError(503, 'POST', '/x'));
+		await Promise.all([
+			convertItems(w.rt, w.store, req(['101']), w.log),
+			convertItems(w.rt, w.store, req(['101', '102', '999']), w.log),
+		]);
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(lockedItems()).toBe(0);
+	});
+
+	test('третий запрос ждёт второго, даже когда первый уже закончился', async () => {
+		const w = world({ keepSource: true });
+		const read = w.miro.getItem.bind(w.miro);
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		let reads = 0;
+		// the second getItem (the second request, after the first finished) stands until released
+		w.miro.getItem = async (boardId, itemId) => {
+			if (++reads === 2) await gate;
+			return read(boardId, itemId);
+		};
+		const first = convertItems(w.rt, w.store, req(['101']), w.log);
+		const second = convertItems(w.rt, w.store, req(['101']), w.log);
+		await first;
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(reads).toBe(2);
+		const third = convertItems(w.rt, w.store, req(['101']), w.log);
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(reads).toBe(2);
+		release();
+		await Promise.all([second, third]);
+		expect(reads).toBe(3);
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
 	});
 
 	test('замок снимается после ошибки: следующий запрос на тот же стикер идёт', async () => {

@@ -5,6 +5,10 @@ import { Store } from '../src/store.ts';
 import { world } from './world.ts';
 
 describe('createRuntime', () => {
+	test('кэш живёт десять минут', () => {
+		expect(CACHE_TTL_MS).toBe(600_000);
+	});
+
 	test('projects: без скрытых и архивных, кэш на CACHE_TTL_MS', async () => {
 		const w = world({ hiddenProjects: ['p-hidden'] });
 		let now = 0;
@@ -81,5 +85,49 @@ describe('createRuntime', () => {
 		expect(calls.at(-1)).toBe('GET https://api.miro.com/v2/boards/b Bearer miro-token');
 		await rt.plane.listProjects();
 		expect(calls.some((c) => c.includes('example-ws') && c.endsWith('Bearer bot'))).toBe(true);
+	});
+
+	test('PlaneClient получает секреты и установку тенанта; часы runtime доходят до токена', async () => {
+		const w = world();
+		const seen: Array<{ url: string; auth: string | null; body: string }> = [];
+		let tokens = 0;
+		let now = 0;
+		const rt = createRuntime(w.tenant, {
+			planeUrl: 'https://plane.example.com',
+			store: new Store(':memory:'),
+			now: () => now,
+			fetch: async (url, init) => {
+				seen.push({
+					url,
+					auth: new Headers(init.headers).get('authorization'),
+					body: String(init.body ?? ''),
+				});
+				if (url.endsWith('/auth/o/token/')) {
+					tokens++;
+					return Response.json({ access_token: `bot-${tokens}`, expires_in: 3600 });
+				}
+				if (url.includes('/members/')) return Response.json([]);
+				return Response.json({ id: w.tenant.auth.appInstallationId, app_bot: 'bot-user' });
+			},
+		});
+		expect(await rt.plane.botUserId()).toBe('bot-user');
+		const basic = Buffer.from(`${w.tenant.auth.clientId}:${w.tenant.auth.clientSecret}`).toString(
+			'base64',
+		);
+		expect(seen[0]?.auth).toBe(`Basic ${basic}`);
+		expect(new URLSearchParams(seen[0]?.body).get('app_installation_id')).toBe(
+			w.tenant.auth.appInstallationId,
+		);
+		expect(seen[1]?.url).toBe(
+			`https://plane.example.com/auth/o/app-installation/?id=${w.tenant.auth.appInstallationId}`,
+		);
+		expect(seen[1]?.auth).toBe('Bearer bot-1');
+		// 3600 s lifetime minus the renewal margin: still cached at 2999 s, renewed at 3000 s
+		now = 2_999_000;
+		await rt.plane.listMembers();
+		expect(tokens).toBe(1);
+		now = 3_000_000;
+		await rt.plane.listMembers();
+		expect(tokens).toBe(2);
 	});
 });

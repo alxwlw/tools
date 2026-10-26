@@ -40,7 +40,6 @@ export function createRuntime(
 		miro?: MiroApi;
 	},
 ): TenantRuntime {
-	const now = deps.now ?? (() => Date.now());
 	const plane =
 		deps.plane ??
 		new PlaneClient({
@@ -54,7 +53,7 @@ export function createRuntime(
 				clientSecret: tenant.auth.clientSecret,
 				appInstallationId: tenant.auth.appInstallationId,
 				fetch: deps.fetch,
-				now,
+				now: deps.now,
 			}),
 		});
 	const miro =
@@ -64,9 +63,9 @@ export function createRuntime(
 			fetch: deps.fetch,
 		});
 	const hidden = new Set(tenant.hiddenProjects);
-	const allProjects = ttl(() => plane.listProjects(), CACHE_TTL_MS, now);
+	const allProjects = ttl(() => plane.listProjects(), CACHE_TTL_MS, deps.now);
 	const statesOf = new Map<string, () => Promise<StateSummary[]>>();
-	const members = ttl<MemberSummary[]>(() => plane.listMembers(), CACHE_TTL_MS, now);
+	const members = ttl<MemberSummary[]>(() => plane.listMembers(), CACHE_TTL_MS, deps.now);
 	return {
 		tenant,
 		plane,
@@ -83,7 +82,7 @@ export function createRuntime(
 		async state(projectId, stateId) {
 			let load = statesOf.get(projectId);
 			if (load === undefined) {
-				load = ttl(() => plane.listStates(projectId), CACHE_TTL_MS, now);
+				load = ttl(() => plane.listStates(projectId), CACHE_TTL_MS, deps.now);
 				statesOf.set(projectId, load);
 			}
 			return (await load()).find((s) => s.id === stateId) ?? null;

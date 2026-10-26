@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Tenant } from '../src/config.ts';
 import { jsonLog, type LogEntry } from '../src/log.ts';
 import type { PlaneEvent } from '../src/plane/webhook.ts';
-import { createHandler, MAX_PLANE_BODY, type ServerDeps } from '../src/server.ts';
+import { createHandler, MAX_PLANE_BODY, readBounded, type ServerDeps } from '../src/server.ts';
 import { miroOauthHandler } from '../src/miro/oauth.ts';
 import { Store } from '../src/store.ts';
 import { fixture } from './fixtures.ts';
@@ -664,6 +664,17 @@ describe('маршруты Miro', () => {
 		);
 		expect(post.status).toBe(401);
 		expect(w.miro.calls).toEqual([]);
+	});
+
+	test('readBounded: content-length не число — тело читается потоком, а не отвергается', async () => {
+		const req = (headers: Record<string, string>) =>
+			new Request('http://x/', { method: 'POST', body: '{"a":1}', headers });
+		expect(
+			new TextDecoder().decode((await readBounded(req({ 'content-length': 'Infinity' })))!),
+		).toBe('{"a":1}');
+		expect(await readBounded(req({ 'content-length': '100' }), 99)).toBeNull();
+		expect(await readBounded(req({}), 6)).toBeNull();
+		expect(await readBounded(req({}), 7)).not.toBeNull();
 	});
 
 	test('web: страница из хука; null → 404; не GET → 405 без вызова хука', async () => {

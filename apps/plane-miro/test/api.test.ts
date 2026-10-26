@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { MiroApiError, MiroNotConnected } from '../src/miro/rest.ts';
+import { createApi } from '../src/api.ts';
+import { PlaneAuthError } from '../src/plane/auth.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
 import { BOARD, jwt, MIRO_WRITES, NOW_SEC, seedItem, world } from './world.ts';
 
@@ -77,6 +79,28 @@ describe('JWT и команда', () => {
 		expect((await w.call('POST', '/miro/api/search?q=a', { body: {} })).status).toBe(405);
 		expect((await w.call('POST', '/miro/api/card', { body: {} })).status).toBe(405);
 		expect((await w.call('GET', '/miro/api/bind')).status).toBe(405);
+	});
+});
+
+describe('часы по умолчанию', () => {
+	test('без nowSec берутся настоящие секунды: живой токен проходит, просроченный 10 дней назад — 401', async () => {
+		const w = world();
+		const api = createApi({
+			config: w.config,
+			runtimes: new Map([[w.tenant.id, w.rt]]),
+			store: w.store,
+			log: w.log,
+		});
+		const get = (token: string) =>
+			api(
+				new Request('http://x/miro/api/projects', {
+					headers: { authorization: `Bearer ${token}` },
+				}),
+				new URL('http://x/miro/api/projects'),
+			);
+		const nowSec = Math.floor(Date.now() / 1000);
+		expect((await get(jwt({ exp: nowSec + 600 }))).status).toBe(200);
+		expect((await get(jwt({ exp: nowSec - 10 * 86_400 }))).status).toBe(401);
 	});
 });
 
@@ -250,7 +274,7 @@ describe('POST /miro/api/convert', () => {
 				status: 400,
 				body: { error: 'bad_request' },
 			});
-		for (const raw of ['{', '', 'не json'])
+		for (const raw of ['{', '', 'не json', 'null', '7', '"s"', 'true', '[]', '[{"boardId":"b"}]'])
 			expect(await json(await w.call('POST', '/miro/api/convert', { raw })), raw).toEqual({
 				status: 400,
 				body: { error: 'bad_request' },
@@ -301,9 +325,17 @@ describe('POST /miro/api/convert', () => {
 			headers: { 'content-length': String(65 * 1024) },
 		});
 		expect(declared.status).toBe(413);
-		const exact = JSON.stringify(convertBody({ author: ' '.repeat(64 * 1024 - 100) }));
-		expect(exact.length).toBeLessThanOrEqual(64 * 1024);
-		expect((await w.call('POST', '/miro/api/convert', { raw: exact })).status).toBe(200);
+		// ASCII body of an exact size: one byte over the limit is refused, the limit itself passes
+		const sized = (n: number) => {
+			const base = JSON.stringify(convertBody({ author: '' })).length;
+			return JSON.stringify(convertBody({ author: ' '.repeat(n - base) }));
+		};
+		expect(sized(64 * 1024 + 1).length).toBe(64 * 1024 + 1);
+		expect((await w.call('POST', '/miro/api/convert', { raw: sized(64 * 1024 + 1) })).status).toBe(
+			413,
+		);
+		expect(sized(64 * 1024).length).toBe(64 * 1024);
+		expect((await w.call('POST', '/miro/api/convert', { raw: sized(64 * 1024) })).status).toBe(200);
 		// only the request that fits created something
 		expect(w.plane.createdItems).toHaveLength(1);
 	});
@@ -335,6 +367,20 @@ describe('POST /miro/api/convert', () => {
 			body: { error: 'miro_failed' },
 		});
 		expect(w.plane.createdItems).toEqual([]);
+	});
+
+	test('ошибка авторизации Plane вне элементов → 502 plane_failed', async () => {
+		const w = world();
+		w.plane.failNext('listProjects', new PlaneAuthError(401));
+		expect(await json(await w.call('GET', '/miro/api/projects'))).toEqual({
+			status: 502,
+			body: { error: 'plane_failed' },
+		});
+		expect(w.logs[0]).toMatchObject({
+			event: 'api.failed',
+			route: 'projects',
+			detail: expect.any(String),
+		});
 	});
 
 	test('чужая ошибка (баг) не маскируется под plane_failed', async () => {

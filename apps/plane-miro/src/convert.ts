@@ -135,6 +135,9 @@ function exclusive<T>(key: string, run: () => Promise<T>): Promise<T> {
 	return result;
 }
 
+/** Items with a conversion running or queued; empty when idle. */
+export const lockedItems = (): number => tails.size;
+
 function ctxOf(
 	rt: TenantRuntime,
 	store: Store,
