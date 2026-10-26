@@ -1,5 +1,5 @@
 // Adapted from apps/plane-discord/test/fixtures.ts.
-// Sanitized Plane deliveries and API replies captured by the probe (Task 1). All files were produced by ONE
+// Sanitized Plane deliveries and API replies captured by the probe. All files were produced by ONE
 // createSanitizer over every capture, so a placeholder UUID means the same entity in every file.
 // Deliveries are { headers, raw } and `fixture` adds the parsed `body`; API replies such as
 // plane-search.json are plain JSON, read with `apiFixture`.

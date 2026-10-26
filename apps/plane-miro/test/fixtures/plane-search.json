@@ -4,7 +4,7 @@
 			"name": "Name1",
 			"id": "00000000-0000-4000-8000-000000000001",
 			"sequence_id": 103,
-			"project__identifier": "DX",
+			"project__identifier": "ACME",
 			"project_id": "00000000-0000-4000-8000-000000000002",
 			"workspace__slug": "example-ws",
 			"type_id": null
@@ -13,7 +13,7 @@
 			"name": "Name2",
 			"id": "00000000-0000-4000-8000-000000000003",
 			"sequence_id": 102,
-			"project__identifier": "DX",
+			"project__identifier": "ACME",
 			"project_id": "00000000-0000-4000-8000-000000000002",
 			"workspace__slug": "example-ws",
 			"type_id": null
@@ -22,7 +22,7 @@
 			"name": "Name3",
 			"id": "00000000-0000-4000-8000-000000000004",
 			"sequence_id": 57,
-			"project__identifier": "DX",
+			"project__identifier": "ACME",
 			"project_id": "00000000-0000-4000-8000-000000000002",
 			"workspace__slug": "example-ws",
 			"type_id": null
@@ -31,7 +31,7 @@
 			"name": "Name4",
 			"id": "00000000-0000-4000-8000-000000000005",
 			"sequence_id": 57,
-			"project__identifier": "OPS",
+			"project__identifier": "BETA",
 			"project_id": "00000000-0000-4000-8000-000000000006",
 			"workspace__slug": "example-ws",
 			"type_id": null
@@ -40,7 +40,7 @@
 			"name": "Name5",
 			"id": "00000000-0000-4000-8000-000000000007",
 			"sequence_id": 12,
-			"project__identifier": "LQ",
+			"project__identifier": "GAMMA",
 			"project_id": "00000000-0000-4000-8000-000000000008",
 			"workspace__slug": "example-ws",
 			"type_id": null
@@ -49,7 +49,7 @@
 			"name": "Name5",
 			"id": "00000000-0000-4000-8000-000000000009",
 			"sequence_id": 46,
-			"project__identifier": "MR",
+			"project__identifier": "DELTA",
 			"project_id": "00000000-0000-4000-8000-000000000010",
 			"workspace__slug": "example-ws",
 			"type_id": "00000000-0000-4000-8000-000000000011"

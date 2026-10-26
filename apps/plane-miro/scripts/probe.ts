@@ -30,9 +30,9 @@ const STATUS_FILL: Record<string, string> = {
 	cancelled: '#ffe3e3',
 };
 
-export const USAGE = `usage: bun scripts/probe.ts <subcommand> [args] --out <dir> [--tenant liq|yulii]
+export const USAGE = `usage: bun scripts/probe.ts <subcommand> [args] --out <dir> [--tenant acme|beta]
 
-Plane (tenant liq by default for single-workspace subcommands):
+Plane (tenant acme by default for single-workspace subcommands):
   plane-token                      bot token of both tenants, GET /projects/ of both
   plane-search --q <text>          GET /work-items/search/?search=<text>
   plane-item --project <uuid> [--name <text>]       create a work item
@@ -52,8 +52,8 @@ Miro (board from PROBE_MIRO_BOARD_ID):
 env, Plane:
   PROBE_PLANE_URL                  e.g. https://plane.example.com
   PROBE_PLANE_CLIENT_ID, PROBE_PLANE_CLIENT_SECRET     the Plane App credentials
-  PROBE_LIQ_WORKSPACE, PROBE_LIQ_INSTALLATION_ID       workspace slug and app installation id, tenant liq
-  PROBE_YULII_WORKSPACE, PROBE_YULII_INSTALLATION_ID   the same for tenant yulii
+  PROBE_ACME_WORKSPACE, PROBE_ACME_INSTALLATION_ID     workspace slug and app installation id, tenant acme
+  PROBE_BETA_WORKSPACE, PROBE_BETA_INSTALLATION_ID     the same for tenant beta
 env, Miro:
   PROBE_MIRO_TOKEN                 access token of the service account
   PROBE_MIRO_BOARD_ID              probe board
@@ -64,7 +64,7 @@ so a repeated run keeps both answers.
 
 type Env = Record<string, string | undefined>;
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
-type Tenant = 'liq' | 'yulii';
+type Tenant = 'acme' | 'beta';
 
 type Reply = { status: number; body: unknown };
 
@@ -225,9 +225,9 @@ const is2xx = (status: number): boolean => status >= 200 && status < 300;
 const seg = (s: string): string => encodeURIComponent(s);
 
 function tenantOf(raw: string | undefined): Tenant {
-	if (raw === undefined || raw === 'liq') return 'liq';
-	if (raw === 'yulii') return 'yulii';
-	throw new Error(`--tenant must be liq or yulii, got ${raw}`);
+	if (raw === undefined || raw === 'acme') return 'acme';
+	if (raw === 'beta') return 'beta';
+	throw new Error(`--tenant must be acme or beta, got ${raw}`);
 }
 
 async function run(
@@ -255,7 +255,7 @@ async function run(
 
 	switch (cmd) {
 		case 'plane-token':
-			for (const t of ['liq', 'yulii'] as const) {
+			for (const t of ['acme', 'beta'] as const) {
 				await p.plane(t, `projects-${t}`, 'GET', '/projects/', undefined, (b) =>
 					listOf(b).map((x) => ({ id: x.id, identifier: x.identifier })),
 				);

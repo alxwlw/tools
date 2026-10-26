@@ -246,12 +246,12 @@ describe('PlaneClient: чтение', () => {
 		});
 		// Distinct projects with the same number stay distinct hits.
 		expect(hits.map((h) => h.key)).toEqual([
-			'DX-103',
-			'DX-102',
-			'DX-57',
-			'OPS-57',
-			'LQ-12',
-			'MR-46',
+			'ACME-103',
+			'ACME-102',
+			'ACME-57',
+			'BETA-57',
+			'GAMMA-12',
+			'DELTA-46',
 		]);
 		expect(hits[3]?.projectId).not.toBe(hits[2]?.projectId);
 		expect(hits[3]?.name).toBe('Name4');
@@ -269,13 +269,13 @@ describe('PlaneClient: чтение', () => {
 	});
 
 	test('searchWorkItems: не-объекты в issues отбрасываются; строка без sequence_id — ошибка, а не NaN', async () => {
-		const row = { id: 'a', name: 'n', sequence_id: 1, project__identifier: 'DX', project_id: 'p' };
+		const row = { id: 'a', name: 'n', sequence_id: 1, project__identifier: 'ACME', project_id: 'p' };
 		const { client } = stub([
 			{ status: 200, body: { issues: [null, 'x', [], row] } },
 			{ status: 200, body: { issues: [{ ...row, sequence_id: '1' }] } },
 		]);
 		expect(await client.searchWorkItems('q')).toEqual([
-			{ id: 'a', projectId: 'p', key: 'DX-1', name: 'n' },
+			{ id: 'a', projectId: 'p', key: 'ACME-1', name: 'n' },
 		]);
 		expect(String(await failure(client.searchWorkItems('q')))).toContain('sequence_id');
 	});

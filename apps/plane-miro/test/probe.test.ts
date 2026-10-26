@@ -143,8 +143,8 @@ test('--step переименовывает файл plane-read: два запу
 		PROBE_PLANE_URL: 'https://plane.example.com',
 		PROBE_PLANE_CLIENT_ID: 'c',
 		PROBE_PLANE_CLIENT_SECRET: 's',
-		PROBE_LIQ_WORKSPACE: 'ws',
-		PROBE_LIQ_INSTALLATION_ID: 'i',
+		PROBE_ACME_WORKSPACE: 'ws',
+		PROBE_ACME_INSTALLATION_ID: 'i',
 	};
 	const fetchFn = (url: string): Promise<Response> =>
 		Promise.resolve(

@@ -54,7 +54,7 @@ const DIRTY = {
 	board: 'uXjVRealBoard1=',
 	id: '3f2b8c1e-9d4a-4e7b-a1c2-5b6d7e8f9a0b',
 	by: 'a@real.io',
-	link: 'https://plane.real.io/ws/browse/DX-1/',
+	link: 'https://plane.real.io/ws/browse/ACME-1/',
 };
 
 test('проверка находит каждую запрещённую форму, в том числе во вложенной JSON-строке', () => {

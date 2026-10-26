@@ -13,7 +13,7 @@ test('ни один UUID, slug, хост и email входа не доживае
 	const input = JSON.stringify({
 		id: UUID_A,
 		project: UUID_B,
-		url: 'https://plane.real.io/real-ws/browse/DX-1/',
+		url: 'https://plane.real.io/real-ws/browse/ACME-1/',
 		by: 'a@real.io',
 	});
 	const out = createSanitizer({ slugs: ['real-ws'], hosts: ['plane.real.io'] })(input);
@@ -21,7 +21,7 @@ test('ни один UUID, slug, хост и email входа не доживае
 		expect(out).not.toContain(secret);
 	}
 	const parsed = JSON.parse(out);
-	expect(parsed.url).toBe('https://plane.example.com/example-ws/browse/DX-1/');
+	expect(parsed.url).toBe('https://plane.example.com/example-ws/browse/ACME-1/');
 });
 
 test('один UUID — одна подмена во всех строках одного санитайзера', () => {
