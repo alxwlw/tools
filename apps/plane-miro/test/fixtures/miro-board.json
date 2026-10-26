@@ -1,77 +1,77 @@
 {
-  "id": "uXjVexample1=",
-  "type": "board",
-  "name": "Name1",
-  "description": "",
-  "links": {
-    "self": "https://api.miro.com/v2/boards/uXjVexample1%3D",
-    "related": "https://api.miro.com/v2/boards/uXjVexample1%3D/members?limit=20&offset=0"
-  },
-  "organization": {
-    "id": "3458764500000000001",
-    "type": "organization"
-  },
-  "createdAt": "2026-10-26T10:27:27Z",
-  "createdBy": {
-    "id": "3458764500000000002",
-    "type": "user",
-    "name": "Name2"
-  },
-  "currentUserMembership": {
-    "id": "3458764500000000002",
-    "type": "board_member",
-    "name": "Name2",
-    "role": "owner"
-  },
-  "lastOpenedAt": "2026-10-26T10:59:52Z",
-  "lastOpenedBy": {
-    "id": "3458764500000000002",
-    "type": "user",
-    "name": "Name2"
-  },
-  "modifiedAt": "2026-10-26T11:00:36Z",
-  "modifiedBy": {
-    "id": "3458764500000000002",
-    "type": "user",
-    "name": "Name2"
-  },
-  "owner": {
-    "id": "3458764500000000002",
-    "type": "user",
-    "name": "Name2"
-  },
-  "permissionsPolicy": {
-    "collaborationToolsStartAccess": "all_editors",
-    "copyAccess": "anyone",
-    "copyAccessLevel": "anyone",
-    "sharingAccess": "team_members_with_editing_rights"
-  },
-  "policy": {
-    "permissionsPolicy": {
-      "collaborationToolsStartAccess": "all_editors",
-      "copyAccess": "anyone",
-      "copyAccessLevel": "anyone",
-      "sharingAccess": "team_members_with_editing_rights"
-    },
-    "sharingPolicy": {
-      "access": "private",
-      "accessPasswordRequired": false,
-      "inviteToAccountAndBoardLinkAccess": "editor",
-      "organizationAccess": "private",
-      "teamAccess": "edit"
-    }
-  },
-  "sharingPolicy": {
-    "access": "private",
-    "accessPasswordRequired": false,
-    "inviteToAccountAndBoardLinkAccess": "editor",
-    "organizationAccess": "private",
-    "teamAccess": "edit"
-  },
-  "team": {
-    "id": "3458764500000000003",
-    "type": "team",
-    "name": "Name3"
-  },
-  "viewLink": "https://miro.com/app/board/uXjVexample1="
+	"id": "uXjVexample1=",
+	"type": "board",
+	"name": "Name1",
+	"description": "",
+	"links": {
+		"self": "https://api.miro.com/v2/boards/uXjVexample1%3D",
+		"related": "https://api.miro.com/v2/boards/uXjVexample1%3D/members?limit=20&offset=0"
+	},
+	"organization": {
+		"id": "3458764500000000001",
+		"type": "organization"
+	},
+	"createdAt": "2026-10-26T10:27:27Z",
+	"createdBy": {
+		"id": "3458764500000000002",
+		"type": "user",
+		"name": "Name2"
+	},
+	"currentUserMembership": {
+		"id": "3458764500000000002",
+		"type": "board_member",
+		"name": "Name2",
+		"role": "owner"
+	},
+	"lastOpenedAt": "2026-10-26T10:59:52Z",
+	"lastOpenedBy": {
+		"id": "3458764500000000002",
+		"type": "user",
+		"name": "Name2"
+	},
+	"modifiedAt": "2026-10-26T11:00:36Z",
+	"modifiedBy": {
+		"id": "3458764500000000002",
+		"type": "user",
+		"name": "Name2"
+	},
+	"owner": {
+		"id": "3458764500000000002",
+		"type": "user",
+		"name": "Name2"
+	},
+	"permissionsPolicy": {
+		"collaborationToolsStartAccess": "all_editors",
+		"copyAccess": "anyone",
+		"copyAccessLevel": "anyone",
+		"sharingAccess": "team_members_with_editing_rights"
+	},
+	"policy": {
+		"permissionsPolicy": {
+			"collaborationToolsStartAccess": "all_editors",
+			"copyAccess": "anyone",
+			"copyAccessLevel": "anyone",
+			"sharingAccess": "team_members_with_editing_rights"
+		},
+		"sharingPolicy": {
+			"access": "private",
+			"accessPasswordRequired": false,
+			"inviteToAccountAndBoardLinkAccess": "editor",
+			"organizationAccess": "private",
+			"teamAccess": "edit"
+		}
+	},
+	"sharingPolicy": {
+		"access": "private",
+		"accessPasswordRequired": false,
+		"inviteToAccountAndBoardLinkAccess": "editor",
+		"organizationAccess": "private",
+		"teamAccess": "edit"
+	},
+	"team": {
+		"id": "3458764500000000003",
+		"type": "team",
+		"name": "Name3"
+	},
+	"viewLink": "https://miro.com/app/board/uXjVexample1="
 }

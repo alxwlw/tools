@@ -1,48 +1,48 @@
 {
-  "size": 1,
-  "limit": 50,
-  "total": 1,
-  "data": [
-    {
-      "id": "3458764500000000001",
-      "links": {
-        "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/connectors/3458764500000000001"
-      },
-      "startItem": {
-        "links": {
-          "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/items/3458764500000000002"
-        },
-        "id": "3458764500000000002"
-      },
-      "endItem": {
-        "links": {
-          "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/items/3458764500000000003"
-        },
-        "id": "3458764500000000003"
-      },
-      "createdAt": "2026-10-26T10:42:11Z",
-      "createdBy": {
-        "id": "3458764500000000004",
-        "type": "user"
-      },
-      "modifiedAt": "2026-10-26T11:00:19Z",
-      "modifiedBy": {
-        "id": "3458764500000000004",
-        "type": "user"
-      },
-      "shape": "curved",
-      "style": {
-        "startStrokeCap": "none",
-        "endStrokeCap": "stealth",
-        "strokeWidth": "1.0",
-        "strokeStyle": "normal",
-        "strokeColor": "#000000"
-      },
-      "type": "connector"
-    }
-  ],
-  "links": {
-    "self": "https://api.miro.com/v2/boards/uXjVexample1%3D/connectors?limit=50&cursor="
-  },
-  "type": "cursor-list"
+	"size": 1,
+	"limit": 50,
+	"total": 1,
+	"data": [
+		{
+			"id": "3458764500000000001",
+			"links": {
+				"self": "https://api.miro.com/v2/boards/uXjVexample1%3D/connectors/3458764500000000001"
+			},
+			"startItem": {
+				"links": {
+					"self": "https://api.miro.com/v2/boards/uXjVexample1%3D/items/3458764500000000002"
+				},
+				"id": "3458764500000000002"
+			},
+			"endItem": {
+				"links": {
+					"self": "https://api.miro.com/v2/boards/uXjVexample1%3D/items/3458764500000000003"
+				},
+				"id": "3458764500000000003"
+			},
+			"createdAt": "2026-10-26T10:42:11Z",
+			"createdBy": {
+				"id": "3458764500000000004",
+				"type": "user"
+			},
+			"modifiedAt": "2026-10-26T11:00:19Z",
+			"modifiedBy": {
+				"id": "3458764500000000004",
+				"type": "user"
+			},
+			"shape": "curved",
+			"style": {
+				"startStrokeCap": "none",
+				"endStrokeCap": "stealth",
+				"strokeWidth": "1.0",
+				"strokeStyle": "normal",
+				"strokeColor": "#000000"
+			},
+			"type": "connector"
+		}
+	],
+	"links": {
+		"self": "https://api.miro.com/v2/boards/uXjVexample1%3D/connectors?limit=50&cursor="
+	},
+	"type": "cursor-list"
 }
