@@ -308,7 +308,9 @@ describe('createNotifier: повтор доставки в тред', () => {
 		await run(w);
 		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
 		expect(w.discord.callsOf('recentMessages')).toEqual([[THREAD, 10]]);
-		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toHaveLength(1);
+		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toEqual([
+			{ event: 'notify.thread_dup_skipped', level: 'warn', tenant: 'initech', thread: THREAD },
+		]);
 	});
 
 	test('сбой до поста (5xx без сообщения) → повтор постит ровно один раз', async () => {
@@ -322,6 +324,21 @@ describe('createNotifier: повтор доставки в тред', () => {
 		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
 		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
 		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toEqual([]);
+	});
+
+	test('без сбоев история не читается; после успешного повтора флаг сброшен', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		const [d] = await w.notify(comment('<p>один раз</p>'));
+		await d!.run();
+		expect(w.discord.callsOf('recentMessages')).toEqual([]);
+		w.discord.failOnce.set('executeWebhook', new DiscordApiError(500, 'POST', '/x'));
+		await expect(d!.run()).rejects.toBeInstanceOf(DiscordApiError);
+		w.discord.posted.clear();
+		await d!.run();
+		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
+		await d!.run();
+		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
 	});
 
 	test('429 — пост не принят: повтор без чтения истории', async () => {
