@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { CONVERTIBLE as serverConvertible, MAX_ITEMS } from '../src/convert.ts';
 import {
+	apiResult,
 	BATCH_SIZE,
 	bindableId,
 	CONVERTIBLE as webConvertible,
@@ -224,5 +225,40 @@ describe('currentSelection', () => {
 		expect(currentSelection(updated, initial)).toEqual(updated);
 		expect(currentSelection([], initial)).toEqual([]);
 		expect(currentSelection(null, initial)).toEqual(initial);
+	});
+});
+
+describe('apiResult', () => {
+	const reply = (status: number, body: string) => async () => new Response(body, { status });
+
+	test('fetch отклонён (сети нет) → network', async () => {
+		expect(
+			await apiResult(async () => {
+				throw new TypeError('Failed to fetch');
+			}),
+		).toEqual({ ok: false, error: 'network' });
+	});
+
+	test('ошибка с кодом в JSON → этот код; тело не JSON, без кода или с не-строкой → unknown', async () => {
+		expect(await apiResult(reply(409, '{"error":"board_no_access"}'))).toEqual({
+			ok: false,
+			error: 'board_no_access',
+		});
+		expect(await apiResult(reply(502, '<html>Bad Gateway</html>'))).toEqual({
+			ok: false,
+			error: 'unknown',
+		});
+		expect(await apiResult(reply(500, '{}'))).toEqual({ ok: false, error: 'unknown' });
+		expect(await apiResult(reply(500, '{"error":5}'))).toEqual({ ok: false, error: 'unknown' });
+		expect(await apiResult(reply(500, 'null'))).toEqual({ ok: false, error: 'unknown' });
+	});
+
+	test('2xx без тела или не JSON → unknown; 2xx с JSON → данные', async () => {
+		expect(await apiResult(reply(200, ''))).toEqual({ ok: false, error: 'unknown' });
+		expect(await apiResult(reply(200, 'ok'))).toEqual({ ok: false, error: 'unknown' });
+		expect(await apiResult(reply(200, '{"projects":[]}'))).toEqual({
+			ok: true,
+			data: { projects: [] },
+		});
 	});
 });

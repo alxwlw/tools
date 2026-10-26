@@ -29,6 +29,30 @@ const TEXTS: Readonly<Record<string, string>> = {
 };
 const FALLBACK = 'Что-то пошло не так.';
 
+/**
+ * One API call's outcome, never a throw: a rejected `send` is `network`; an error status carries the body's
+ * `error` code, or `unknown` when the body is not JSON or has none; a 2xx without a JSON body is `unknown` too.
+ */
+export async function apiResult<T>(send: () => Promise<Response>): Promise<ApiResult<T>> {
+	let res: Response;
+	try {
+		res = await send();
+	} catch {
+		return { ok: false, error: 'network' };
+	}
+	let body: unknown;
+	try {
+		body = await res.json();
+	} catch {
+		// A body that is not JSON carries no code.
+	}
+	if (!res.ok) {
+		const code = (body as { error?: unknown } | null | undefined)?.error;
+		return { ok: false, error: typeof code === 'string' ? code : 'unknown' };
+	}
+	return body === undefined ? { ok: false, error: 'unknown' } : { ok: true, data: body as T };
+}
+
 export function convertibleIds(items: readonly Item[]): string[] {
 	return items.filter((item) => CONVERTIBLE.includes(item.type)).map((item) => item.id);
 }
