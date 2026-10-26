@@ -146,6 +146,8 @@ describe('createNotifier: comment.created → тред', () => {
 	test('404 другого рода и 5xx → ошибка как есть, webhook не пересоздаётся', async () => {
 		for (const err of [
 			new DiscordApiError(404, 'POST', '/webhooks/x/:token', 10008),
+			// the code alone is not enough: only a 404 means the thread is gone
+			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10003),
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', null),
 			// the code alone is not enough: only a 404 means the webhook is gone
 			new DiscordApiError(500, 'POST', '/webhooks/x/:token', 10015),
@@ -381,6 +383,22 @@ describe('createNotifier: удалённый тред', () => {
 		await runAll(await w.notify(agentMention()));
 		expect(sent(w.discord).map(([channel]) => channel)).toEqual([TEXT]);
 		expect(w.plane.activities.at(-1)?.body).toBe(`→ Discord: ${TEXT}`);
+	});
+});
+
+describe('createNotifier: удалённый тред после сомнительной попытки', () => {
+	test('сомнение снято вместе с привязкой: следующий run() историю не читает', async () => {
+		const w = setup([route(TEXT)]);
+		w.store.putThread('initech', ITEM, TEXT, THREAD, PROJECT);
+		w.store.putWebhook(TEXT, 'wh-old', 'tok-old');
+		const [d] = await w.notify(comment('<p>x</p>'));
+		w.discord.failOnce.set('executeWebhook', new DiscordApiError(502, 'POST', '/x'));
+		await expect(d!.run()).rejects.toBeInstanceOf(DiscordApiError);
+		w.discord.failOnce.set('executeWebhook', new DiscordApiError(404, 'POST', '/x', 10003));
+		await d!.run();
+		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
+		await d!.run();
+		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
 	});
 });
 

@@ -75,6 +75,46 @@ describe('startService', () => {
 		expect(w.entries().some((e) => e.event === 'plane.accepted')).toBe(true);
 	});
 
+	test('комментарий Plane по задаче с тредом → webhook приложения из списка канала, сообщение в тред', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-discord-'));
+		try {
+			const db = join(dir, 'state.sqlite');
+			const seed = new Store(db);
+			seed.putThread(
+				'acme',
+				'00000000-0000-4000-8000-000000000003',
+				CHANNEL,
+				'444444444444444444',
+				null,
+			);
+			seed.close();
+			const w = world();
+			// the application's own webhook already exists in the channel: it is adopted, none is created
+			w.behaviour.webhooks = [
+				{ id: 'wh-other', token: 't-o', application_id: '999999999999999999' },
+				{
+					id: 'wh-ours',
+					token: 'tok-ours',
+					application_id: ENV.PLANE_DISCORD_DISCORD_APPLICATION_ID,
+				},
+			];
+			const { service, url } = start(w, { ...ENV, PLANE_DISCORD_DB: db });
+			await post(
+				url(''),
+				signed('plane-app-comment-mentions', () => {}),
+			);
+			await service.idle();
+			const hook = w.discord.filter((c) => c.path.startsWith('/webhooks/wh-ours/'));
+			expect(hook.map((c) => c.path)).toEqual(['/webhooks/wh-ours/tok-ours']);
+			expect(hook[0]?.authorization).toBeNull();
+			expect(w.discord.some((c) => c.method === 'POST' && c.path.endsWith('/webhooks'))).toBe(
+				false,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test('правка через REST API: одна человеческая доставка state → «Задача закрыта» один раз', async () => {
 		const { w, service, url } = start();
 		const res = await post(url(''), signed('plane-app-workitem-state-done', humanState));

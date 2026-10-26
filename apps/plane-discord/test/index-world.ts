@@ -59,6 +59,8 @@ export function world() {
 	const behaviour = {
 		channelStatus: 200,
 		planeDown: false,
+		/** What `GET /channels/{id}/webhooks` lists. */
+		webhooks: [] as unknown[],
 		/** When set, a Discord message POST waits for it. */
 		gate: null as Promise<void> | null,
 	};
@@ -87,6 +89,10 @@ export function world() {
 				return json({ id: 'm1' });
 			}
 			if (path === '/users/@me/channels' && init.method === 'POST') return json({ id: 'dm1' });
+			if (path.endsWith('/webhooks') && init.method === 'GET') return json(behaviour.webhooks);
+			if (path.endsWith('/webhooks') && init.method === 'POST')
+				return json({ id: 'wh-new', token: 'tok-new' });
+			if (path.startsWith('/webhooks/') && init.method === 'POST') return json({ id: 'wm1' });
 			if (init.method === 'DELETE') return new Response(null, { status: 204 });
 			return json({}, 404);
 		}
