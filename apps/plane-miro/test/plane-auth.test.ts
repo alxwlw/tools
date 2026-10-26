@@ -148,7 +148,18 @@ describe('botTokenAuth', () => {
 		);
 		expect(e2).toBeInstanceOf(PlaneAuthError);
 		expect((e2 as PlaneAuthError).status).toBe(0);
-		// a refused token request is not cached: the next call asks again
+		const slow = make(
+			async () => {
+				throw new DOMException('The operation timed out', 'TimeoutError');
+			},
+			() => 0,
+		);
+		const e3 = await slow.headers().then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect(e3).toBeInstanceOf(PlaneAuthError);
+		expect((e3 as PlaneAuthError).status).toBe(0);
 		expect(isRetryable(new PlaneAuthError(401))).toBe(false);
 	});
 

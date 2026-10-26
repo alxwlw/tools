@@ -413,6 +413,25 @@ describe('convertItems', () => {
 		});
 	});
 
+	test('409 называет записанную задачу, а повторное чтение уже видит её (un-archive между чтениями) → already_linked, карточка и источник целы', async () => {
+		const w = world({ keepSource: true, embed: true });
+		const first = (await convertItems(w.rt, w.store, req(['101']), w.log))[0] as { cardId: string };
+		w.plane.archived.add('fake-w-1');
+		const create = w.plane.createWorkItem.bind(w.plane);
+		w.plane.createWorkItem = async (projectId, item) => {
+			const answer = await create(projectId, item);
+			w.plane.archived.delete('fake-w-1');
+			return answer;
+		};
+		expect(await convertItems(w.rt, w.store, req(['101']), w.log)).toEqual([
+			{ itemId: '101', ok: false, error: 'already_linked' },
+		]);
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
+		expect(w.store.getSource('acme', BOARD, '101')?.cardId).toBe(first.cardId);
+		expect(w.plane.links.get('fake-w-1')).toHaveLength(1);
+		expect(w.plane.descriptions.get('fake-w-1')!.split('moveToWidget')).toHaveLength(2);
+	});
+
 	test('архив и возврат: после un-archive повтор берёт первую карточку, ссылка и Embed не дублируются', async () => {
 		const w = world({ keepSource: true, embed: true });
 		const first = (await convertItems(w.rt, w.store, req(['101']), w.log))[0] as { cardId: string };

@@ -355,6 +355,10 @@ async function resolveWorkItem(
 	);
 	if (created.created)
 		store.putSource(tenantId, boardId, itemId, { workItemId: created.id, projectId, key: '' });
+	// The 409 names the recorded item: it is hidden, not gone. Decided by the 409's id, not by a second read,
+	// which can see the item again after an un-archive in between; the source and its card stay as they are.
+	if (!created.created && created.id === recorded?.workItemId)
+		throw new ItemFailure('already_linked');
 	const workItem = await plane(() => rt.plane.getWorkItem(projectId, created.id));
 	// null after a 409: the external id belongs to an item Plane hides from reads (archived, draft, triage); when
 	// that is the recorded item, the source and its card stay as they are

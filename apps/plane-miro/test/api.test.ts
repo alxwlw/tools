@@ -602,6 +602,15 @@ describe('GET /miro/api/card', () => {
 			});
 	});
 
+	test('карточка: сбой Plane при сборке ключа остаётся 502, а не 404', async () => {
+		const w = setup();
+		w.plane.failNext('listProjects', new PlaneApiError(503, 'GET', '/projects/'));
+		expect(await json(await w.call('GET', path()))).toEqual({
+			status: 502,
+			body: { error: 'plane_failed' },
+		});
+	});
+
 	test('карточка удалённого проекта (ключ не собрать) → 404 unknown_card, а не 500', async () => {
 		const w = setup();
 		seedItem(w.plane, 'w-lost', { projectId: 'p-lost' });
