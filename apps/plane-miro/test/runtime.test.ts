@@ -30,6 +30,33 @@ describe('createRuntime', () => {
 		expect(w.plane.calls).toEqual(['listProjects', 'listProjects']);
 	});
 
+	test('keyOf и проверка проекта перечитывают список при промахе, но не чаще окна', async () => {
+		const w = world();
+		let now = 0;
+		const rt = createRuntime(w.tenant, {
+			planeUrl: 'https://plane.example.com',
+			store: new Store(':memory:'),
+			plane: w.plane,
+			miro: w.miro,
+			now: () => now,
+			minGapMs: 1000,
+		});
+		await rt.projects();
+		w.plane.projects.push({ id: 'p9', identifier: 'NEW', name: 'Новый', archived: false });
+		now = 10;
+		expect(await rt.keyOf('p9', 1)).toBe('NEW-1');
+		expect((await rt.projects({ refresh: true })).map((p) => p.id)).toContain('p9');
+		expect(w.plane.calls.filter((c) => c === 'listProjects')).toHaveLength(2);
+		// a second miss inside the gap does not reload
+		await expect(rt.keyOf('nope', 1)).rejects.toThrow('unknown project');
+		now = 500;
+		await expect(rt.keyOf('nope', 1)).rejects.toThrow('unknown project');
+		expect(w.plane.calls.filter((c) => c === 'listProjects')).toHaveLength(2);
+		now = 1010;
+		await expect(rt.keyOf('nope', 1)).rejects.toThrow('unknown project');
+		expect(w.plane.calls.filter((c) => c === 'listProjects')).toHaveLength(3);
+	});
+
 	test('isHidden: по списку тенанта', () => {
 		const w = world({ hiddenProjects: ['p-hidden'] });
 		expect(w.rt.isHidden('p-hidden')).toBe(true);

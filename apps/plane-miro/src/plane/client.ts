@@ -64,7 +64,10 @@ export interface PlaneApi {
 	): Promise<'created' | 'exists'>;
 }
 
-/** A non-2xx answer the call did not expect. Carries no response body: bodies can echo payload data into logs. */
+/**
+ * A non-2xx answer the call did not expect, or status 0 for a transport failure or timeout.
+ * Carries no response body: bodies can echo payload data into logs.
+ */
 export class PlaneApiError extends Error {
 	override name = 'PlaneApiError';
 
@@ -302,17 +305,25 @@ export class PlaneClient implements PlaneApi {
 		for (let attempt = 0; ; attempt++) {
 			// Waiting for a slot happens before the per-call timeout starts: a queued request never times out unsent.
 			await this.#limiter.acquire();
-			const res = await this.#fetch(`${root}${path}`, {
-				method,
-				headers: {
-					...(await this.#auth.headers()),
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
-				},
-				body: body === undefined ? undefined : JSON.stringify(body),
-				signal: AbortSignal.timeout(this.#timeoutMs),
-			});
-			const text = await res.text();
+			const headers = {
+				...(await this.#auth.headers()),
+				'Content-Type': 'application/json',
+				Accept: 'application/json',
+			};
+			let res: Response;
+			let text: string;
+			try {
+				res = await this.#fetch(`${root}${path}`, {
+					method,
+					headers,
+					body: body === undefined ? undefined : JSON.stringify(body),
+					signal: AbortSignal.timeout(this.#timeoutMs),
+				});
+				text = await res.text();
+			} catch {
+				// A refused connection, a reset or a timeout: status 0, as MiroClient reports it.
+				throw new PlaneApiError(0, method, cleanPath);
+			}
 			// An expired bot token (10 h): drop it and retry once with a fresh one.
 			if (res.status === 401 && attempt === 0) {
 				this.#auth.invalidate();

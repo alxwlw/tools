@@ -369,6 +369,57 @@ describe('POST /miro/api/convert', () => {
 		expect(w.plane.createdItems).toEqual([]);
 	});
 
+	test('отказ соединения и таймаут Plane вне элементов → 502 plane_failed JSON, одна строка api.failed', async () => {
+		const down = new PlaneApiError(0, 'GET', '/projects/');
+		for (const route of [
+			'/miro/api/projects',
+			'/miro/api/search?q=a',
+			'/miro/api/card?board=b&item=1',
+		]) {
+			const w = world();
+			w.store.putCard({
+				tenant: 'acme',
+				boardId: 'b',
+				cardId: '1',
+				workItemId: 'w',
+				projectId: 'p1',
+				fieldsHash: null,
+			});
+			w.plane.failNext('listProjects', down);
+			w.plane.failNext('getWorkItem', down);
+			const res = await w.call('GET', route);
+			expect([res.status, await res.json()], route).toEqual([502, { error: 'plane_failed' }]);
+			expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
+			expect(w.logs.filter((l) => l.event === 'api.failed')).toHaveLength(1);
+		}
+	});
+
+	test('четыре кода отказа после JWT пишут по одной строке api.rejected, без текста', async () => {
+		const w = world();
+		w.miro.noAccess.add(BOARD);
+		await w.call('POST', '/miro/api/convert', { body: convertBody() });
+		await w.call('POST', '/miro/api/convert', { body: convertBody({ projectId: 'нет' }) });
+		await w.call('POST', '/miro/api/convert', { raw: '{' });
+		await w.call('GET', '/miro/api/nothing');
+		expect(w.logs).toEqual([
+			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'board_no_access' },
+			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'unknown_project' },
+			{ event: 'api.rejected', tenant: 'acme', route: 'convert', error: 'bad_request' },
+		]);
+	});
+
+	test('проект, созданный после первого чтения списка, принимается convert', async () => {
+		const w = world();
+		await w.call('GET', '/miro/api/projects');
+		w.plane.projects.push({ id: 'p9', identifier: 'NEW', name: 'Новый', archived: false });
+		w.plane.states.set('p9', [{ id: 's9', name: 'Todo', group: 'unstarted' }]);
+		const res = await w.call('POST', '/miro/api/convert', {
+			body: convertBody({ projectId: 'p9' }),
+		});
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { results: { key: string }[] }).results[0]?.key).toBe('NEW-1');
+	});
+
 	test('ошибка авторизации Plane вне элементов → 502 plane_failed', async () => {
 		const w = world();
 		w.plane.failNext('listProjects', new PlaneAuthError(401));
@@ -385,7 +436,7 @@ describe('POST /miro/api/convert', () => {
 
 	test('чужая ошибка (баг) не маскируется под plane_failed', async () => {
 		const w = world();
-		w.plane.failNext('listProjects', new TypeError('bug'));
+		w.plane.failNext('listProjects', new RangeError('bug'));
 		await expect(w.call('POST', '/miro/api/convert', { body: convertBody() })).rejects.toThrow(
 			'bug',
 		);

@@ -14,14 +14,20 @@ import { ttl } from './ttl.ts';
 
 export const CACHE_TTL_MS = 10 * 60_000;
 
+/** A lookup that misses the projects cache reloads it, but not more often than this. */
+export const MISS_REFRESH_MS = 30_000;
+
 export type TenantRuntime = {
 	tenant: Tenant;
 	plane: PlaneApi;
 	miro: MiroApi;
-	/** Projects without hiddenProjects and without archived ones (probe: the bot sees archived projects); cached CACHE_TTL_MS. */
-	projects(): Promise<ProjectSummary[]>;
+	/**
+	 * Projects without hiddenProjects and without archived ones (probe: the bot sees archived projects); cached
+	 * CACHE_TTL_MS. `refresh` reloads at once, at most once per MISS_REFRESH_MS.
+	 */
+	projects(opts?: { refresh?: boolean }): Promise<ProjectSummary[]>;
 	isHidden(projectId: string): boolean;
-	/** `<identifier>-<sequenceId>` from the full (unfiltered) project list; throws for a project the list lacks. */
+	/** `<identifier>-<sequenceId>` from the full (unfiltered) project list, reloaded once on a miss; throws if still unknown. */
 	keyOf(projectId: string, sequenceId: number): Promise<string>;
 	/** null: the project has no such state. */
 	state(projectId: string, stateId: string): Promise<StateSummary | null>;
@@ -36,6 +42,7 @@ export function createRuntime(
 		store: Store;
 		fetch?: Fetch;
 		now?: () => number;
+		minGapMs?: number;
 		plane?: PlaneApi;
 		miro?: MiroApi;
 	},
@@ -62,27 +69,38 @@ export function createRuntime(
 			token: () => deps.store.getMiroToken(tenant.miroTeamId),
 			fetch: deps.fetch,
 		});
+	const now = deps.now ?? (() => Date.now());
+	const minGapMs = deps.minGapMs ?? MISS_REFRESH_MS;
 	const hidden = new Set(tenant.hiddenProjects);
-	const allProjects = ttl(() => plane.listProjects(), CACHE_TTL_MS, deps.now);
+	let loadProjects = ttl(() => plane.listProjects(), CACHE_TTL_MS, now);
+	let reloadedAt = Number.NEGATIVE_INFINITY;
+	const allProjects = (refresh = false): Promise<ProjectSummary[]> => {
+		if (refresh && now() - reloadedAt >= minGapMs) {
+			reloadedAt = now();
+			loadProjects = ttl(() => plane.listProjects(), CACHE_TTL_MS, now);
+		}
+		return loadProjects();
+	};
 	const statesOf = new Map<string, () => Promise<StateSummary[]>>();
-	const members = ttl<MemberSummary[]>(() => plane.listMembers(), CACHE_TTL_MS, deps.now);
+	const members = ttl<MemberSummary[]>(() => plane.listMembers(), CACHE_TTL_MS, now);
 	return {
 		tenant,
 		plane,
 		miro,
-		async projects() {
-			return (await allProjects()).filter((p) => !p.archived && !hidden.has(p.id));
+		async projects(opts) {
+			return (await allProjects(opts?.refresh)).filter((p) => !p.archived && !hidden.has(p.id));
 		},
 		isHidden: (projectId) => hidden.has(projectId),
 		async keyOf(projectId, sequenceId) {
-			const project = (await allProjects()).find((p) => p.id === projectId);
+			const known = (list: ProjectSummary[]) => list.find((p) => p.id === projectId);
+			const project = known(await allProjects()) ?? known(await allProjects(true));
 			if (project === undefined) throw new Error('unknown project');
 			return `${project.identifier}-${sequenceId}`;
 		},
 		async state(projectId, stateId) {
 			let load = statesOf.get(projectId);
 			if (load === undefined) {
-				load = ttl(() => plane.listStates(projectId), CACHE_TTL_MS, deps.now);
+				load = ttl(() => plane.listStates(projectId), CACHE_TTL_MS, now);
 				statesOf.set(projectId, load);
 			}
 			return (await load()).find((s) => s.id === stateId) ?? null;

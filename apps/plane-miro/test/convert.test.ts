@@ -356,13 +356,95 @@ describe('convertItems', () => {
 		expect(w.miro.item(BOARD, '101')).not.toBeNull();
 	});
 
-	test('источник есть, задачи в Plane уже нет → not_found, карточка не ставится', async () => {
-		const w = world();
-		w.store.putSource('acme', BOARD, '101', { workItemId: 'gone', projectId: 'p1', key: 'LAB-9' });
+	test('источник есть, задача удалена в Plane → источник забыт, создаётся новая задача и карточка', async () => {
+		const w = world({ keepSource: true });
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		w.plane.items.delete('fake-w-1');
+		const r = await convertItems(w.rt, w.store, req(['101']), w.log);
+		expect(r[0]).toMatchObject({ ok: true });
+		expect(w.plane.createdItems.map((i) => i.id)).toEqual(['fake-w-1', 'fake-w-2']);
+		expect(w.store.getSource('acme', BOARD, '101')).toMatchObject({ workItemId: 'fake-w-2' });
+		expect(w.store.getSource('acme', BOARD, '101')?.cardId).toBe(
+			(r[0] as { cardId: string }).cardId,
+		);
+	});
+
+	test('источник есть, задача заархивирована → already_linked, источник забыт, карточки нет', async () => {
+		const w = world({ keepSource: true });
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		w.plane.archived.add('fake-w-1');
+		const cards = w.miro.cardsOn(BOARD).length;
 		expect(await convertItems(w.rt, w.store, req(['101']), w.log)).toEqual([
-			{ itemId: '101', ok: false, error: 'not_found' },
+			{ itemId: '101', ok: false, error: 'already_linked' },
 		]);
-		expect(writes(w.miro.calls)).toEqual([]);
+		expect(w.store.getSource('acme', BOARD, '101')).toBeNull();
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(cards);
+		expect(w.plane.createdItems).toHaveLength(1);
+	});
+
+	test('задача создана, чтение не удалось (источник уже записан) → повтор берёт её же, одна карточка', async () => {
+		const w = world({ keepSource: true });
+		w.plane.failNext('getWorkItem', new PlaneApiError(503, 'GET', '/x'));
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: false,
+			error: 'plane_failed',
+		});
+		expect(w.store.getSource('acme', BOARD, '101')).toEqual({
+			workItemId: 'fake-w-1',
+			projectId: 'p1',
+			key: '',
+			cardId: null,
+		});
+		expect(w.miro.cardsOn(BOARD)).toEqual([]);
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: true,
+			key: 'LAB-1',
+		});
+		expect(w.plane.createdItems).toHaveLength(1);
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
+		expect(w.store.getSource('acme', BOARD, '101')?.key).toBe('LAB-1');
+	});
+
+	test('повтор с другим проектом работает в записанном: одна задача в p1, одна карточка, ключ верный', async () => {
+		const w = world({ keepSource: true });
+		w.plane.projects.push({ id: 'p2', identifier: 'TWO', name: 'Второй', archived: false });
+		w.plane.states.set('p2', [{ id: 's2', name: 'Todo', group: 'unstarted' }]);
+		w.plane.failNext('getWorkItem', new PlaneApiError(503, 'GET', '/x'));
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		const r = await convertItems(w.rt, w.store, req(['101'], { projectId: 'p2' }), w.log);
+		expect(r[0]).toMatchObject({ ok: true, key: 'LAB-1' });
+		expect(w.plane.createdItems.map((i) => i.projectId)).toEqual(['p1']);
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
+		expect(w.store.getSource('acme', BOARD, '101')).toMatchObject({ projectId: 'p1' });
+	});
+
+	test('строка источника потеряна после создания → повтор получает 409 и берёт ту же задачу', async () => {
+		const w = world({ keepSource: true });
+		w.plane.failNext('getWorkItem', new PlaneApiError(503, 'GET', '/x'));
+		await convertItems(w.rt, w.store, req(['101']), w.log);
+		w.store.deleteSource('acme', BOARD, '101');
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: true,
+			key: 'LAB-1',
+		});
+		expect(w.plane.createdItems).toHaveLength(1);
+		expect(w.miro.cardsOn(BOARD)).toHaveLength(1);
+		expect(w.store.getSource('acme', BOARD, '101')).toMatchObject({ workItemId: 'fake-w-1' });
+	});
+
+	test('ключ не вычислился (keyOf упал) → источник с пустым ключом, повтор считает ключ', async () => {
+		const w = world({ keepSource: true });
+		w.plane.failNext('listProjects', new PlaneApiError(503, 'GET', '/projects/'));
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: false,
+			error: 'plane_failed',
+		});
+		expect(w.store.getSource('acme', BOARD, '101')).toMatchObject({ key: '' });
+		expect(w.miro.cardsOn(BOARD)).toEqual([]);
+		expect((await convertItems(w.rt, w.store, req(['101']), w.log))[0]).toMatchObject({
+			ok: true,
+			key: 'LAB-1',
+		});
 	});
 
 	test('два одновременных запроса на один стикер → одна задача и одна карточка', async () => {
@@ -432,6 +514,29 @@ describe('convertItems', () => {
 		expect(a[0]).toMatchObject({ ok: false, error: 'plane_failed' });
 		expect(b[0]?.ok).toBe(true);
 		expect((await convertItems(w.rt, w.store, req(['102']), w.log))[0]?.ok).toBe(true);
+	});
+
+	test('замок по стикеру: запрос на другой доске не ждёт зависший запрос первой', async () => {
+		const w = world({ keepSource: false });
+		const other = w.miro.addBoard('other=', 'Другая');
+		other.items.set('101', sticky('101', '<p>Тоже 101</p>', 1, 1, null));
+		const read = w.miro.getItem.bind(w.miro);
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		w.miro.getItem = async (boardId, itemId) => {
+			if (boardId === BOARD) await gate;
+			return read(boardId, itemId);
+		};
+		const held = convertItems(w.rt, w.store, req(['101']), w.log);
+		const free = await convertItems(
+			w.rt,
+			w.store,
+			req(['101'], { boardId: 'other=', boardName: 'Другая' }),
+			w.log,
+		);
+		expect(free[0]?.ok).toBe(true);
+		release();
+		expect((await held)[0]?.ok).toBe(true);
 	});
 
 	test('стикер на другой доске того же тенанта не мешает: ключи по доске', async () => {

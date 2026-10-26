@@ -95,7 +95,9 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 	/** The board must be visible to the service account and the project one the tenant offers. */
 	async function boardAndProject(rt: TenantRuntime, boardId: string, projectId: unknown) {
 		const id = text(projectId, /^.{1,64}$/);
-		if (!(await rt.projects()).some((p) => p.id === id)) throw new Reject(400, 'unknown_project');
+		const offered = (list: { id: string }[]) => list.some((p) => p.id === id);
+		if (!offered(await rt.projects()) && !offered(await rt.projects({ refresh: true })))
+			throw new Reject(400, 'unknown_project');
 		const board = await rt.miro.getBoard(boardId);
 		if (board === null) throw new Reject(409, 'board_no_access');
 		return { projectId: id, boardName: board.name };
@@ -209,7 +211,10 @@ export function createApi(deps: ApiDeps): (req: Request, url: URL) => Promise<Re
 					return await bind(rt, req);
 			}
 		} catch (error) {
-			if (error instanceof Reject) return reply(error.status, { error: error.code });
+			if (error instanceof Reject) {
+				deps.log({ event: 'api.rejected', tenant: rt.tenant.id, route, error: error.code });
+				return reply(error.status, { error: error.code });
+			}
 			if (error instanceof MiroNotConnected) return reply(503, { error: 'miro_not_connected' });
 			const code =
 				error instanceof MiroApiError

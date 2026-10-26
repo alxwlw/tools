@@ -9,6 +9,7 @@ import {
 	type Place,
 } from './miro/rest.ts';
 import { plainText } from './miro/text.ts';
+import type { WorkItem } from './plane/client.ts';
 import { embedBlock } from './plane/embed.ts';
 import type { TenantRuntime } from './runtime.ts';
 import type { Store } from './store.ts';
@@ -37,8 +38,8 @@ export function besidePlace(item: MiroItem): Place {
 /**
  * `board_no_access`: createAppCard answered 403 — probe: a Free board beyond the team's three is view-only,
  * `insufficientPermissions`. `already_linked`: the sticker is a source of another work item, or its external id
- * belongs to an item Plane hides from reads (archived, draft, triage). `not_found`: no such sticker, or the work
- * item it is recorded against is gone from Plane.
+ * belongs to an item Plane hides from reads (archived, draft, triage). `not_found`: no such sticker; the bind target
+ * does not exist or is in another project; or the work item vanished while the Embed step re-read it.
  */
 export type ItemError =
 	| 'not_found'
@@ -221,38 +222,15 @@ async function attempt(
 	const lines = text === '' ? [] : text.split('\n');
 
 	// 2. The work item: the recorded source, a bound one, or a new one.
-	const source = store.getSource(tenant.id, boardId, itemId);
-	if (source !== null && mode.kind === 'bind' && mode.workItemId !== source.workItemId)
-		throw new ItemFailure('already_linked');
-	let workItemId: string;
-	let projectId: string;
-	if (source !== null) ({ workItemId, projectId } = source);
-	else if (mode.kind === 'bind') ({ workItemId, projectId } = mode);
-	else {
-		projectId = mode.projectId;
-		const tags = TAGGED.includes(item.type)
-			? await miro(() => rt.miro.getItemTags(boardId, itemId))
-			: [];
-		const created = await plane(() =>
-			rt.plane.createWorkItem(projectId, {
-				name: truncate(lines[0] as string, NAME_MAX),
-				description_html: descriptionOf(lines, tags, ctx.author),
-				external_source: SOURCE,
-				external_id: `${boardId}:${itemId}`,
-			}),
-		);
-		workItemId = created.id;
-	}
-	const workItem = await plane(() => rt.plane.getWorkItem(projectId, workItemId));
-	if (workItem === null)
-		throw new ItemFailure(
-			source === null && mode.kind === 'convert' ? 'already_linked' : 'not_found',
-		);
-	const key = source?.key ?? (await plane(() => rt.keyOf(workItem.projectId, workItem.sequenceId)));
-	if (source === null) store.putSource(tenant.id, boardId, itemId, { workItemId, projectId, key });
+	const {
+		workItem,
+		key,
+		cardId: recordedCard,
+	} = await resolveWorkItem(ctx, itemId, item, lines, mode);
+	const { id: workItemId, projectId } = workItem;
 
 	// 3. The card, unless a live one is recorded (a card row deleted after Miro answered 404 is not live).
-	let cardId = source?.cardId ?? null;
+	let cardId = recordedCard;
 	if (cardId !== null && store.findCard(boardId, cardId) === null) cardId = null;
 	if (cardId === null) {
 		const card = await plane(() => cardFor(rt, workItem));
@@ -313,6 +291,74 @@ async function attempt(
 		await miro(() => rt.miro.deleteItem(boardId, itemId));
 	}
 	return { key, cardId };
+}
+
+type Resolved = { workItem: WorkItem; key: string; cardId: string | null };
+
+/**
+ * The work item of a sticker. A recorded source wins, in its own project whatever the request names; its work
+ * item gone from Plane forgets the source. Otherwise the item is bound (bind) or created (convert): the source
+ * is recorded the moment Plane confirms the create, before any read that can fail, so a retry cannot create a
+ * second item in another project. A source whose key is empty gets its key computed.
+ */
+async function resolveWorkItem(
+	ctx: Ctx,
+	itemId: string,
+	item: MiroItem,
+	lines: readonly string[],
+	mode: Mode,
+): Promise<Resolved> {
+	const { rt, store, boardId } = ctx;
+	const tenantId = rt.tenant.id;
+	const recordKey = async (workItem: WorkItem): Promise<string> => {
+		const key = await plane(() => rt.keyOf(workItem.projectId, workItem.sequenceId));
+		store.putSource(tenantId, boardId, itemId, {
+			workItemId: workItem.id,
+			projectId: workItem.projectId,
+			key,
+		});
+		return key;
+	};
+
+	const recorded = store.getSource(tenantId, boardId, itemId);
+	if (recorded !== null) {
+		const live = await plane(() => rt.plane.getWorkItem(recorded.projectId, recorded.workItemId));
+		if (live !== null) {
+			if (mode.kind === 'bind' && mode.workItemId !== recorded.workItemId)
+				throw new ItemFailure('already_linked');
+			if (recorded.key !== '')
+				return { workItem: live, key: recorded.key, cardId: recorded.cardId };
+			return { workItem: live, key: await recordKey(live), cardId: null };
+		}
+		store.deleteSource(tenantId, boardId, itemId);
+	}
+
+	if (mode.kind === 'bind') {
+		const target = await plane(() => rt.plane.getWorkItem(mode.projectId, mode.workItemId));
+		if (target === null) throw new ItemFailure('not_found');
+		return { workItem: target, key: await recordKey(target), cardId: null };
+	}
+	const tags = TAGGED.includes(item.type)
+		? await miro(() => rt.miro.getItemTags(boardId, itemId))
+		: [];
+	const created = await plane(() =>
+		rt.plane.createWorkItem(mode.projectId, {
+			name: truncate(lines[0] as string, NAME_MAX),
+			description_html: descriptionOf(lines, tags, ctx.author),
+			external_source: SOURCE,
+			external_id: `${boardId}:${itemId}`,
+		}),
+	);
+	if (created.created)
+		store.putSource(tenantId, boardId, itemId, {
+			workItemId: created.id,
+			projectId: mode.projectId,
+			key: '',
+		});
+	const workItem = await plane(() => rt.plane.getWorkItem(mode.projectId, created.id));
+	// null after a 409: the external id belongs to an item Plane hides from reads (archived, draft, triage)
+	if (workItem === null) throw new ItemFailure('already_linked');
+	return { workItem, key: await recordKey(workItem), cardId: null };
 }
 
 const paragraphs = (lines: readonly string[]): string =>

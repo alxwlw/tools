@@ -4,7 +4,7 @@ import { truncate } from './html.ts';
 import type { AppCardInput } from './miro/rest.ts';
 import type { TenantRuntime } from './runtime.ts';
 
-/** Fill of the status field by Plane's state group (design §3.2). */
+/** Fill of the status field by Plane's state group (the card constraints of the project plan). */
 export const STATE_COLORS: Readonly<Record<string, string>> = {
 	backlog: '#e6e6e6',
 	unstarted: '#dbe4ff',

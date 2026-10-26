@@ -7,6 +7,7 @@ import {
 	PlaneApiError,
 	PlaneClient,
 } from '../src/plane/client.ts';
+import { isRetryable } from '../src/queue.ts';
 import { apiFixture } from './fixtures.ts';
 
 type Reply = { status: number; body?: unknown; raw?: string };
@@ -614,6 +615,34 @@ describe('PlaneClient: лимитер и таймаут', () => {
 				}),
 			20,
 		);
-		expect(String(await failure(client.listProjects()))).toContain('aborted');
+		const error = await failure(client.listProjects());
+		expect(error).toBeInstanceOf(PlaneApiError);
+		expect(error).toMatchObject({ status: 0, method: 'GET', path: '/projects/' });
+	});
+
+	test('отказ соединения и обрыв чтения тела — PlaneApiError со статусом 0, который очередь повторяет', async () => {
+		const refused = limited(async () => {
+			throw Object.assign(new TypeError('Unable to connect'), { code: 'ConnectionRefused' });
+		}, 1000).client;
+		const e1 = await failure(refused.listProjects());
+		expect(e1).toBeInstanceOf(PlaneApiError);
+		expect(e1).toMatchObject({ status: 0, method: 'GET', path: '/projects/' });
+		expect(isRetryable(e1)).toBe(true);
+		expect(String((e1 as Error).message)).not.toContain('connect');
+
+		const cut = limited(
+			async () =>
+				({
+					status: 200,
+					ok: true,
+					text: async () => {
+						throw new DOMException('aborted', 'AbortError');
+					},
+				}) as unknown as Response,
+			1000,
+		).client;
+		const e2 = await failure(cut.listProjects());
+		expect(e2).toMatchObject({ status: 0, method: 'GET' });
+		expect(e2).toBeInstanceOf(PlaneApiError);
 	});
 });

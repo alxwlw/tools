@@ -131,6 +131,13 @@ export class Store {
 			.run(tenant, boardId, itemId, row.workItemId, row.projectId, row.key);
 	}
 
+	/** Forgets the sticker's work item (it is gone from Plane); the next conversion starts afresh. */
+	deleteSource(tenant: string, boardId: string, itemId: string): void {
+		this.#db
+			.query('DELETE FROM sources WHERE tenant = ? AND board_id = ? AND item_id = ?')
+			.run(tenant, boardId, itemId);
+	}
+
 	setSourceCard(tenant: string, boardId: string, itemId: string, cardId: string): void {
 		this.#db
 			.query('UPDATE sources SET card_id = ? WHERE tenant = ? AND board_id = ? AND item_id = ?')
