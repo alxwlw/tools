@@ -146,6 +146,15 @@ describe('syncWorkItem', () => {
 		expect(w.miro.cardsOn(BOARD2)[0]?.card.fields[0]?.value).toBe('In Progress');
 	});
 
+	test('обрыв сети (TypeError) на одной карточке → вторая обновлена, затем ошибка', async () => {
+		const w = await setup();
+		const err = new TypeError('fetch failed');
+		w.miro.failNext('updateAppCard', err);
+		await expect(syncWorkItem(w.rt, w.store, changed(), w.log)).rejects.toBe(err);
+		expect(w.miro.cardsOn(BOARD2)[0]?.card.fields[0]?.value).toBe('In Progress');
+		expect(w.logs).toEqual([]);
+	});
+
 	test('токена Miro нет → лог miro.not_connected, без исключения', async () => {
 		const w = await setup();
 		w.miro.failNext('updateAppCard', new MiroNotConnected());

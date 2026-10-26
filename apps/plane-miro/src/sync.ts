@@ -24,8 +24,7 @@ function classify(
 		log({ event: 'miro.not_connected', level: 'error', tenant: event.tenant });
 		return 'stop';
 	}
-	if (err instanceof MiroApiError && isRetryable(err)) return 'retry';
-	if (err instanceof MiroApiError) {
+	if (err instanceof MiroApiError && !isRetryable(err)) {
 		log({
 			event: 'card.update_failed',
 			level: 'error',
