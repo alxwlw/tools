@@ -26,6 +26,8 @@ export class FakeDiscord implements DiscordApi {
 	posted = new Map<string, { id: string; webhookId: string | null; content: string }[]>();
 	calls: DiscordCall[] = [];
 	#seq = 0;
+	/** Clock for snowflake ids of webhook posts. */
+	now: () => number = Date.now;
 
 	#enter(method: keyof DiscordApi, ...args: unknown[]): void {
 		this.calls.push({ method, args });
@@ -117,7 +119,8 @@ export class FakeDiscord implements DiscordApi {
 		message: OutMessage & { username?: string; avatarUrl?: string },
 	): Promise<{ id: string }> {
 		this.#enter('executeWebhook', webhookId, token, threadId, message);
-		const id = this.#id();
+		// A real snowflake: the code under test reads the creation time out of it.
+		const id = ((BigInt(this.now()) - 1420070400000n) * 4194304n + BigInt(++this.#seq)).toString();
 		this.posted.set(threadId, [
 			...(this.posted.get(threadId) ?? []),
 			{ id, webhookId, content: message.content },

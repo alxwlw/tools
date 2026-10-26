@@ -17,6 +17,7 @@ import {
 	D_BOB,
 	FORUM,
 	FORUM_2,
+	clock,
 	ID,
 	ITEM,
 	mentionHtml,
@@ -31,6 +32,9 @@ import {
 
 const THREAD = '140000000000000001';
 const THREAD_2 = '140000000000000002';
+/** Discord snowflake for a moment in time, as the fake mints them. */
+const snowflake = (ms: number, seq: number) =>
+	((BigInt(ms) - 1420070400000n) * 4194304n + BigInt(seq)).toString();
 const AVATAR = 'https://cdn.example.com/carol.png';
 
 const bound = (channels = [route(FORUM)]) => {
@@ -341,6 +345,68 @@ describe('createNotifier: повтор доставки в тред', () => {
 		expect(w.discord.callsOf('recentMessages')).toHaveLength(1);
 	});
 
+	test('тот же текст раньше от того же webhook («ок» дважды) + сбой без поста → второй комментарий всё равно постится', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		const q = queueOf(w);
+		const [first] = await w.notify(comment('<p>ок</p>'));
+		await first!.run();
+		w.discord.failOnce.set(
+			'executeWebhook',
+			new DiscordApiError(502, 'POST', '/webhooks/wh-old/:token'),
+		);
+		// the first «ок» was posted a minute ago
+		clock.t += 60_000;
+		for (const d of await w.notify(comment('<p>ок</p>'))) q.push(d.label, d.run);
+		await q.idle();
+		expect(w.discord.posted.get(THREAD)).toHaveLength(2);
+		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toEqual([]);
+	});
+
+	test('граница: пост того же webhook с тем же текстом за 5 с до попытки — наш, за 5 с + 1 мс — нет', async () => {
+		for (const [offset, expected] of [
+			[5000, 1],
+			[5001, 2],
+		] as const) {
+			const w = bound();
+			w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+			w.discord.posted.set(THREAD, [
+				{ id: snowflake(clock.t - offset, 1), webhookId: 'wh-old', content: 'один раз' },
+			]);
+			w.discord.failOnce.set('executeWebhook', new DiscordApiError(0, 'POST', '/x'));
+			await run(w);
+			expect(w.discord.posted.get(THREAD)).toHaveLength(expected);
+		}
+	});
+
+	test('createWebhook упал (502) → поста не было: повтор создаёт webhook и постит, история не читается', async () => {
+		const w = bound();
+		w.discord.failOnce.set(
+			'createWebhook',
+			new DiscordApiError(502, 'POST', '/channels/x/webhooks'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
+		expect(w.discord.callsOf('recentMessages')).toEqual([]);
+		expect(w.logs.filter((l) => l.event === 'notify.thread_dup_skipped')).toEqual([]);
+	});
+
+	test('webhook удалён, пост через новый принят, ответ потерян → повтор не дублирует', async () => {
+		const w = bound();
+		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
+		w.discord.failOnce.set(
+			'executeWebhook',
+			new DiscordApiError(404, 'POST', '/webhooks/wh-old/:token', 10015),
+		);
+		w.discord.lostResponse.set(
+			'executeWebhook',
+			new DiscordApiError(0, 'POST', '/webhooks/x/:token'),
+		);
+		await run(w);
+		expect(w.discord.posted.get(THREAD)).toHaveLength(1);
+		expect(w.discord.callsOf('createWebhook')).toHaveLength(1);
+	});
+
 	test('429 — пост не принят: повтор без чтения истории', async () => {
 		const w = bound();
 		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
@@ -357,8 +423,8 @@ describe('createNotifier: повтор доставки в тред', () => {
 		const w = bound();
 		w.store.putWebhook(FORUM, 'wh-old', 'tok-old');
 		w.discord.posted.set(THREAD, [
-			{ id: 'x1', webhookId: 'wh-foreign', content: 'один раз' },
-			{ id: 'x2', webhookId: 'wh-old', content: 'совсем другое' },
+			{ id: snowflake(clock.t, 1), webhookId: 'wh-foreign', content: 'один раз' },
+			{ id: snowflake(clock.t, 2), webhookId: 'wh-old', content: 'совсем другое' },
 		]);
 		w.discord.failOnce.set(
 			'executeWebhook',

@@ -124,7 +124,10 @@ export function setup(
 	return build(plane, discord, tenant);
 }
 
+export const clock = { t: Date.now() };
+
 export function build(plane: SpyPlane, discord: FakeDiscord, tenant: Tenant) {
+	discord.now = () => clock.t;
 	const store = new Store(':memory:');
 	const logs: LogEntry[] = [];
 	const runtime: TenantRuntime = {
@@ -147,6 +150,7 @@ export function build(plane: SpyPlane, discord: FakeDiscord, tenant: Tenant) {
 			return found.type;
 		},
 		log: (e) => logs.push(e),
+		now: () => clock.t,
 	});
 	return { plane, discord, store, logs, notify, tenant };
 }

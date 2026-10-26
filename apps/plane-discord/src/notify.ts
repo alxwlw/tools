@@ -41,6 +41,8 @@ export type NotifyDeps = {
 	planeUrl: string;
 	channelType: (channelId: string) => Promise<number>;
 	log: Log;
+	/** Clock in ms (default `Date.now`); tests inject one. */
+	now?: () => number;
 };
 
 type Item = { id: string; projectId: string; sequenceId: number; name: string };
@@ -53,6 +55,13 @@ const USERNAME_BANNED = /discord|clyde/gi;
 const USERNAME_MAX = 80;
 // How far back a retry looks for its own post that Discord took before the response was lost.
 const DUP_LOOKBACK = 10;
+const DUP_CLOCK_SKEW_MS = 5000;
+const DISCORD_EPOCH_MS = 1420070400000n;
+
+/** Creation time of a Discord snowflake id, ms since the Unix epoch; NaN for anything that is not one. */
+function snowflakeMs(id: string): number {
+	return /^\d+$/.test(id) ? Number((BigInt(id) >> 22n) + DISCORD_EPOCH_MS) : Number.NaN;
+}
 const IN_THREAD = '→ Discord: в тред задачи';
 const NO_CHANNEL = 'Канал для проекта не настроен';
 const NO_PROJECT = 'Не удалось отправить в Discord: проект не найден в Plane';
@@ -376,21 +385,38 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 			return made;
 		};
 		// Execute Webhook takes no nonce: after a lost response the retry first looks for its own post in the thread.
-		// The queue calls this same `run` on each retry, so the flag lives in the closure.
-		let inDoubt = false;
-		const alreadyPosted = async (): Promise<boolean> => {
-			const hook = deps.store.getWebhook(target.channelId);
-			if (hook === null) return false;
+		// The queue calls this same `run` on each retry, so the state lives in the closure.
+		// `doubt`: start of the first execute that may have posted without our seeing the answer, and the webhooks
+		// those executes used (the 404 path may switch to a new one).
+		let doubt: { since: number; hooks: Set<string> } | null = null;
+		const now = deps.now ?? Date.now;
+		const post = async (hook: { id: string; token: string }) => {
+			const startedAt = now();
+			try {
+				await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
+			} catch (err) {
+				// Transport failure or 5xx: Discord may have taken the post. A 429 or 4xx did not.
+				if (err instanceof DiscordApiError && (err.status === 0 || err.status >= 500))
+					(doubt ??= { since: startedAt, hooks: new Set() }).hooks.add(hook.id);
+				throw err;
+			}
+		};
+		/** One webhook posts every author's comments: only a message made since the doubtful attempt is ours. */
+		const alreadyPosted = async (since: number, hooks: ReadonlySet<string>): Promise<boolean> => {
 			const recent = await deps.discord.recentMessages(target.threadId, DUP_LOOKBACK);
 			return recent.some(
-				(m) => m.webhookId === hook.id && m.content === truncate(message.content, CONTENT_MAX),
+				(m) =>
+					m.webhookId !== null &&
+					hooks.has(m.webhookId) &&
+					m.content === truncate(message.content, CONTENT_MAX) &&
+					snowflakeMs(m.id) >= since - DUP_CLOCK_SKEW_MS,
 			);
 		};
 		const attempt = async () => {
 			// Read at run time: an earlier delivery of another event may have created it since.
 			const hook = deps.store.getWebhook(target.channelId) ?? (await create());
 			try {
-				await deps.discord.executeWebhook(hook.id, hook.token, target.threadId, message);
+				await post(hook);
 			} catch (err) {
 				if (
 					!(
@@ -406,14 +432,13 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 					tenant: rt.tenant.id,
 					channel: target.channelId,
 				});
-				const fresh = await create();
-				await deps.discord.executeWebhook(fresh.id, fresh.token, target.threadId, message);
+				await post(await create());
 			}
 		};
 		return {
 			label: `${event.eventKey}→thread:${target.threadId}`,
 			run: async () => {
-				if (inDoubt && (await alreadyPosted())) {
+				if (doubt !== null && (await alreadyPosted(doubt.since, doubt.hooks))) {
 					deps.log({
 						event: 'notify.thread_dup_skipped',
 						level: 'warn',
@@ -422,15 +447,8 @@ export function createNotifier(deps: NotifyDeps): (event: PlaneEvent) => Promise
 					});
 					return;
 				}
-				try {
-					await attempt();
-					inDoubt = false;
-				} catch (err) {
-					// Transport failure or 5xx: Discord may have taken the post. A 429 or 4xx did not.
-					if (err instanceof DiscordApiError && (err.status === 0 || err.status >= 500))
-						inDoubt = true;
-					throw err;
-				}
+				await attempt();
+				doubt = null;
 			},
 		};
 	}
