@@ -435,6 +435,16 @@ describe('маршруты установки приложения', () => {
 		expect(logs).toEqual([{ event: 'plane.installed', appInstallationId: 'inst-1' }]);
 	});
 
+	test('с config прочие пути не перехватываются: POST /nope — 404, POST /plane/webhook доходит до вебхука', async () => {
+		const { handler, logs } = build(true);
+		expect((await handler(new Request('http://x/nope', { method: 'POST' }))).status).toBe(404);
+		const res = await handler(new Request('http://x/plane/webhook', { method: 'POST' }));
+		expect(res.status).toBe(200);
+		expect(logs).toEqual([
+			{ event: 'plane.rejected', level: 'error', reason: 'unknown_workspace' },
+		]);
+	});
+
 	test('не GET → 405; без config маршруты не существуют → 404', async () => {
 		const { handler } = build(true);
 		for (const path of ['/plane/setup?tenant=acme', '/plane/oauth/callback?app_installation_id=i'])
