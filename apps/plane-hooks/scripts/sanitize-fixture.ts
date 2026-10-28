@@ -132,7 +132,12 @@ export function sanitizeGithub(value: unknown): unknown {
 
 	const text = (s: string): string => {
 		let out = s.replace(EMAIL, 'octocat@example.com');
-		if (pairRe) out = out.replace(pairRe, (_m, repo: string) => `acme/${repoName(repo)}`);
+		if (pairRe)
+			out = out.replace(pairRe, (_m, segment: string) => {
+				// `.git` and sentence-final dots are not part of the repository name.
+				const [, name = segment, tail = ''] = /^(.*?)((?:\.git)?\.*)$/.exec(segment) ?? [];
+				return `acme/${repoName(name)}${tail}`;
+			});
 		if (literals) out = out.replace(literals, (m) => names.get(m.toLowerCase()) ?? m);
 		return out.replace(SHA, fakeSha).replace(AVATAR, 'avatars.githubusercontent.com/u/1');
 	};

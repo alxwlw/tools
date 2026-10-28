@@ -332,3 +332,16 @@ test('sanitizeVercel даёт разным dpl_ id разные замены', (
 	>;
 	expect(out).toEqual({ a: 'dpl_example1', b: 'dpl_example2', c: 'dpl_example1' });
 });
+
+test('sanitizeGithub не включает .git и точку в конце предложения в имя репозитория', () => {
+	const out = sanitizeGithub({
+		repository: {
+			full_name: 'example-org/monorepo',
+			clone_url: 'https://github.com/example-org/monorepo.git',
+		},
+		note: 'see example-org/monorepo.',
+	}) as any;
+	expect(out.repository.full_name).toBe('acme/api');
+	expect(out.repository.clone_url).toBe('https://github.com/acme/api.git');
+	expect(out.note).toBe('see acme/api.');
+});

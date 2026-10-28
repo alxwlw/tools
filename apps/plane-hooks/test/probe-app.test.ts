@@ -112,3 +112,22 @@ test('gh-deploy: упавший DELETE называет Deployment, код 1', a
 	expect(out.lines).toContain('LEFT: deployment 77');
 	expect(code).toBe(1);
 });
+
+test('gh-deploy: id из тела отказа создания не попадает в удаление', async () => {
+	const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+	const pem = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+	const calls = stubFetch((c) => {
+		if (c.url.endsWith('/installation')) return json({ id: 5 });
+		if (c.url.endsWith('/access_tokens')) return json({ token: 'ghs_abcdef' }, 201);
+		if (c.url.endsWith('/deployments')) return json({ id: 77 }, 403);
+		return json({}, 204);
+	});
+	const out = capture();
+	const code = await run(['gh-deploy', '--app', 'acme', 'acme/api', 'abc123', '--env', 'probe'], {
+		PLANE_HOOKS_GH_ACME_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
+		PROBE_GH_ACME_APP_ID: '1',
+	});
+	out.restore();
+	expect(calls.filter((c) => c.method === 'DELETE')).toEqual([]);
+	expect(code).toBe(1);
+});
