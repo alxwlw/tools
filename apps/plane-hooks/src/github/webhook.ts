@@ -168,9 +168,9 @@ export function parseGitHubDelivery(headers: Headers, raw: Uint8Array): GitHubEv
 
 	const status = record(payload, 'deployment_status');
 	const state = status.state;
-	if (typeof state !== 'string' || !DEPLOYMENT_STATES.includes(state)) {
-		throw bad('deployment_status.state is not a known state');
-	}
+	if (typeof state !== 'string') throw bad('deployment_status.state is missing');
+	// A state GitHub adds later is ignored, not a 400: failed deliveries raise health alarms.
+	if (!DEPLOYMENT_STATES.includes(state)) return null;
 	return {
 		kind: 'deployment_status',
 		appId,

@@ -210,9 +210,11 @@ describe('разбор доставки', () => {
 		}
 	});
 
-	test('неизвестное состояние деплоя — BadPayload', () => {
+	test('неизвестное состояние деплоя — null (событие игнорируется, не 400); не строка — BadPayload', () => {
 		const d = deploymentStatusDelivery('exploded');
-		expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		expect(parseGitHubDelivery(d.headers, d.raw)).toBeNull();
+		const bad = deploymentStatusDelivery('success', {}, { state: 5 });
+		expect(() => parseGitHubDelivery(bad.headers, bad.raw)).toThrow(BadPayload);
 	});
 
 	test('installation — null; ping — ping', () => {

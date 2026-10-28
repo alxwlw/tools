@@ -136,7 +136,12 @@ describe('callback', () => {
 	};
 
 	function harness(reply: Response | Error) {
-		const calls: { url: string; method: string | undefined; accept: string | undefined }[] = [];
+		const calls: {
+			url: string;
+			method: string | undefined;
+			accept: string | undefined;
+			signal: unknown;
+		}[] = [];
 		const logs: unknown[] = [];
 		return {
 			calls,
@@ -149,6 +154,7 @@ describe('callback', () => {
 						url,
 						method: init.method,
 						accept: (init.headers as Record<string, string>).Accept,
+						signal: init.signal,
 					});
 					if (reply instanceof Error) throw reply;
 					return reply;
@@ -227,6 +233,7 @@ describe('callback', () => {
 				url: 'https://api.github.com/app-manifests/abc123/conversions',
 				method: 'POST',
 				accept: 'application/vnd.github+json',
+				signal: expect.any(AbortSignal),
 			},
 		]);
 		expect(res.status).toBe(200);
