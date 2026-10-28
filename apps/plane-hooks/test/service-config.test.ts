@@ -301,6 +301,14 @@ describe('loadServiceConfig', () => {
 			expect(message(edit)).toContain(expected);
 		});
 
+	test('без Grafana проект инцидентов не нужен', () => {
+		const config = load(
+			(file) => delete file.tenants[0].incidents,
+			without('PLANE_HOOKS_ACME_GRAFANA_TOKEN'),
+		);
+		expect(config.tenants[0]?.incidents).toBeNull();
+	});
+
 	test('нет секрета Plane — называет переменную', () => {
 		expect(message(() => {}, without('PLANE_HOOKS_ACME_PLANE_SECRET'))).toContain(
 			'missing env PLANE_HOOKS_ACME_PLANE_SECRET',
@@ -352,5 +360,6 @@ describe('matchRepo', () => {
 		expect(matchRepo(rules, 'other/api')).toBeNull();
 		expect(matchRepo(rules, 'acme-evil/api')).toBeNull();
 		expect(matchRepo([{ repo: 'acme', environments: [] }], 'acme/api')).toBeNull();
+		expect(matchRepo([{ repo: 'acme/x', environments: [] }], 'acme/api')).toBeNull();
 	});
 });
