@@ -66,6 +66,17 @@ describe('FakeGitHub.compare', () => {
 });
 
 describe('FakeGitHub pulls', () => {
+	test('mergedPullsForCommit: коммит ветки смёрдженного PR тоже находит PR; несмёрдженный — нет', async () => {
+		const gh = new FakeGitHub()
+			.pull({ repo: 'acme/api', number: 5 })
+			.pull({ repo: 'acme/api', number: 6 })
+			.mergePull('acme/api', 5, 'm5', ['b1', 'b2']);
+		expect((await gh.mergedPullsForCommit('acme/api', 'b2')).map((p) => p.number)).toEqual([5]);
+		expect((await gh.mergedPullsForCommit('acme/api', 'm5')).map((p) => p.number)).toEqual([5]);
+		expect(await gh.mergedPullsForCommit('acme/web', 'b1')).toEqual([]);
+		expect(await gh.mergedPullsForCommit('acme/api', 'b3')).toEqual([]);
+	});
+
 	test('PR: значения по умолчанию, merge, поиск по коммиту и ветке', async () => {
 		const gh = new FakeGitHub()
 			.pull({ repo: 'acme/api', number: 1, head: 'eng-1' })
@@ -95,6 +106,8 @@ describe('FakeGitHub pulls', () => {
 		});
 		expect((await gh.mergedPullsForCommit('acme/api', 'm2')).map((p) => p.number)).toEqual([2]);
 		expect(await gh.mergedPullsForCommit('acme/web', 'm2')).toEqual([]);
+		// Not the merge commit of PR 2 and not on its branch: no PR.
+		expect(await gh.mergedPullsForCommit('acme/api', 'other')).toEqual([]);
 		expect((await gh.openPullsForBranch('acme/api', 'eng-1')).map((p) => p.repo)).toEqual([
 			'acme/api',
 		]);

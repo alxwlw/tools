@@ -19,6 +19,8 @@ export class FakeGitHub implements GitHubApi {
 	readonly calls: string[] = [];
 	readonly #commits = new Map<string, { parents: string[]; message: string }>();
 	readonly #pulls = new Map<string, Pull>();
+	/** Branch commits of merged PRs: GitHub reports the PR for them too, not only for the merge commit. */
+	readonly #branchCommits = new Map<string, string[]>();
 	readonly #deployments: StoredDeployment[] = [];
 	#nextDeploymentId = 1;
 
@@ -49,9 +51,11 @@ export class FakeGitHub implements GitHubApi {
 		return this;
 	}
 
-	mergePull(repo: string, number: number, mergeSha: string): this {
+	/** `branchCommits` — commits of the PR's branch that reached the base with it (a merge commit, not a squash). */
+	mergePull(repo: string, number: number, mergeSha: string, branchCommits: string[] = []): this {
 		const pull = this.#pulls.get(`${repo}#${number}`);
 		if (!pull) throw new Error(`FakeGitHub: no pull ${repo}#${number}`);
+		this.#branchCommits.set(`${repo}#${number}`, branchCommits);
 		this.#pulls.set(`${repo}#${number}`, { ...pull, state: 'closed', merged: true, mergeSha });
 		return this;
 	}
@@ -82,12 +86,17 @@ export class FakeGitHub implements GitHubApi {
 		return pull ? { ...pull } : null;
 	}
 
-	/** Merged PRs whose merge commit is `sha`. */
+	/** Merged PRs whose merge commit is `sha` or that carry `sha` on their branch (like `commits/{sha}/pulls`). */
 	async mergedPullsForCommit(repo: string, sha: string): Promise<Pull[]> {
 		this.calls.push(`mergedPullsForCommit ${repo} ${sha}`);
-		return [...this.#pulls.values()]
-			.filter((p) => p.repo === repo && p.merged && p.mergeSha === sha)
-			.map((p) => ({ ...p }));
+		return [...this.#pulls.entries()]
+			.filter(
+				([key, p]) =>
+					p.repo === repo &&
+					p.merged &&
+					(p.mergeSha === sha || (this.#branchCommits.get(key) ?? []).includes(sha)),
+			)
+			.map(([, p]) => ({ ...p }));
 	}
 
 	async openPullsForBranch(repo: string, branch: string): Promise<Pull[]> {

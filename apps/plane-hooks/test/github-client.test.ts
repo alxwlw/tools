@@ -126,6 +126,16 @@ describe('списки PR', () => {
 });
 
 describe('compare', () => {
+	test('compare: 422 (sha исчез) — null, как 404', async () => {
+		const { client } = stub([{ status: 422, body: { message: 'No common ancestor' } }]);
+		expect(await client.compare('acme/api', 'gone', 'x')).toBeNull();
+	});
+
+	test('compare: 500 — ошибка, не null', async () => {
+		const { client } = stub([{ status: 500, body: { message: 'boom' } }]);
+		await expect(client.compare('acme/api', 'a', 'b')).rejects.toThrow('→ 500');
+	});
+
 	test('compare: статусы и коммиты; 404 — null', async () => {
 		const { calls, client } = stub([
 			{ status: 200, body: compareBody('ahead', commits(1, 4)) },
@@ -204,6 +214,17 @@ describe('deployments', () => {
 		expect(calls.map((c) => c.url)).toEqual([
 			`${API}/repos/acme/api/deployments?environment=staging&per_page=100&page=1`,
 			`${API}/repos/acme/api/deployments?environment=staging&per_page=100&page=2`,
+		]);
+	});
+
+	test('listDeployments: creator null (удалённый аккаунт) — пустая строка', async () => {
+		const { client } = stub([
+			{ status: 200, body: [deploymentBody({ id: 4, creator: null }), deploymentBody({ id: 3 })] },
+		]);
+		const found = await client.listDeployments('acme/api', 'production', 10);
+		expect(found.map((d) => [d.id, d.creator])).toEqual([
+			[4, ''],
+			[3, 'github-actions[bot]'],
 		]);
 	});
 
@@ -392,6 +413,20 @@ describe('границы и форма ответа', () => {
 		await expect(client.mergedPullsForCommit('acme/api', 'abc')).rejects.toThrow(
 			'pulls is not an array',
 		);
+	});
+
+	test('mergedPullsForCommit: sha исчез (404 или 422) — пустой список, не ошибка', async () => {
+		const { client } = stub([
+			{ status: 404, body: { message: 'Not Found' } },
+			{ status: 422, body: { message: 'No commit found for SHA' } },
+		]);
+		expect(await client.mergedPullsForCommit('acme/api', 'gone')).toEqual([]);
+		expect(await client.mergedPullsForCommit('acme/api', 'gone')).toEqual([]);
+	});
+
+	test('mergedPullsForCommit: 500 — ошибка', async () => {
+		const { client } = stub([{ status: 500, body: { message: 'boom' } }]);
+		await expect(client.mergedPullsForCommit('acme/api', 'abc')).rejects.toThrow('→ 500');
 	});
 
 	test('openPullsForBranch просит страницу в 100', async () => {

@@ -40,10 +40,10 @@ export type DeploymentState =
 
 export interface GitHubApi {
 	getPull(repo: string, number: number): Promise<Pull | null>; // 404 → null
-	/** Merged PRs that brought the commit in (`commits/{sha}/pulls`, merged only). */
+	/** Merged PRs that brought the commit in (`commits/{sha}/pulls`, merged only); a sha that is gone (404/422) → []. */
 	mergedPullsForCommit(repo: string, sha: string): Promise<Pull[]>;
 	openPullsForBranch(repo: string, branch: string): Promise<Pull[]>;
-	/** 404 (a sha gone after force-push) → null. At most 250 commits; more → truncated: true. */
+	/** 404/422 (a sha gone after force-push) → null. At most 250 commits; more → truncated: true. */
 	compare(repo: string, base: string, head: string): Promise<Comparison | null>;
 	/** Newest first, at most `limit` (pages of 100). */
 	listDeployments(repo: string, environment: string, limit: number): Promise<Deployment[]>;
@@ -89,6 +89,8 @@ const DEPLOYMENT_STATES: readonly string[] = [
 	'queued',
 	'pending',
 ];
+/** A sha that no longer exists answers 404 or 422, depending on the endpoint. */
+const GONE: readonly number[] = [404, 422];
 const COMPARE_STATUSES: readonly string[] = ['ahead', 'behind', 'identical', 'diverged'];
 
 /** How one GitHub request is authorised and sent; the bearer is a JWT (App level) or an installation token. */
@@ -211,7 +213,11 @@ function toDeployment(repo: string, value: unknown): Deployment {
 		repo,
 		sha: str(rec, 'sha', 'deployment'),
 		environment: str(rec, 'environment', 'deployment'),
-		creator: str(recordAt(rec.creator, 'deployment.creator'), 'login', 'deployment.creator'),
+		// GitHub's schema makes the creator nullable (a deleted account); '' never equals a login.
+		creator:
+			rec.creator === null || rec.creator === undefined
+				? ''
+				: str(recordAt(rec.creator, 'deployment.creator'), 'login', 'deployment.creator'),
 		description: nullableText(rec, 'description', 'deployment'),
 	};
 }
@@ -231,7 +237,9 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubApi {
 
 		async mergedPullsForCommit(repo, sha) {
 			const path = `${repoPath(repo)}/commits/${encodeURIComponent(sha)}/pulls?per_page=${PAGE_SIZE}`;
-			const res = await call('GET', path);
+			// 404/422: the commit is gone (force-push) — no PR brought it in.
+			const res = await call('GET', path, undefined, GONE);
+			if (GONE.includes(res.status)) return [];
 			return list(res.body, 'pulls')
 				.map((row) => toPull(repo, row))
 				.filter((pull) => pull.merged);
@@ -255,8 +263,8 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubApi {
 			let total = 0;
 			for (let page = 1; commits.length < COMPARE_MAX_COMMITS; page++) {
 				const path = `${repoPath(repo)}/compare/${range}?per_page=${PAGE_SIZE}&page=${page}`;
-				const res = await call('GET', path, undefined, [404]);
-				if (res.status === 404) return null;
+				const res = await call('GET', path, undefined, GONE);
+				if (GONE.includes(res.status)) return null;
 				const rec = recordAt(res.body, 'comparison');
 				const rawStatus = str(rec, 'status', 'comparison');
 				if (!COMPARE_STATUSES.includes(rawStatus)) {
