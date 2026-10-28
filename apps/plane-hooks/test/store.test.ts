@@ -39,6 +39,10 @@ describe('Store: курсор деплоя', () => {
 		acme.set('acme/api', 'staging', 'sha-a');
 		expect(acme.get('acme/api', 'staging')).toBe('sha-a');
 		expect(other.get('acme/api', 'staging')).toBeNull();
+		other.set('acme/api', 'staging', 'sha-o');
+		expect(other.get('acme/api', 'staging')).toBe('sha-o');
+		expect(acme.get('acme/api', 'staging')).toBe('sha-a');
+		expect(store.deployCursor('other', 'acme/api', 'staging')).toBe('sha-o');
 		expect(store.deployCursor('acme', 'acme/api', 'staging')).toBe('sha-a');
 		store.close();
 	});

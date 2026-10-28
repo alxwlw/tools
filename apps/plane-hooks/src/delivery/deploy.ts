@@ -104,7 +104,7 @@ async function pullsOfCommits(
 			const pseudo = commitAsPull(repo, commit);
 			pulls.set(pseudo.url, pseudo);
 		}
-		for (const pull of found) if (!pulls.has(pull.url)) pulls.set(pull.url, pull);
+		for (const pull of found) pulls.set(pull.url, pull);
 	}
 	return [...pulls.values()];
 }

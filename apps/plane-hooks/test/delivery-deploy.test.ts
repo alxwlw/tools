@@ -368,18 +368,52 @@ describe('handleDeploy: откат и диапазон', () => {
 		expect(keysOf(result)).toEqual(['ENG-1']);
 	});
 
-	test('compare обрезан на 250 коммитах — warnOnce, деплой доставлен', async () => {
-		const w = setup();
+	function longChain(w: ReturnType<typeof setup>) {
 		w.gh.commit('c0', [], 'init');
 		for (let i = 1; i <= 251; i++) w.gh.commit(`c${i}`, [`c${i - 1}`], `chore ${i}`);
+	}
+	const truncated = [{ reason: 'compare_truncated:acme/api', entry: { repo: REPO } }];
+
+	test('compare обрезан на 250 коммитах — warnOnce, деплой доставлен', async () => {
+		const w = setup();
+		longChain(w);
 		w.cursor.set(REPO, 'staging', 'c0');
 
 		const result = await handleDeploy(w.deps, fact('c251'));
 
 		expect(result.action).toBe('delivered');
-		expect(w.warns.filter((x) => x.reason.startsWith('compare_'))).toEqual([
-			{ reason: 'compare_truncated:acme/api', entry: { repo: REPO } },
-		]);
+		expect(w.warns.filter((x) => x.reason.startsWith('compare_'))).toEqual(truncated);
+	});
+
+	test('откат на 250+ коммитов — тот же warnOnce', async () => {
+		const w = setup();
+		longChain(w);
+		w.cursor.set(REPO, 'staging', 'c251');
+
+		const result = await handleDeploy(w.deps, fact('c0'));
+
+		expect(result.action).toBe('rolled_back');
+		expect(w.warns.filter((x) => x.reason.startsWith('compare_'))).toEqual(truncated);
+	});
+
+	test('compare ответил identical для другого sha — identical, курсор сдвинут', async () => {
+		const w = setup();
+		w.cursor.set(REPO, 'staging', 'old');
+		const github = new Proxy(w.gh, {
+			get(target, prop) {
+				if (prop === 'compare') {
+					return async () => ({ status: 'identical' as const, commits: [], truncated: false });
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+		});
+
+		const result = await handleDeploy({ ...w.deps, github: async () => github }, fact('new'));
+
+		expect(result.action).toBe('identical');
+		expect(result.notes).toEqual([]);
+		expect(w.cursor.get(REPO, 'staging')).toBe('new');
 	});
 });
 

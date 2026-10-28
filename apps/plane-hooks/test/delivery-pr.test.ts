@@ -161,6 +161,18 @@ describe('handlePullRequest', () => {
 		expect(w.stateOf(ops)).toBe('ops-in-progress');
 	});
 
+	test('задача исчезла между чтением и ссылкой (404) — ключ пропущен с предупреждением', async () => {
+		const w = deliveryWorld();
+		w.item('ENG-1', 'In Progress');
+		w.plane.failNext('createLink', new PlaneApiError(404, 'POST', '/links/'));
+		const result = await handlePullRequest(w.deps, event({ head: 'x', body: '' }));
+		expect(result.linked).toBe(0);
+		expect(w.warns.filter((x) => x.reason.startsWith('plane_'))[0]).toEqual({
+			reason: 'plane_not_found:ENG',
+			entry: { project: 'ENG' },
+		});
+	});
+
 	test('сбой Plane, не 403 и не 404, не глотается', async () => {
 		const w = deliveryWorld();
 		w.item('ENG-1', 'In Progress');
