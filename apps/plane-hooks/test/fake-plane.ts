@@ -350,11 +350,6 @@ export class FakePlane implements PlaneApi {
 			: null;
 	}
 
-	async listProjectIdentifiers(): Promise<string[]> {
-		this.#enter('listProjectIdentifiers');
-		return [...this.#projects.keys()];
-	}
-
 	async listStates(projectId: string): Promise<StateSummary[]> {
 		this.#enter('listStates', projectId);
 		return this.#statesOf(projectId).map((s) => ({ ...s }));

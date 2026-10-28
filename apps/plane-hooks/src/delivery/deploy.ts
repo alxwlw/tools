@@ -1,8 +1,7 @@
 import { matchRepo } from '../config.ts';
-import type { ReleaseDraft } from '../deploy-note.ts';
 import type { Commit, GitHubApi, Pull } from '../github/client.ts';
-import type { ReleaseItem, ReleaseResult } from '../release.ts';
-import { describeError } from '../server.ts';
+import { describeError } from '../log.ts';
+import type { ReleaseDraft, ReleaseItem, ReleaseResult } from '../release.ts';
 import { ownedKeys } from './keys.ts';
 import { deployedHtml, rolledBackHtml } from './notes.ts';
 import { tolerateGone } from './pr.ts';
@@ -17,7 +16,12 @@ export type DeployFact = {
 	/** GitHub deployment id; null — a deploy GitHub has no record of (Vercel promote). */
 	deploymentId: number | null;
 	logUrl: string | null;
-	at: string; // ISO
+	/**
+	 * When the deploy took effect, ISO: GitHub's `created_at` of the success status, Vercel's promote/rollback
+	 * event time. handleDeploy orders deploys by it (a fact older than the cursor is stale), so neither the
+	 * processing time nor the deployment's creation time may stand in.
+	 */
+	at: string;
 };
 export type DeployResult = {
 	action: 'ignored' | 'identical' | 'delivered' | 'rolled_back';

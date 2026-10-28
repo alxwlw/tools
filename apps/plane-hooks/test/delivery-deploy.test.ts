@@ -6,9 +6,13 @@ import {
 	type DeployResult,
 	handleDeploy,
 } from '../src/delivery/deploy.ts';
-import type { ReleaseDraft } from '../src/deploy-note.ts';
 import { PlaneApiError } from '../src/plane.ts';
-import { publishRelease, type ReleaseItem, type ReleaseResult } from '../src/release.ts';
+import {
+	publishRelease,
+	type ReleaseDraft,
+	type ReleaseItem,
+	type ReleaseResult,
+} from '../src/release.ts';
 import { Store } from '../src/store.ts';
 import { tenantOf } from './config-fixture.ts';
 import { deliveryWorld } from './delivery-world.ts';

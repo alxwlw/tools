@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { ReleaseDraft } from '../src/deploy-note.ts';
-import { changelogHtml, publishRelease, releaseName, type ReleaseItem } from '../src/release.ts';
+import {
+	changelogHtml,
+	publishRelease,
+	type ReleaseDraft,
+	releaseName,
+	type ReleaseItem,
+} from '../src/release.ts';
 import { RELEASE_ITEMS_MAX } from '../src/plane.ts';
 import { FakePlane } from './fake-plane.ts';
 

@@ -1,13 +1,15 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
-import type { DeployOutcome, DeploySummary, DeployTarget } from './deploy-note.ts';
 import { esc, link, p, truncate } from './html.ts';
 import type { IncidentSignal } from './incident.ts';
 import { BadPayload, isRecord, optString } from './payload.ts';
 
 const TITLE_MAX = 200;
 const BRANCH_MAX = 80;
-const KEY_LIMIT = 10;
+
+export type DeployTarget = 'production' | 'staging' | 'preview';
+/** What the Grafana annotation of one Vercel deploy shows. */
+export type DeploySummary = { title: string; env: string; sha?: string };
 
 /** 40 hex digits — the only shape an HMAC-SHA1 signature can take; anything else fails before the body is read. */
 export function isVercelSignatureShaped(header: string | null): header is string {
@@ -25,18 +27,43 @@ export function verifyVercelSignature(
 	return timingSafeEqual(expected, Buffer.from(header, 'hex'));
 }
 
-export type VercelEvent = DeployOutcome | { kind: 'ignored'; type: string };
+export type VercelPreview = {
+	/** The Vercel project name (`payload.deployment.name`). */
+	project: string;
+	/** `<org>/<repo>` from the deployment meta; null for a deploy without git metadata. */
+	repo: string | null;
+	branch: string | null;
+	url: string;
+	sha: string | null;
+};
+/** What a Vercel delivery means for plane-hooks: GitHub Deployments carry the deploys, Vercel adds the rest. */
+export type VercelHookEvent =
+	| { kind: 'failed'; signal: IncidentSignal; summary: DeploySummary }
+	| { kind: 'succeeded'; resolve: IncidentSignal; summary: DeploySummary }
+	| { kind: 'preview'; preview: VercelPreview; resolve: IncidentSignal }
+	| {
+			kind: 'promoted' | 'rolled_back';
+			project: string;
+			repo: string | null;
+			sha: string | null;
+			/** When the event itself happened (its own `createdAt`): the order of deploys on an environment. */
+			at: string;
+			url: string | null;
+	  }
+	| { kind: 'ignored'; type: string };
 
 /**
- * Vercel account webhook → what plane-hooks does about it.
- * deployment.error opens or extends an incident keyed by project + target +
- * branch; deployment.succeeded resolves that incident and carries the deploy
- * note. Other types are ignored. Throws BadPayload on a body Vercel would not send.
+ * Vercel account webhook → the part of it GitHub does not already tell. deployment.error opens or extends an
+ * incident keyed by project + target + branch; deployment.succeeded resolves it (a preview additionally yields the
+ * preview link); promote and rollback become `promoted` / `rolled_back` for the deploy path. Other types are
+ * ignored. Throws BadPayload on a body Vercel would not send.
  */
-export function parseVercelWebhook(body: unknown): VercelEvent {
+export function parseVercelEvent(body: unknown): VercelHookEvent {
 	if (!isRecord(body)) throw new BadPayload('vercel: body is not an object');
 	const type = optString(body.type);
 	if (type === null) throw new BadPayload('vercel: no event type');
+	if (type === 'deployment.promoted' || type === 'deployment.rollback')
+		return parseSwitch(body, type === 'deployment.promoted' ? 'promoted' : 'rolled_back');
 	if (type !== 'deployment.error' && type !== 'deployment.succeeded')
 		return { kind: 'ignored', type };
 
@@ -95,83 +122,23 @@ export function parseVercelWebhook(body: unknown): VercelEvent {
 		};
 	}
 
-	return {
-		kind: 'succeeded',
-		resolve: {
-			status: 'resolved',
-			source: 'vercel',
-			key,
-			at,
-			noteHtml: p(`Деплой снова проходит: <code>${esc(sha7 ?? deploymentId)}</code>`),
-		},
-		note: {
-			deploymentId,
-			project: name,
-			target,
-			sha,
-			url,
-			texts: [ref, message].filter((text): text is string => text !== null),
-			source: 'vercel',
-			keyLimit: KEY_LIMIT,
-		},
-		summary: { title: `${name} → ${target} · ${label}`, env: target, sha },
+	const resolve: IncidentSignal = {
+		status: 'resolved',
+		source: 'vercel',
+		key,
+		at,
+		noteHtml: p(`Деплой снова проходит: <code>${esc(sha7 ?? deploymentId)}</code>`),
 	};
-}
-
-export type VercelPreview = {
-	/** The Vercel project name (`payload.deployment.name`). */
-	project: string;
-	/** `<org>/<repo>` from the deployment meta; null for a deploy without git metadata. */
-	repo: string | null;
-	branch: string | null;
-	url: string;
-	sha: string | null;
-};
-/**
- * What a Vercel delivery means for plane-hooks since the GitHub App took over «Выкачено».
- * Named apart from the legacy `VercelEvent` until that one is removed with the old server.
- */
-export type VercelHookEvent =
-	| { kind: 'failed'; signal: IncidentSignal; summary: DeploySummary }
-	| { kind: 'succeeded'; resolve: IncidentSignal; summary: DeploySummary }
-	| { kind: 'preview'; preview: VercelPreview; resolve: IncidentSignal }
-	| {
-			kind: 'promoted' | 'rolled_back';
-			project: string;
-			repo: string | null;
-			sha: string | null;
-			/** When the event itself happened (its own `createdAt`): the order of deploys on an environment. */
-			at: string;
-			url: string | null;
-	  }
-	| { kind: 'ignored'; type: string };
-
-/**
- * Vercel account webhook → the part of it GitHub does not already tell. deployment.error stays an incident;
- * deployment.succeeded only resolves it (a preview additionally yields the preview link); promote and rollback
- * become `promoted` / `rolled_back` for the deploy path. Throws BadPayload on a body Vercel would not send.
- */
-export function parseVercelEvent(body: unknown): VercelHookEvent {
-	if (isRecord(body)) {
-		const type = optString(body.type);
-		if (type === 'deployment.promoted' || type === 'deployment.rollback')
-			return parseSwitch(body, type === 'deployment.promoted' ? 'promoted' : 'rolled_back');
-	}
-	const legacy = parseVercelWebhook(body);
-	if (legacy.kind === 'ignored' || legacy.kind === 'failed') return legacy;
-	if (legacy.note.target !== 'preview')
-		return { kind: 'succeeded', resolve: legacy.resolve, summary: legacy.summary };
-	const meta = metaOf(body);
+	if (target !== 'preview')
+		return {
+			kind: 'succeeded',
+			resolve,
+			summary: { title: `${name} → ${target} · ${label}`, env: target, sha },
+		};
 	return {
 		kind: 'preview',
-		preview: {
-			project: legacy.note.project,
-			repo: repoOf(meta),
-			branch: optString(meta.githubCommitRef),
-			url: legacy.note.url,
-			sha: legacy.note.sha ?? null,
-		},
-		resolve: legacy.resolve,
+		preview: { project: name, repo: repoOf(meta), branch: ref, url, sha: sha ?? null },
+		resolve,
 	};
 }
 

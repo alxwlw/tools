@@ -2,7 +2,6 @@ import type { PlaneAuth } from '@alxwlw/plane-app';
 import { describe, expect, test } from 'bun:test';
 
 import {
-	apiKeyAuth,
 	type NewRelease,
 	type NewWorkItem,
 	PLANE_HOOKS_SCOPES,
@@ -10,6 +9,12 @@ import {
 	PlaneClient,
 	RELEASE_ITEMS_MAX,
 } from '../src/plane.ts';
+
+/** A fixed header in place of the bot token: these tests pin what the client sends, not how the token is made. */
+const staticKeyAuth = (key: string): PlaneAuth => ({
+	headers: () => Promise.resolve({ 'X-API-Key': key }),
+	invalidate() {},
+});
 
 type Reply = { status: number; body?: unknown; raw?: string };
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
@@ -33,7 +38,7 @@ function stub(replies: Reply[]) {
 	const client = new PlaneClient({
 		baseUrl: 'https://plane.test/',
 		workspace: 'example-ws',
-		auth: apiKeyAuth('key-1'),
+		auth: staticKeyAuth('key-1'),
 		fetch,
 	});
 	return { calls, client };
@@ -293,7 +298,7 @@ describe('PlaneClient: списки', () => {
 		]);
 	});
 
-	test('идентификаторы проектов, метки, создание метки', async () => {
+	test('проекты, метки, создание метки', async () => {
 		const { calls, client } = stub([
 			{
 				status: 200,
@@ -302,7 +307,7 @@ describe('PlaneClient: списки', () => {
 			{ status: 200, body: { results: [{ id: 'l1', name: 'alert' }], next_page_results: false } },
 			{ status: 201, body: { id: 'l2', name: 'deploy-failed' } },
 		]);
-		expect(await client.listProjectIdentifiers()).toEqual(['OPS']);
+		expect(await client.listProjects()).toEqual([{ id: 'p1', identifier: 'OPS' }]);
 		expect(await client.listLabels('p1')).toEqual([{ id: 'l1', name: 'alert' }]);
 		expect(await client.createLabel('p1', 'deploy-failed')).toEqual({
 			id: 'l2',
@@ -365,7 +370,7 @@ describe('PlaneClient: ошибки', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			auth: apiKeyAuth('k'),
+			auth: staticKeyAuth('k'),
 			timeoutMs: 20,
 			fetch: hang,
 		});
@@ -383,7 +388,7 @@ describe('ограничитель темпа', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			auth: apiKeyAuth('key-1'),
+			auth: staticKeyAuth('key-1'),
 			limiter: {
 				acquire: async () => {
 					events.push('acquire');
@@ -410,7 +415,7 @@ describe('ограничитель темпа', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			auth: apiKeyAuth('key-1'),
+			auth: staticKeyAuth('key-1'),
 			timeoutMs: 20,
 			limiter: { acquire: () => Bun.sleep(60) },
 			fetch: async (_url, init) => {
@@ -579,10 +584,6 @@ describe('PlaneClient: бот-токен Plane App', () => {
 		expect((err as PlaneApiError).status).toBe(401);
 		expect(invalidated()).toBe(1);
 		expect(calls).toHaveLength(2);
-	});
-
-	test('apiKeyAuth отдаёт заголовок X-API-Key', async () => {
-		expect(await apiKeyAuth('k-9').headers()).toEqual({ 'X-API-Key': 'k-9' });
 	});
 
 	test('скоупы Plane App — ровно десять из Global Constraints', () => {

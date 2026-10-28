@@ -1,6 +1,23 @@
-import type { ReleaseDraft } from './deploy-note.ts';
 import { esc, link, truncate } from './html.ts';
 import { type PlaneApi, RELEASE_ITEMS_MAX } from './plane.ts';
+
+/** A deployed commit: full sha (lower case) and message. */
+export type DeployCommit = { sha: string; message: string };
+
+/** One successful production deploy, reduced to what its Plane release needs. */
+export type ReleaseDraft = {
+	/** `example-org/app` */
+	repository: string;
+	/** The deployed commit, 40 hex, lower case. */
+	sha: string;
+	/** When the deploy happened (ISO, `DeployFact.at`): the release date is its UTC day. */
+	at: string;
+	runUrl: string;
+	/** Newest first; commits[0] is the deployed commit when it carries any. */
+	commits: DeployCommit[];
+	/** Title of the PR whose merge commit is `sha`: the release name carries it. */
+	headline?: string;
+};
 
 /** external_source of every release plane-hooks makes. */
 export const RELEASE_SOURCE = 'github-deploy';

@@ -18,9 +18,8 @@
 
 import { botTokenAuth } from '@alxwlw/plane-app';
 
-import type { ReleaseDraft } from '../src/deploy-note.ts';
 import { PLANE_HOOKS_SCOPES } from '../src/plane.ts';
-import { changelogHtml } from '../src/release.ts';
+import { changelogHtml, type ReleaseDraft } from '../src/release.ts';
 
 // A module, so top-level await type-checks.
 export {};

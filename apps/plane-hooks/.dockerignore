@@ -1,6 +1,0 @@
-node_modules
-test
-Dockerfile
-.dockerignore
-README.md
-moon.yml

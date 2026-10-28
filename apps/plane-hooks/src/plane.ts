@@ -66,13 +66,6 @@ export const PLANE_HOOKS_SCOPES: readonly string[] = [
 	'projects.labels:write',
 ];
 
-/** Static API-key auth for the old single-tenant service; removed with it. */
-export function apiKeyAuth(key: string): PlaneAuth {
-	return {
-		headers: () => Promise.resolve({ 'X-API-Key': key }),
-		invalidate() {},
-	};
-}
 export type LabelSummary = { id: string; name: string };
 
 /**
@@ -114,7 +107,6 @@ export interface PlaneApi {
 	listProjects(): Promise<ProjectSummary[]>;
 	/** `key` is `OPS-12`; null when Plane answers 404. */
 	getWorkItemByKey(key: string): Promise<WorkItemRef | null>;
-	listProjectIdentifiers(): Promise<string[]>;
 	listStates(projectId: string): Promise<StateSummary[]>;
 	listLabels(projectId: string): Promise<LabelSummary[]>;
 	createLabel(projectId: string, name: string): Promise<LabelSummary>;
@@ -294,10 +286,6 @@ export class PlaneClient implements PlaneApi {
 			[404],
 		);
 		return res.status === 404 ? null : workItemRef(res.body);
-	}
-
-	async listProjectIdentifiers(): Promise<string[]> {
-		return (await this.#listAll('/projects/')).map((row) => field(row, 'identifier'));
 	}
 
 	async listStates(projectId: string): Promise<StateSummary[]> {
