@@ -1,5 +1,7 @@
-import { describe, expect, test } from 'bun:test';
 import { createPublicKey, createVerify } from 'node:crypto';
+
+import { describe, expect, setSystemTime, test } from 'bun:test';
+
 import { appJwt, createGitHubApp } from '../src/github/app.ts';
 import { GitHubApiError } from '../src/github/client.ts';
 import { tenantOf, TEST_KEY_PEM } from './config-fixture.ts';
@@ -251,5 +253,85 @@ describe('health', () => {
 			'https://api.github.com/app/hook/deliveries?per_page=100',
 			'https://api.github.com/app/hook/deliveries?per_page=100&cursor=v1_2',
 		]);
+	});
+});
+
+describe('границы', () => {
+	test('config приложения доступен как есть', () => {
+		expect(createGitHubApp(CONFIG, { fetch: stub([]).fetch }).config).toBe(CONFIG);
+	});
+
+	test('без now берутся системные часы: второй вызов в пределах срока токена не просит новый', async () => {
+		setSystemTime(new Date(T0));
+		try {
+			const { calls, fetch } = stub([
+				{ status: 200, body: accessTokenBody(EXPIRES) },
+				{ status: 200, body: pullBody() },
+				{ status: 200, body: pullBody() },
+			]);
+			const client = createGitHubApp(CONFIG, { fetch }).client(7);
+			await client.getPull('acme/api', 12);
+			await client.getPull('acme/api', 12);
+			expect(calls.map((c) => c.method)).toEqual(['POST', 'GET', 'GET']);
+			const jwt = (calls[0]?.headers.Authorization ?? '').replace('Bearer ', '');
+			expect(decode(jwt.split('.')[1] as string).iat).toBe(T0 / 1000 - 60);
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	test.each([
+		['пустой token', { token: '', expires_at: EXPIRES }],
+		['нет token', { expires_at: EXPIRES }],
+		['token не строка', { token: 5, expires_at: EXPIRES }],
+	])('токен установки: %s — ошибка формы', async (_name, body) => {
+		const { fetch } = stub([{ status: 200, body }]);
+		const app = createGitHubApp(CONFIG, { fetch, now: () => T0 });
+		await expect(app.client(7).getPull('acme/api', 12)).rejects.toThrow('unexpected shape');
+	});
+
+	test.each([['x'], [1.5], [undefined]])('installationFor: id %p — ошибка формы', async (id) => {
+		const { fetch } = stub([{ status: 200, body: { id } }]);
+		const app = createGitHubApp(CONFIG, { fetch, now: () => T0 });
+		await expect(app.installationFor('acme/api')).rejects.toThrow('unexpected shape');
+	});
+
+	test('health: доставки не массивом или строка без delivered_at — ошибка формы', async () => {
+		const { fetch } = stub([
+			{ status: 200, body: appBody() },
+			{ status: 200, body: { deliveries: [] } },
+			{ status: 200, body: appBody() },
+			{ status: 200, body: [null] },
+			{ status: 200, body: appBody() },
+			{ status: 200, body: [{ status_code: 500 }] },
+		]);
+		const app = createGitHubApp(CONFIG, { fetch, now: () => T0 });
+		for (let i = 0; i < 3; i++) {
+			await expect(app.health('2026-10-20T09:00:00Z')).rejects.toThrow('unexpected shape');
+		}
+	});
+
+	test('health: доставка со status_code не числом считается неудачной', async () => {
+		const { fetch } = stub([
+			{ status: 200, body: appBody() },
+			{ status: 200, body: [{ delivered_at: '2026-10-20T09:30:00Z', status_code: 'OK' }] },
+		]);
+		const app = createGitHubApp(CONFIG, { fetch, now: () => T0 });
+		expect(await app.health('2026-10-20T09:00:00Z')).toEqual({ appOk: true, failed: 1 });
+	});
+
+	test('health: курсор без конца — не больше 10 страниц', async () => {
+		const page = (n: number): Reply => ({
+			status: 200,
+			body: [deliveryBody('2026-10-20T09:30:00Z', 500, n)],
+			link: `<https://api.github.com/app/hook/deliveries?per_page=100&cursor=v1_${n}>; rel="next"`,
+		});
+		const { calls, fetch } = stub([
+			{ status: 200, body: appBody() },
+			...Array.from({ length: 10 }, (_, i) => page(i + 1)),
+		]);
+		const app = createGitHubApp(CONFIG, { fetch, now: () => T0 });
+		expect(await app.health('2026-10-20T09:00:00Z')).toEqual({ appOk: true, failed: 10 });
+		expect(calls).toHaveLength(11);
 	});
 });

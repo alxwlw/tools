@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { createGitHubClient, GitHubApiError } from '../src/github/client.ts';
 import {
 	compareBody,
@@ -315,5 +316,108 @@ describe('ошибки', () => {
 		await expect(client.openPullsForBranch('acme/api', 'x')).rejects.toMatchObject({
 			path: '/repos/acme/api/pulls',
 		});
+	});
+});
+
+describe('границы и форма ответа', () => {
+	test.each(['success', 'failure', 'error', 'inactive', 'in_progress', 'queued', 'pending'])(
+		'latestState принимает состояние %s',
+		async (state) => {
+			const { client } = stub([{ status: 200, body: [deploymentStatusBody(state)] }]);
+			expect(await client.latestState('acme/api', 501)).toBe(state);
+		},
+	);
+
+	test('неизвестные status и state называют метод и ресурс', async () => {
+		const { client } = stub([
+			{ status: 200, body: compareBody('sideways', []) },
+			{ status: 200, body: [deploymentStatusBody('exploded')] },
+		]);
+		await expect(client.compare('acme/api', 'a', 'b')).rejects.toThrow(
+			'GitHub GET compare: unexpected shape (status)',
+		);
+		await expect(client.latestState('acme/api', 501)).rejects.toThrow(
+			'GitHub GET statuses: unexpected shape (state)',
+		);
+	});
+
+	test('GitHubApiError — имя класса в name', async () => {
+		const { client } = stub([{ status: 500 }]);
+		const error = await client.getPull('acme/api', 1).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect((error as GitHubApiError).name).toBe('GitHubApiError');
+	});
+
+	test('запрос обрывается по таймауту', async () => {
+		const fetch = (_url: string, init: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+			});
+		const client = createGitHubClient({ fetch, bearer: async () => 't', timeoutMs: 20 });
+		const error = await client.getPull('acme/api', 1).then(
+			() => null,
+			(e: unknown) => e,
+		);
+		expect((error as Error).name).toBe('TimeoutError');
+	});
+
+	test('404 с не-JSON телом — null, пустое тело 2xx — успех', async () => {
+		const { client } = stub([{ status: 404, raw: '<html>not found</html>' }, { status: 201 }]);
+		expect(await client.getPull('acme/api', 1)).toBeNull();
+		await client.createDeploymentStatus('acme/api', 1, 'success', null);
+	});
+
+	test('PR без body и с неверной формой полей', async () => {
+		const { body: _body, ...noBody } = pullBody();
+		const cases: [unknown, string][] = [
+			[noBody, ''],
+			[pullBody({ state: 'merged' }), 'pull.state unknown'],
+			[pullBody({ number: '12' }), 'pull.number is not an integer'],
+			[pullBody({ number: 1.5 }), 'pull.number is not an integer'],
+			[pullBody({ body: 5 }), 'pull.body is not a string'],
+			[[pullBody()], 'pull is not an object'],
+		];
+		const { client } = stub(cases.map(([body]) => ({ status: 200, body })));
+		for (const [, expected] of cases) {
+			const result = client.getPull('acme/api', 12);
+			if (expected === '') expect((await result)?.body).toBe('');
+			else await expect(result).rejects.toThrow(expected);
+		}
+	});
+
+	test('список PR не массив — ошибка формы', async () => {
+		const { client } = stub([{ status: 200, body: pullBody() }]);
+		await expect(client.mergedPullsForCommit('acme/api', 'abc')).rejects.toThrow(
+			'pulls is not an array',
+		);
+	});
+
+	test('openPullsForBranch просит страницу в 100', async () => {
+		const { calls, client } = stub([{ status: 200, body: [] }]);
+		await client.openPullsForBranch('acme/api', 'x');
+		expect(new URL(calls[0]?.url as string).searchParams.get('per_page')).toBe('100');
+	});
+
+	test('compare: полная страница из 100 при total_commits 100 — один запрос', async () => {
+		const { calls, client } = stub([{ status: 200, body: compareBody('ahead', commits(0, 100)) }]);
+		const result = await client.compare('acme/api', 'a', 'b');
+		expect([result?.commits.length, result?.truncated, calls.length]).toEqual([100, false, 1]);
+	});
+
+	test('compare: неполная страница при большем total_commits — стоп, truncated', async () => {
+		const { calls, client } = stub([
+			{ status: 200, body: compareBody('ahead', commits(0, 40), { total_commits: 300 }) },
+		]);
+		const result = await client.compare('acme/api', 'a', 'b');
+		expect([result?.commits.length, result?.truncated, calls.length]).toEqual([40, true, 1]);
+	});
+
+	test('listDeployments: limit равен полной странице — один запрос', async () => {
+		const full = Array.from({ length: 100 }, (_, i) => deploymentBody({ id: 100 - i }));
+		const { calls, client } = stub([{ status: 200, body: full }]);
+		expect(await client.listDeployments('acme/api', 'production', 100)).toHaveLength(100);
+		expect(calls).toHaveLength(1);
 	});
 });
