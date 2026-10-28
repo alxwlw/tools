@@ -440,6 +440,20 @@ describe('GitHub: очередь и входящие', () => {
 		expect(failedWorld.lines('job.dropped')).toHaveLength(1);
 	});
 
+	test('вид задачи, неизвестный этой сборке, — job.dropped и failed', async () => {
+		const path = dbFile();
+		const old = new Store(path);
+		old.inboxAdd('acme', 'github.future', null, '{}', '2026-10-28T10:00:00Z');
+		old.close();
+		const w = world({ store: new Store(path) });
+		await w.idle();
+		expect(w.store.inboxFailedList().map((job) => job.error)).toEqual([
+			'inbox kind github.future is unknown to this build',
+		]);
+		expect(w.lines('job.dropped').map((l) => l.label)).toEqual(['github.future#1']);
+		w.store.close();
+	});
+
 	test('задача тенанта, которого больше нет в конфиге, при старте помечается упавшей', async () => {
 		const path = dbFile();
 		const old = new Store(path);

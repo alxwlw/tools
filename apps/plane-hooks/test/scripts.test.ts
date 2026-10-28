@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { inbox } from '../scripts/inbox.ts';
-import { journal, sinceOf } from '../scripts/journal.ts';
+import { inbox, USAGE as INBOX_USAGE } from '../scripts/inbox.ts';
+import { journal, USAGE as JOURNAL_USAGE, sinceOf } from '../scripts/journal.ts';
 import { replayRequest } from '../scripts/replay.ts';
 import { Store } from '../src/store.ts';
 import { BASE, DOKPLOY_SECRET, GRAFANA_TOKEN, VERCEL_SECRET, world } from './server-harness.ts';
@@ -32,6 +32,10 @@ describe('scripts/inbox.ts', () => {
 		});
 		expect(store.inboxPending().map((job) => job.id)).toEqual([1]);
 		expect(run((print) => inbox(['retry', '1'], store, print)).code).toBe(1);
+		expect(run((print) => inbox(['retry', '1'], store, print)).out).toEqual([
+			'no failed delivery 1',
+		]);
+		expect(run((print) => inbox([], store, print)).out).toEqual([INBOX_USAGE]);
 		for (const args of [[], ['retry'], ['retry', 'x'], ['retry', '0'], ['failed', '1'], ['purge']])
 			expect(run((print) => inbox(args, store, print)).code).toBe(2);
 	});
@@ -63,6 +67,12 @@ describe('scripts/journal.ts', () => {
 		expect(
 			run((print) => journal(['--since', '7d', '--tenant', 'beta'], store, NOW, print)).out,
 		).toHaveLength(2);
+		expect(run((print) => journal(['--since', 'week'], store, NOW, print)).out).toEqual([
+			JOURNAL_USAGE,
+		]);
+		expect(run((print) => journal(['--from', '7d'], store, NOW, print)).out).toEqual([
+			JOURNAL_USAGE,
+		]);
 		for (const args of [[], ['--since', 'week'], ['--since', '7d', 'extra'], ['--from', '7d']])
 			expect(run((print) => journal(args, store, NOW, print)).code).toBe(2);
 	});

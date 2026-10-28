@@ -173,13 +173,36 @@ describe('runtime: кеши и предупреждения', () => {
 		expect(result).toEqual({ action: 'noop', workItemId: null });
 		expect(w.plane.calls).toEqual([]);
 	});
+
+	test('инциденты: проект ищется раз в 10 минут, метки — одним репортёром на проект', async () => {
+		const w = setup([tenantOf()]);
+		const incidents = w.runtimes.tenants.get('acme')?.incidents;
+		const firing = (key: string) => ({
+			status: 'firing' as const,
+			source: 'grafana' as const,
+			key,
+			occurrence: '2026-10-28T10:00:00Z',
+			at: '2026-10-28T10:00:00Z',
+			title: key,
+			bodyHtml: '',
+			noteHtml: '<p>x</p>',
+			priority: 'high' as const,
+			label: 'alert' as const,
+		});
+		await incidents?.report(firing('fp-1'));
+		await incidents?.report(firing('fp-2'));
+		const count = (method: string) => w.plane.calls.filter((call) => call === method).length;
+		expect([count('listProjects'), count('listLabels')]).toEqual([1, 1]);
+		expect(w.plane.workItems.filter((i) => i.project === 'p-inc')).toHaveLength(2);
+	});
 });
 
 describe('runtime: настоящие клиенты', () => {
 	test('Plane — бот-токен установки тенанта со скоупами приложения, затем запрос в воркспейс', async () => {
-		const requests: Array<{ url: string; body: string }> = [];
+		const requests: Array<{ url: string; body: string; auth: string }> = [];
 		const fetch = async (url: string, init: RequestInit) => {
-			requests.push({ url, body: typeof init.body === 'string' ? init.body : '' });
+			const auth = (init.headers as Record<string, string>).Authorization ?? '';
+			requests.push({ url, body: typeof init.body === 'string' ? init.body : '', auth });
 			if (url.endsWith('/auth/o/token/'))
 				return new Response(JSON.stringify({ access_token: 'bot-token', expires_in: 36_000 }));
 			return new Response(
@@ -201,6 +224,11 @@ describe('runtime: настоящие клиенты', () => {
 		const token = new URLSearchParams(requests[0]?.body);
 		expect(token.get('app_installation_id')).toBe('00000000-0000-4000-8000-000000000002');
 		expect(token.get('scope')?.split(' ')).toContain('projects.work_items.links:write');
+		// The tenant's client id and secret (Basic), then the bot token on the API call.
+		expect(requests.map((r) => r.auth)).toEqual([
+			`Basic ${Buffer.from('example-client-id:plane-secret').toString('base64')}`,
+			'Bearer bot-token',
+		]);
 		expect(runtimes.apps.get(1_000_001)?.app.config.webhookSecret).toBe('gh-secret');
 	});
 });
