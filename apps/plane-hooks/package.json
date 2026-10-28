@@ -7,6 +7,9 @@
 		"start": "bun src/index.ts",
 		"probe": "bun scripts/probe-plane.ts"
 	},
+	"dependencies": {
+		"@alxwlw/plane-app": "workspace:*"
+	},
 	"devDependencies": {
 		"@alxwlw/tsconfig": "catalog:dev",
 		"@types/bun": "catalog:dev",

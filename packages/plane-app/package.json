@@ -1,0 +1,14 @@
+{
+	"name": "@alxwlw/plane-app",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"devDependencies": {
+		"@alxwlw/tsconfig": "catalog:dev",
+		"@types/bun": "catalog:dev",
+		"typescript": "catalog:dev"
+	}
+}

@@ -228,6 +228,10 @@ importers:
         version: 7.0.2
 
   apps/plane-hooks:
+    dependencies:
+      '@alxwlw/plane-app':
+        specifier: workspace:*
+        version: link:../../packages/plane-app
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
@@ -240,6 +244,18 @@ importers:
         version: 7.0.2
 
   apps/plane-miro:
+    devDependencies:
+      '@alxwlw/tsconfig':
+        specifier: catalog:dev
+        version: 1.8.0
+      '@types/bun':
+        specifier: catalog:dev
+        version: 1.4.3
+      typescript:
+        specifier: catalog:dev
+        version: 7.0.2
+
+  packages/plane-app:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev

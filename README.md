@@ -1,6 +1,6 @@
 # tools
 
-Small standalone tools, one per directory under `apps/`. A pnpm + moon monorepo on the
+Small standalone tools, one per directory under `apps/`, and shared code under `packages/`. A pnpm + moon monorepo on the
 [`@alxwlw/stack`](https://github.com/alxwlw/stack) toolchain canon.
 
 ## Tools
@@ -12,6 +12,11 @@ Small standalone tools, one per directory under `apps/`. A pnpm + moon monorepo 
   on one) and `/plane KEY`, a public card of a work item.
 - [`apps/plane-miro`](apps/plane-miro/README.md) — a Bun service that links Plane and Miro: stickers become
   work items, a work item's status shows on its cards on the board, and a Miro link in a comment puts a card there.
+
+## Packages
+
+- [`packages/plane-app`](packages/plane-app) — shared Plane App code: bot-token auth (`botTokenAuth`) and the
+  install redirect and callback (`planeSetupRedirect`, `planeOauthCallback`).
 
 ## Development
 
