@@ -210,6 +210,11 @@ describe('loadServiceConfig', () => {
 	});
 
 	const shapeCases: Array<[string, (file: Json) => void, string]> = [
+		[
+			'dokploy.repo — не owner/name',
+			(f) => (f.tenants[0].dokploy.apps[0].repo = 'acme/*'),
+			'dokploy.apps[0].repo must be',
+		],
 		['тенант — не объект', (f) => (f.tenants[0] = 5), 'tenants[0] must be an object'],
 		[
 			'plane: лишний ключ',
