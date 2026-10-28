@@ -210,6 +210,23 @@ describe('loadServiceConfig', () => {
 	});
 
 	const shapeCases: Array<[string, (file: Json) => void, string]> = [
+		['plane = null', (f) => (f.tenants[0].plane = null), 'tenants[0].plane must be an object'],
+		[
+			'github = [null]',
+			(f) => (f.tenants[0].github = [null]),
+			'tenants[0].github[0] must be an object',
+		],
+		['tenants = [null]', (f) => (f.tenants = [null]), 'tenants[0] must be an object'],
+		[
+			'incidents = null',
+			(f) => (f.tenants[0].incidents = null),
+			'tenants[0].incidents must be an object',
+		],
+		[
+			'projects.QA = null',
+			(f) => (f.tenants[0].delivery.projects = { QA: null }),
+			'delivery.projects.QA must be an object',
+		],
 		[
 			'dokploy.repo — не owner/name',
 			(f) => (f.tenants[0].dokploy.apps[0].repo = 'acme/*'),
@@ -312,6 +329,35 @@ describe('loadServiceConfig', () => {
 			without('PLANE_HOOKS_ACME_GRAFANA_TOKEN'),
 		);
 		expect(config.tenants[0]?.incidents).toBeNull();
+	});
+
+	test('корень файла — null: одна ошибка, не TypeError', () => {
+		expect(() => loadServiceConfig(ENV, () => 'null')).toThrow('tenants file must be an object');
+	});
+
+	test('необязательные github, hold, repos, environments по умолчанию []', () => {
+		const config = load(
+			(file) => {
+				const tenant = file.tenants[0];
+				delete tenant.github;
+				delete tenant.delivery.hold;
+				tenant.delivery.repos = [{ repo: 'acme/*' }];
+				tenant.delivery.projects = {};
+			},
+			without('PLANE_HOOKS_GH_ACME_PRIVATE_KEY', 'PLANE_HOOKS_GH_ACME_WEBHOOK_SECRET'),
+		);
+		const tenant = config.tenants[0];
+		expect(tenant?.github).toEqual([]);
+		expect(tenant?.delivery?.hold).toEqual([]);
+		expect(tenant?.delivery?.repos).toEqual([{ repo: 'acme/*', environments: [] }]);
+	});
+
+	test('имя и владелец App — разные поля', () => {
+		const config = load((file) => {
+			file.tenants[0].github[0].owner = 'acme-org';
+		});
+		expect(config.tenants[0]?.github[0]?.name).toBe('acme');
+		expect(config.tenants[0]?.github[0]?.owner).toBe('acme-org');
 	});
 
 	test('нет секрета Plane — называет переменную', () => {
