@@ -156,10 +156,12 @@ describe('repoVisibility', () => {
 			{ status: 200, body: { full_name: 'acme/api', private: true, visibility: 'internal' } },
 			{ status: 200, body: { full_name: 'acme/web', private: false, visibility: 'public' } },
 			{ status: 404, body: { message: 'Not Found' } },
+			{ status: 200, body: { full_name: 'acme/db', private: true, visibility: 'private' } },
 		]);
 		expect(await client.repoVisibility('acme/api')).toBe('internal');
 		expect(await client.repoVisibility('acme/web')).toBe('public');
 		expect(await client.repoVisibility('acme/gone')).toBeNull();
+		expect(await client.repoVisibility('acme/db')).toBe('private');
 		expect(calls[0]).toMatchObject({ method: 'GET', url: `${API}/repos/acme/api` });
 	});
 
@@ -169,7 +171,9 @@ describe('repoVisibility', () => {
 			{ status: 200, body: { private: true } },
 			{ status: 500, body: { message: 'boom' } },
 		]);
-		await expect(client.repoVisibility('acme/api')).rejects.toThrow('unexpected shape');
+		await expect(client.repoVisibility('acme/api')).rejects.toThrow(
+			'GitHub GET /repos/acme/api: unexpected shape (visibility)',
+		);
 		await expect(client.repoVisibility('acme/api')).rejects.toThrow('visibility is not a string');
 		await expect(client.repoVisibility('acme/api')).rejects.toThrow('→ 500');
 	});

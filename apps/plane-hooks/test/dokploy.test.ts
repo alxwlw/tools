@@ -209,13 +209,35 @@ describe('parseDokployWebhook', () => {
 	test('ошибка сборки: длинный errorMessage обрезается', () => {
 		const { signal } = failed(buildError({ errorMessage: 'x'.repeat(5000) }));
 		if (signal.status !== 'firing') throw new Error('expected firing');
-		expect(signal.bodyHtml.length).toBeLessThan(3000);
-		expect(signal.bodyHtml).toContain('…');
+		expect(signal.bodyHtml).toContain(`<code>${'x'.repeat(1999)}…</code>`);
+	});
+
+	test('ошибка сборки: проект в теле работы — если Dokploy его назвал', () => {
+		const withProject = failed(buildError()).signal;
+		const without = failed(buildError({ projectName: '' })).signal;
+		if (withProject.status !== 'firing' || without.status !== 'firing')
+			throw new Error('expected firing');
+		expect(withProject.bodyHtml).toContain(
+			'<p>Приложение: <code>api</code>, проект: <code>shop</code></p>',
+		);
+		expect(without.bodyHtml).toContain('<p>Приложение: <code>api</code></p>');
+	});
+
+	test('длинное имя приложения не раздувает заголовок инцидента: до 200 знаков', () => {
+		const name = 'a'.repeat(300);
+		const build = failed(buildError({ applicationName: name })).signal;
+		const backup = failed(databaseBackup('error', { applicationName: name })).signal;
+		for (const signal of [build, backup]) {
+			if (signal.status !== 'firing') throw new Error('expected firing');
+			expect(Array.from(signal.title)).toHaveLength(200);
+			expect(signal.title.endsWith('…')).toBe(true);
+		}
 	});
 
 	test('упавший бэкап БД и тома — инцидент …:backup', () => {
 		const db = failed(databaseBackup('error')).signal;
 		expect(db).toMatchObject({
+			at: '2026-10-29T03:00:00.000Z',
 			status: 'firing',
 			source: 'dokploy',
 			key: 'dokploy:pg/orders:backup',
@@ -225,9 +247,13 @@ describe('parseDokployWebhook', () => {
 			label: 'alert',
 		});
 		if (db.status !== 'firing') throw new Error('expected firing');
+		expect(db.bodyHtml).toContain('База: <code>pg/orders</code>');
 		expect(db.bodyHtml).toContain('pg_dump: connection refused');
+		expect(db.noteHtml).toContain('Бэкап упал: <code>pg/orders</code>');
 
 		const volume = failed(volumeBackup('error')).signal;
+		if (volume.status !== 'firing') throw new Error('expected firing');
+		expect(volume.bodyHtml).toContain('Том: <code>files/uploads</code>');
 		expect(volume).toMatchObject({
 			key: 'dokploy:files/uploads:backup',
 			title: 'Бэкап упал: files/uploads',
@@ -255,6 +281,8 @@ describe('parseDokployWebhook', () => {
 		});
 		const volume = deployedOrResolved(volumeBackup('success'));
 		expect(volume).toMatchObject({ status: 'resolved', key: 'dokploy:files/uploads:backup' });
+		if (db.status !== 'resolved') throw new Error('expected resolved');
+		expect(db.noteHtml).toBe('<p>Бэкап снова проходит: <code>pg/orders</code></p>');
 	});
 
 	test('другие события (docker-cleanup, dokploy-restart, server-threshold) — ignored', () => {
@@ -281,7 +309,10 @@ describe('parseDokployWebhook', () => {
 	});
 
 	test('тело не от Dokploy — BadPayload', () => {
-		expect(() => parseDokployWebhook('x')).toThrow(BadPayload);
+		expect(() => parseDokployWebhook('x')).toThrow('body is not an object');
+		expect(() => parseDokployWebhook(buildSuccess({ timestamp: '' }))).toThrow(
+			'without a valid timestamp',
+		);
 		expect(() => parseDokployWebhook([])).toThrow(BadPayload);
 		expect(() => parseDokployWebhook({ status: 'success' })).toThrow('no event type');
 		expect(() => parseDokployWebhook(buildSuccess({ applicationName: '' }))).toThrow(
