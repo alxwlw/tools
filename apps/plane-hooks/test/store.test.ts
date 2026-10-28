@@ -22,13 +22,19 @@ describe('Store: курсор деплоя', () => {
 		const store = new Store(':memory:');
 		expect(store.deployCursor('acme', 'acme/api', 'staging')).toBeNull();
 		store.setDeployCursor('acme', 'acme/api', 'staging', 'sha-a', '2026-10-28T10:00:00.000Z');
-		expect(store.deployCursor('acme', 'acme/api', 'staging')).toBe('sha-a');
+		expect(store.deployCursor('acme', 'acme/api', 'staging')).toEqual({
+			sha: 'sha-a',
+			at: '2026-10-28T10:00:00.000Z',
+		});
 		// Every part of the key counts.
 		expect(store.deployCursor('other', 'acme/api', 'staging')).toBeNull();
 		expect(store.deployCursor('acme', 'acme/infra', 'staging')).toBeNull();
 		expect(store.deployCursor('acme', 'acme/api', 'production')).toBeNull();
 		store.setDeployCursor('acme', 'acme/api', 'staging', 'sha-b', '2026-10-28T11:00:00.000Z');
-		expect(store.deployCursor('acme', 'acme/api', 'staging')).toBe('sha-b');
+		expect(store.deployCursor('acme', 'acme/api', 'staging')).toEqual({
+			sha: 'sha-b',
+			at: '2026-10-28T11:00:00.000Z',
+		});
 		store.close();
 	});
 
@@ -36,14 +42,23 @@ describe('Store: курсор деплоя', () => {
 		const store = new Store(':memory:');
 		const acme = store.cursorFor('acme');
 		const other = store.cursorFor('other');
-		acme.set('acme/api', 'staging', 'sha-a');
-		expect(acme.get('acme/api', 'staging')).toBe('sha-a');
+		acme.set('acme/api', 'staging', 'sha-a', '2026-10-28T10:00:00.000Z');
+		expect(acme.get('acme/api', 'staging')).toEqual({
+			sha: 'sha-a',
+			at: '2026-10-28T10:00:00.000Z',
+		});
 		expect(other.get('acme/api', 'staging')).toBeNull();
-		other.set('acme/api', 'staging', 'sha-o');
-		expect(other.get('acme/api', 'staging')).toBe('sha-o');
-		expect(acme.get('acme/api', 'staging')).toBe('sha-a');
-		expect(store.deployCursor('other', 'acme/api', 'staging')).toBe('sha-o');
-		expect(store.deployCursor('acme', 'acme/api', 'staging')).toBe('sha-a');
+		other.set('acme/api', 'staging', 'sha-o', '2026-10-28T12:00:00.000Z');
+		expect(other.get('acme/api', 'staging')).toEqual({
+			sha: 'sha-o',
+			at: '2026-10-28T12:00:00.000Z',
+		});
+		expect(acme.get('acme/api', 'staging')).toEqual({
+			sha: 'sha-a',
+			at: '2026-10-28T10:00:00.000Z',
+		});
+		expect(store.deployCursor('other', 'acme/api', 'staging')?.sha).toBe('sha-o');
+		expect(store.deployCursor('acme', 'acme/api', 'staging')?.sha).toBe('sha-a');
 		store.close();
 	});
 
@@ -53,7 +68,10 @@ describe('Store: курсор деплоя', () => {
 		first.setDeployCursor('acme', 'acme/api', 'production', 'sha-z', '2026-10-28T10:00:00.000Z');
 		first.close();
 		const second = new Store(path);
-		expect(second.deployCursor('acme', 'acme/api', 'production')).toBe('sha-z');
+		expect(second.deployCursor('acme', 'acme/api', 'production')).toEqual({
+			sha: 'sha-z',
+			at: '2026-10-28T10:00:00.000Z',
+		});
 		second.close();
 		const raw = new Database(path);
 		expect((raw.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe(

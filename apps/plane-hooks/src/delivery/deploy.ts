@@ -31,8 +31,9 @@ export type DeployResult = {
 };
 /** Tenant-bound view of Store's deploy cursor. */
 export type DeployCursor = {
-	get(repo: string, environment: string): string | null;
-	set(repo: string, environment: string, sha: string): void;
+	/** The last handled deploy: its sha and `at`; null — none yet. */
+	get(repo: string, environment: string): { sha: string; at: string } | null;
+	set(repo: string, environment: string, sha: string, at: string): void;
 };
 export type DeployDeps = SyncDeps & {
 	releases: (draft: ReleaseDraft, items: ReleaseItem[]) => Promise<ReleaseResult>;
@@ -75,11 +76,13 @@ async function rangeOf(
 	fact: DeployFact,
 	previous: string | null,
 ): Promise<Range> {
-	const alone: Range = { action: 'delivered', commits: [{ sha: fact.sha, message: '' }] };
-	if (previous === null) return alone;
+	// An unknown message is an empty one here: no key in it, so nothing is moved on a guess.
+	const head = async (): Promise<Commit> =>
+		(await github.getCommit(fact.repo, fact.sha)) ?? { sha: fact.sha, message: '' };
+	if (previous === null) return { action: 'delivered', commits: [await head()] };
 	const forward = await github.compare(fact.repo, previous, fact.sha);
 	// The previous sha is gone (force-push): only this sha is known; a vanished base is no rollback.
-	if (forward === null) return alone;
+	if (forward === null) return { action: 'delivered', commits: [await head()] };
 	if (forward.status === 'identical') return { action: 'identical' };
 	if (forward.status === 'behind') {
 		// The environment went back: the PRs that were in `previous` and are not in `fact.sha` are rolled back.
@@ -87,8 +90,13 @@ async function rangeOf(
 		if (undone?.truncated) deps.warnOnce(`compare_truncated:${fact.repo}`, { repo: fact.repo });
 		return { action: 'rolled_back', commits: undone?.commits ?? [] };
 	}
-	if (forward.truncated) deps.warnOnce(`compare_truncated:${fact.repo}`, { repo: fact.repo });
-	return { action: 'delivered', commits: forward.commits };
+	if (!forward.truncated) return { action: 'delivered', commits: forward.commits };
+	deps.warnOnce(`compare_truncated:${fact.repo}`, { repo: fact.repo });
+	// The kept commits are the oldest ones; the deployed head is the one that must not be lost.
+	const kept = forward.commits.some((c) => c.sha === fact.sha)
+		? forward.commits
+		: [...forward.commits, await head()];
+	return { action: 'delivered', commits: kept };
 }
 
 /** The PRs of the commits, each once; a commit without a PR becomes a stand-in PR. */
@@ -135,12 +143,14 @@ export async function handleDeploy(deps: DeployDeps, fact: DeployFact): Promise<
 	}
 
 	const cursor = deps.cursor.get(fact.repo, fact.environment);
-	if (cursor === fact.sha) return result('identical');
+	if (cursor?.sha === fact.sha) return result('identical');
+	// An older deploy processed after a newer one (a retried delivery) must not read as a rollback.
+	if (cursor !== null && Date.parse(fact.at) < Date.parse(cursor.at)) return result('ignored');
 	// A lost earlier deploy is caught up by the cursor; the first run asks GitHub for the one before.
-	const previous = cursor ?? (await previousFromGitHub(github, fact));
+	const previous = cursor?.sha ?? (await previousFromGitHub(github, fact));
 	const range = await rangeOf(deps, github, fact, previous);
 	if (range.action === 'identical') {
-		deps.cursor.set(fact.repo, fact.environment, fact.sha);
+		deps.cursor.set(fact.repo, fact.environment, fact.sha, fact.at);
 		return result('identical');
 	}
 
@@ -205,6 +215,6 @@ export async function handleDeploy(deps: DeployDeps, fact: DeployFact): Promise<
 			out.releaseError = describeError(err);
 		}
 	}
-	deps.cursor.set(fact.repo, fact.environment, fact.sha);
+	deps.cursor.set(fact.repo, fact.environment, fact.sha, fact.at);
 	return out;
 }

@@ -65,6 +65,14 @@ describe('FakeGitHub.compare', () => {
 	});
 });
 
+describe('FakeGitHub getCommit', () => {
+	test('известный sha — сообщение, неизвестный — null', async () => {
+		const gh = new FakeGitHub().commit('a1', [], 'ENG-1 one');
+		expect(await gh.getCommit('acme/api', 'a1')).toEqual({ sha: 'a1', message: 'ENG-1 one' });
+		expect(await gh.getCommit('acme/api', 'zz')).toBeNull();
+	});
+});
+
 describe('FakeGitHub pulls', () => {
 	test('mergedPullsForCommit: коммит ветки смёрдженного PR тоже находит PR; несмёрдженный — нет', async () => {
 		const gh = new FakeGitHub()

@@ -43,6 +43,8 @@ export interface GitHubApi {
 	/** Merged PRs that brought the commit in (`commits/{sha}/pulls`, merged only); a sha that is gone (404/422) → []. */
 	mergedPullsForCommit(repo: string, sha: string): Promise<Pull[]>;
 	openPullsForBranch(repo: string, branch: string): Promise<Pull[]>;
+	/** The commit's message; a sha that is gone (404/422) → null. */
+	getCommit(repo: string, sha: string): Promise<Commit | null>;
 	/** 404/422 (a sha gone after force-push) → null. At most 250 commits; more → truncated: true. */
 	compare(repo: string, base: string, head: string): Promise<Comparison | null>;
 	/** Newest first, at most `limit` (pages of 100). */
@@ -243,6 +245,15 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubApi {
 			return list(res.body, 'pulls')
 				.map((row) => toPull(repo, row))
 				.filter((pull) => pull.merged);
+		},
+
+		async getCommit(repo, sha) {
+			const path = `${repoPath(repo)}/commits/${encodeURIComponent(sha)}`;
+			const res = await call('GET', path, undefined, GONE);
+			if (GONE.includes(res.status)) return null;
+			const rec = recordAt(res.body, 'commit');
+			const inner = recordAt(rec.commit, 'commit.commit');
+			return { sha: str(rec, 'sha', 'commit'), message: str(inner, 'message', 'commit.commit') };
 		},
 
 		async openPullsForBranch(repo, branch) {

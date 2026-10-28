@@ -18,12 +18,18 @@ const REPO = 'acme/api';
 function setup(tenant = tenantOf()) {
 	const w = deliveryWorld(tenant);
 	const store = new Store(':memory:');
-	const cursor = store.cursorFor('acme');
+	const real = store.cursorFor('acme');
+	// Tests read the sha and seed a cursor older than every fact (`at` 10:00) unless they say otherwise.
+	const cursor = {
+		get: (repo: string, env: string) => real.get(repo, env)?.sha ?? null,
+		set: (repo: string, env: string, sha: string, at = '2026-10-28T09:00:00.000Z') =>
+			real.set(repo, env, sha, at),
+	};
 	const releases: Array<{ draft: ReleaseDraft; items: ReleaseItem[] }> = [];
 	let releaseFailure: Error | null = null;
 	const deps = {
 		...w.deps,
-		cursor,
+		cursor: real,
 		releases: async (draft: ReleaseDraft, items: ReleaseItem[]): Promise<ReleaseResult> => {
 			releases.push({ draft, items });
 			if (releaseFailure) throw releaseFailure;
@@ -222,6 +228,10 @@ describe('handleDeploy: доставка', () => {
 		expect(result.notes).toEqual([{ key: 'ENG-1', workItemId: id, created: true }]);
 		expect(w.linksOf(id)).toHaveLength(1);
 		expect(w.gh.calls.filter((c) => c.startsWith('mergedPullsForCommit'))).toHaveLength(3);
+		// One PR once: three commits of the range found it, the note names it a single time.
+		expect(w.plane.commentsOf(id)[0]?.comment_html).toBe(
+			'<p>Выкачено: <code>acme/api</code> → staging · <code>mg</code> · <a href="https://github.com/acme/api/actions/runs/1">прогон</a> · PR: <a href="https://github.com/acme/api/pull/3">acme/api#3</a></p>',
+		);
 	});
 });
 
@@ -458,6 +468,101 @@ describe('handleDeploy: откат и диапазон', () => {
 		expect(w.gh.calls.find((c) => c.startsWith('listDeployments'))).toBe(
 			'listDeployments acme/api staging 20',
 		);
+	});
+
+	test('устаревшее событие после более нового — ignored, курсор и комментарии не тронуты; настоящий откат проходит', async () => {
+		const w = history();
+		for (const sha of ['a0', 'a1', 'a2']) w.gh.deploy(REPO, 'staging', sha, 'success');
+		const ids = [w.item('ENG-1', 'In Review'), w.item('ENG-2', 'In Review')] as [string, string];
+		w.cursor.set(REPO, 'staging', 'a0');
+
+		await handleDeploy(w.deps, fact('a2', { deploymentId: 3, at: '2026-10-28T10:05:00.000Z' }));
+		const comments = w.plane.comments.length;
+		const stale = await handleDeploy(
+			w.deps,
+			fact('a1', { deploymentId: 2, at: '2026-10-28T10:00:00.000Z' }),
+		);
+
+		expect(stale.action).toBe('ignored');
+		expect(stale.notes).toEqual([]);
+		expect(w.plane.comments).toHaveLength(comments);
+		expect(w.cursor.get(REPO, 'staging')).toBe('a2');
+		expect(w.commentIds(ids[1]).some((c) => c.startsWith('rolledback:'))).toBe(false);
+
+		// A new deployment of a0, later than the cursor: a real rollback.
+		w.gh.deploy(REPO, 'staging', 'a0', 'success');
+		const back = await handleDeploy(
+			w.deps,
+			fact('a0', { deploymentId: 4, at: '2026-10-28T10:10:00.000Z' }),
+		);
+		expect(back.action).toBe('rolled_back');
+		expect(w.commentIds(ids[1]).some((c) => c.startsWith('rolledback:'))).toBe(true);
+		expect(w.cursor.get(REPO, 'staging')).toBe('a0');
+	});
+
+	test('другой sha в ту же секунду, что и курсор — не устаревшее, доставляется', async () => {
+		const w = history();
+		w.gh.deploy(REPO, 'staging', 'a1', 'success');
+		w.item('ENG-1', 'In Review');
+		w.cursor.set(REPO, 'staging', 'a0', '2026-10-28T10:00:00.000Z');
+
+		const result = await handleDeploy(w.deps, fact('a1', { deploymentId: 1 }));
+
+		expect(result.action).toBe('delivered');
+		expect(keysOf(result)).toEqual(['ENG-1']);
+	});
+
+	test('обрезанный compare: sha деплоя и его PR не теряются — Выкачено, заголовок и задача релиза', async () => {
+		const w = setup();
+		w.gh.commit('c0', [], 'init');
+		for (let i = 1; i <= 251; i++) w.gh.commit(`c${i}`, [`c${i - 1}`], `chore ${i}`);
+		w.gh.commit('m1', ['c251'], 'Merge pull request #5');
+		w.gh
+			.pull({ repo: REPO, number: 5, title: 'ENG-1 release', head: 'staging' })
+			.mergePull(REPO, 5, 'm1');
+		w.gh.deploy(REPO, 'production', 'c0', 'success');
+		w.gh.deploy(REPO, 'production', 'm1', 'success');
+		const id = w.item('ENG-1', 'In Review');
+		w.cursor.set(REPO, 'production', 'c0');
+
+		const result = await handleDeploy(
+			w.deps,
+			fact('m1', { environment: 'production', deploymentId: 2 }),
+		);
+
+		expect(result.action).toBe('delivered');
+		expect(w.commentIds(id)[0]).toBe(`deployed:${id}:acme/api:production:m1`);
+		expect(w.stateOf(id)).toBe('eng-done');
+		expect(w.releases).toHaveLength(1);
+		expect(w.releases[0]?.draft.headline).toBe('ENG-1 release');
+		expect(w.releases[0]?.items).toEqual([{ key: 'ENG-1', workItemId: id }]);
+		expect(w.warns.filter((x) => x.reason.startsWith('compare_'))).toHaveLength(1);
+	});
+
+	test('прямой push без PR на первом деплое и при пропавшей базе: ключ из сообщения двигает задачу', async () => {
+		for (const cursor of [null, 'gone-after-force-push']) {
+			const w = setup();
+			w.gh.commit('a0', [], 'init').commit('a1', ['a0'], 'ENG-4 hotfix');
+			const only = w.gh.deploy(REPO, 'staging', 'a1', 'success');
+			const id = w.item('ENG-4', 'In Progress');
+			if (cursor !== null) w.cursor.set(REPO, 'staging', cursor);
+
+			const result = await handleDeploy(w.deps, fact('a1', { deploymentId: only }));
+
+			expect(keysOf(result)).toEqual(['ENG-4']);
+			expect(w.stateOf(id)).toBe('eng-on-staging');
+			expect(w.commentIds(id)[0]).toBe(`deployed:${id}:acme/api:staging:a1`);
+		}
+	});
+
+	test('коммит исчез целиком (getCommit null) — задач нет, деплой доставлен, курсор сдвинут', async () => {
+		const w = setup();
+		w.item('ENG-4', 'In Progress');
+
+		const result = await handleDeploy(w.deps, fact('ghost'));
+
+		expect(result).toMatchObject({ action: 'delivered', notes: [] });
+		expect(w.cursor.get(REPO, 'staging')).toBe('ghost');
 	});
 
 	function longChain(w: ReturnType<typeof setup>) {

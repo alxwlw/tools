@@ -125,6 +125,31 @@ describe('списки PR', () => {
 	});
 });
 
+describe('getCommit', () => {
+	test('getCommit: sha и сообщение; 404 и 422 — null; 500 — ошибка', async () => {
+		const sha = 'b'.repeat(40);
+		const { calls, client } = stub([
+			{ status: 200, body: compareCommit(sha, 'ENG-4 hotfix\n\nbody') },
+			{ status: 404, body: { message: 'Not Found' } },
+			{ status: 422, body: { message: 'No commit found for SHA' } },
+			{ status: 500, body: { message: 'boom' } },
+		]);
+		expect(await client.getCommit('acme/api', sha)).toEqual({
+			sha,
+			message: 'ENG-4 hotfix\n\nbody',
+		});
+		expect(calls[0]?.url).toBe(`${API}/repos/acme/api/commits/${sha}`);
+		expect(await client.getCommit('acme/api', 'gone')).toBeNull();
+		expect(await client.getCommit('acme/api', 'gone')).toBeNull();
+		await expect(client.getCommit('acme/api', 'x')).rejects.toThrow('→ 500');
+	});
+
+	test('getCommit: ответ без сообщения — ошибка формы', async () => {
+		const { client } = stub([{ status: 200, body: { sha: 'abc', commit: {} } }]);
+		await expect(client.getCommit('acme/api', 'abc')).rejects.toThrow('message is not a string');
+	});
+});
+
 describe('compare', () => {
 	test('compare: 422 (sha исчез) — null, как 404', async () => {
 		const { client } = stub([{ status: 422, body: { message: 'No common ancestor' } }]);

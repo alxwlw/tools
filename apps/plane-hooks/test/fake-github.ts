@@ -99,6 +99,12 @@ export class FakeGitHub implements GitHubApi {
 			.map(([, p]) => ({ ...p }));
 	}
 
+	async getCommit(repo: string, sha: string): Promise<Commit | null> {
+		this.calls.push(`getCommit ${repo} ${sha}`);
+		const node = this.#commits.get(sha);
+		return node === undefined ? null : { sha, message: node.message };
+	}
+
 	async openPullsForBranch(repo: string, branch: string): Promise<Pull[]> {
 		this.calls.push(`openPullsForBranch ${repo} ${branch}`);
 		return [...this.#pulls.values()]

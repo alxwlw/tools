@@ -37,12 +37,15 @@ export class Store {
 		this.#db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	}
 
-	/** The sha the last handled deploy of repo/environment reached; null — none yet. */
-	deployCursor(tenant: string, repo: string, environment: string): string | null {
-		const row = this.#db
-			.query('SELECT sha FROM deploy_cursor WHERE tenant = ? AND repo = ? AND environment = ?')
-			.get(tenant, repo, environment) as { sha: string } | null;
-		return row?.sha ?? null;
+	/** The sha the last handled deploy of repo/environment reached and when that deploy happened; null — none yet. */
+	deployCursor(
+		tenant: string,
+		repo: string,
+		environment: string,
+	): { sha: string; at: string } | null {
+		return this.#db
+			.query('SELECT sha, at FROM deploy_cursor WHERE tenant = ? AND repo = ? AND environment = ?')
+			.get(tenant, repo, environment) as { sha: string; at: string } | null;
 	}
 
 	setDeployCursor(
@@ -63,8 +66,7 @@ export class Store {
 	cursorFor(tenant: string): DeployCursor {
 		return {
 			get: (repo, environment) => this.deployCursor(tenant, repo, environment),
-			set: (repo, environment, sha) =>
-				this.setDeployCursor(tenant, repo, environment, sha, new Date().toISOString()),
+			set: (repo, environment, sha, at) => this.setDeployCursor(tenant, repo, environment, sha, at),
 		};
 	}
 
