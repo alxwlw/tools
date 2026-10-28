@@ -38,6 +38,8 @@ export type CommentSummary = {
 	id: string;
 	external_id: string | null;
 	external_source: string | null;
+	/** The comment text as Plane stores it; null when the list row carries none. */
+	comment_html: string | null;
 	created_at: string;
 };
 export type StateSummary = {
@@ -240,6 +242,7 @@ export class PlaneClient implements PlaneApi {
 			external_id:
 				typeof row.external_id === 'string' && row.external_id !== '' ? row.external_id : null,
 			external_source: optionalString(row.external_source),
+			comment_html: optionalString(row.comment_html),
 			created_at: field(row, 'created_at'),
 		}));
 	}

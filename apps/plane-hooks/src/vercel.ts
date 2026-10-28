@@ -1,7 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
-import type { DeployOutcome, DeployTarget } from './deploy-note.ts';
+import type { DeployOutcome, DeploySummary, DeployTarget } from './deploy-note.ts';
 import { esc, link, p, truncate } from './html.ts';
+import type { IncidentSignal } from './incident.ts';
 import { BadPayload, isRecord, optString } from './payload.ts';
 
 const TITLE_MAX = 200;
@@ -115,6 +116,110 @@ export function parseVercelWebhook(body: unknown): VercelEvent {
 		},
 		summary: { title: `${name} → ${target} · ${label}`, env: target, sha },
 	};
+}
+
+export type VercelPreview = {
+	/** The Vercel project name (`payload.deployment.name`). */
+	project: string;
+	/** `<org>/<repo>` from the deployment meta; null for a deploy without git metadata. */
+	repo: string | null;
+	branch: string | null;
+	url: string;
+	sha: string | null;
+};
+/**
+ * What a Vercel delivery means for plane-hooks since the GitHub App took over «Выкачено».
+ * Named apart from the legacy `VercelEvent` until that one is removed with the old server.
+ */
+export type VercelHookEvent =
+	| { kind: 'failed'; signal: IncidentSignal; summary: DeploySummary }
+	| { kind: 'succeeded'; resolve: IncidentSignal; summary: DeploySummary }
+	| { kind: 'preview'; preview: VercelPreview; resolve: IncidentSignal }
+	| {
+			kind: 'promoted' | 'rolled_back';
+			project: string;
+			repo: string | null;
+			sha: string | null;
+			/** When the event itself happened (its own `createdAt`): the order of deploys on an environment. */
+			at: string;
+			url: string | null;
+	  }
+	| { kind: 'ignored'; type: string };
+
+/**
+ * Vercel account webhook → the part of it GitHub does not already tell. deployment.error stays an incident;
+ * deployment.succeeded only resolves it (a preview additionally yields the preview link); promote and rollback
+ * become `promoted` / `rolled_back` for the deploy path. Throws BadPayload on a body Vercel would not send.
+ */
+export function parseVercelEvent(body: unknown): VercelHookEvent {
+	if (isRecord(body)) {
+		const type = optString(body.type);
+		if (type === 'deployment.promoted' || type === 'deployment.rollback')
+			return parseSwitch(body, type === 'deployment.promoted' ? 'promoted' : 'rolled_back');
+	}
+	const legacy = parseVercelWebhook(body);
+	if (legacy.kind === 'ignored' || legacy.kind === 'failed') return legacy;
+	if (legacy.note.target !== 'preview')
+		return { kind: 'succeeded', resolve: legacy.resolve, summary: legacy.summary };
+	const meta = metaOf(body);
+	return {
+		kind: 'preview',
+		preview: {
+			project: legacy.note.project,
+			repo: repoOf(meta),
+			branch: optString(meta.githubCommitRef),
+			url: legacy.note.url,
+			sha: legacy.note.sha ?? null,
+		},
+		resolve: legacy.resolve,
+	};
+}
+
+/** promote / rollback: fields per the Vercel webhook docs; a rollback event carries no `payload.deployment` there. */
+function parseSwitch(
+	body: Record<string, unknown>,
+	kind: 'promoted' | 'rolled_back',
+): Extract<VercelHookEvent, { kind: 'promoted' | 'rolled_back' }> {
+	const payload = isRecord(body.payload) ? body.payload : {};
+	const deployment = isRecord(payload.deployment) ? payload.deployment : {};
+	const projectId = optString(isRecord(payload.project) ? payload.project.id : undefined);
+	const name = optString(deployment.name);
+	const host = optString(deployment.url);
+	if (kind === 'promoted') {
+		if (optString(deployment.id) === null || name === null)
+			throw new BadPayload('vercel: deployment.promoted without deployment id or name');
+	} else if (optString(payload.toDeploymentId) === null || (projectId === null && name === null)) {
+		throw new BadPayload('vercel: deployment.rollback without toDeploymentId or project');
+	}
+	const meta = metaOf(body);
+	return {
+		kind,
+		project: (name ?? projectId) as string,
+		repo: repoOf(meta),
+		sha: optString(meta.githubCommitSha),
+		at: eventTime(body.createdAt),
+		url: host === null ? null : /^https?:\/\//i.test(host) ? host : `https://${host}`,
+	};
+}
+
+function metaOf(body: unknown): Record<string, unknown> {
+	const payload = isRecord(body) && isRecord(body.payload) ? body.payload : {};
+	const deployment = isRecord(payload.deployment) ? payload.deployment : {};
+	return isRecord(deployment.meta) ? deployment.meta : {};
+}
+
+function repoOf(meta: Record<string, unknown>): string | null {
+	const org = optString(meta.githubCommitOrg);
+	const repo = optString(meta.githubCommitRepo);
+	return org === null || repo === null ? null : `${org}/${repo}`;
+}
+
+/** The event's own time — it orders deploys, so a missing or unparseable one is a bad payload, not «now». */
+function eventTime(value: unknown): string {
+	const date =
+		typeof value === 'number' || typeof value === 'string' ? new Date(value) : new Date(Number.NaN);
+	if (Number.isNaN(date.getTime())) throw new BadPayload('vercel: event without a valid createdAt');
+	return date.toISOString();
 }
 
 function deployTarget(value: unknown): DeployTarget {

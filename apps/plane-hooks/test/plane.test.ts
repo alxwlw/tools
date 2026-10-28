@@ -231,6 +231,7 @@ describe('PlaneClient: списки', () => {
 							id: 'c1',
 							external_id: 'k:a:firing',
 							external_source: 'plane-hooks',
+							comment_html: '<p>first</p>',
 							created_at: '2026-10-06T10:00:00Z',
 						},
 					],
@@ -259,9 +260,16 @@ describe('PlaneClient: списки', () => {
 				id: 'c1',
 				external_id: 'k:a:firing',
 				external_source: 'plane-hooks',
+				comment_html: '<p>first</p>',
 				created_at: '2026-10-06T10:00:00Z',
 			},
-			{ id: 'c2', external_id: null, external_source: null, created_at: '2026-10-06T10:05:00Z' },
+			{
+				id: 'c2',
+				external_id: null,
+				external_source: null,
+				comment_html: null,
+				created_at: '2026-10-06T10:05:00Z',
+			},
 		]);
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/?per_page=100`);
 		expect(calls[1]?.url).toBe(

@@ -291,6 +291,7 @@ export class FakePlane implements PlaneApi {
 				id: c.id,
 				external_id: c.external_id === '' ? null : c.external_id,
 				external_source: c.external_source === '' ? null : c.external_source,
+				comment_html: c.comment_html,
 				created_at: c.created_at,
 			}))
 			.reverse();
