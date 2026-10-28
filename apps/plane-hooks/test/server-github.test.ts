@@ -254,30 +254,38 @@ describe('GitHub: деплой', () => {
 		expect(w.logs.filter((l) => l.level === 'error')).toEqual([]);
 	});
 
-	test('Погас при успешном деплое падает 503 — деплой сделан, задача повторена, Выкачено одно', async () => {
+	test('Погас при успешном деплое падает 503 дважды — деплой один раз, одна отметка, Погас — своей задачей', async () => {
 		const { w, id, status } = deployWorld();
 		let reports = 0;
 		w.runtime().incidents = {
 			report: async () => {
 				reports += 1;
-				if (reports === 1) throw new PlaneApiError(503, 'GET', '/work-items/');
-				return { action: 'noop', workItemId: null };
+				if (reports < 3) throw new PlaneApiError(503, 'GET', '/work-items/');
+				return { action: 'commented', workItemId: 'inc-1' };
 			},
 		};
 		expect((await w.send(githubRequest('deployment_status', status()))).status).toBe(202);
-		expect([reports, w.lines('job.retry').length, w.lines('job.dropped').length]).toEqual([
-			2, 1, 0,
-		]);
-		// The retry is for the resolve's own failure, rethrown after the deploy.
-		expect(w.lines('job.retry').map((l) => l.error)).toEqual(['Plane GET /work-items/ → 503']);
+		// The deploy job ran once: one «Выкачено», one deploy mark, one deploy line.
 		expect(stateOf(w, id)).toBe('eng-on-staging');
 		expect(
 			w.plane.commentsOf(id).filter((c) => c.external_id.startsWith('deployed:')),
 		).toHaveLength(1);
-		const line = { event: 'deployment.success', tenant: 'acme', source: 'github' };
-		expect(w.lines('deployment.success')).toEqual([
+		expect(w.lines('deploy').map((l) => [l.action, l.annotation])).toEqual([
+			['delivered', 'deploy'],
+		]);
+		// The resolve failed once inside the deploy job, then its own job retried until it went through.
+		expect(reports).toBe(3);
+		expect(w.lines('deployment.success').map((l) => [l.level, l.action, l.error])).toEqual([
+			['error', 'error', 'PlaneApiError: Plane GET /work-items/ → 503'],
+		]);
+		expect(w.lines('job.retry').map((l) => [l.label, l.error])).toEqual([
+			['incident.resolve#2', 'Plane GET /work-items/ → 503'],
+		]);
+		expect(w.lines('incident.resolve')).toEqual([
 			{
-				...line,
+				event: 'incident.resolve',
+				tenant: 'acme',
+				source: 'github',
 				key: 'deploy:acme/api:staging',
 				level: 'error',
 				action: 'error',
@@ -286,14 +294,41 @@ describe('GitHub: деплой', () => {
 				error: 'PlaneApiError: Plane GET /work-items/ → 503',
 			},
 			{
-				...line,
+				event: 'incident.resolve',
+				tenant: 'acme',
+				source: 'github',
 				key: 'deploy:acme/api:staging',
-				action: 'noop',
-				workItemId: null,
+				action: 'commented',
+				workItemId: 'inc-1',
 				ms: expect.any(Number),
 			},
 		]);
-		expect(w.store.inboxFailedList()).toEqual([]);
+		expect([w.store.inboxPending(), w.store.inboxFailedList(), w.lines('job.dropped')]).toEqual([
+			[],
+			[],
+			[],
+		]);
+	});
+
+	test('отложенный Погас в inbox доигрывается после рестарта', async () => {
+		const path = dbFile();
+		const old = new Store(path);
+		const signal = {
+			status: 'resolved',
+			source: 'github',
+			key: 'deploy:acme/api:staging',
+			at: '2026-10-28T10:00:00.000Z',
+			noteHtml: '<p>Погас</p>',
+		};
+		old.inboxAdd('acme', 'incident.resolve', null, JSON.stringify(signal), '2026-10-28T10:00:00Z');
+		old.close();
+		const w = world({ store: new Store(path) });
+		await w.idle();
+		expect(w.lines('incident.resolve').map((l) => [l.key, l.action])).toEqual([
+			['deploy:acme/api:staging', 'noop'],
+		]);
+		expect([w.store.inboxPending(), w.store.inboxFailedList()]).toEqual([[], []]);
+		w.store.close();
 	});
 
 	test('Погас при успешном деплое — 403: без повтора, деплой сделан, warn один на причину', async () => {

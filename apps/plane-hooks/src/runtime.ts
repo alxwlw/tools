@@ -28,7 +28,12 @@ import { ttl } from './ttl.ts';
 export const CACHE_TTL_MS = 10 * 60_000;
 
 /** The inbox kinds and the normalised event each one carries as its payload. */
-export type JobKind = 'github' | 'vercel.preview' | 'vercel.deploy' | 'dokploy.deployed';
+export type JobKind =
+	| 'github'
+	| 'vercel.preview'
+	| 'vercel.deploy'
+	| 'dokploy.deployed'
+	| 'incident.resolve';
 
 export type TenantRuntime = {
 	tenant: Tenant;

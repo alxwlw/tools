@@ -45,8 +45,8 @@ The incident part of Grafana, Vercel and Dokploy (an alert, a failed deploy, bui
 deploy, a backup that recovered) runs while the sender waits and answers `502` when Plane fails, so the sender
 retries; every write carries an `external_id`, so a retry duplicates nothing. «Погас» that comes with a deploy (a
 GitHub success, a Vercel preview, a Dokploy deploy) is best effort and never holds the deploy back: the deploy work
-is queued and done, a failure that may clear is an `error` line (a GitHub job is retried whole), any other — the
-incident project missing, a 4xx — one `warn` line per cause.
+is queued and done, a failure that may clear is an `error` line and its own inbox job (`incident.resolve`), retried
+alone while the deploy is done once, any other — the incident project missing, a 4xx — one `warn` line per cause.
 
 ## Setting up a tenant
 

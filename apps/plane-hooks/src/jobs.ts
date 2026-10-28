@@ -38,6 +38,8 @@ export async function runJob(runtime: TenantRuntime, job: InboxJob, deps: JobDep
 			return deployJob(runtime, payload as DeployFact, 'vercel', deps);
 		case 'dokploy.deployed':
 			return dokployJob(runtime, payload as Extract<DokployEvent, { kind: 'deployed' }>, deps);
+		case 'incident.resolve':
+			return resolveJob(runtime, payload as IncidentSignal, deps);
 		default:
 			throw new Error(`inbox kind ${job.kind} is unknown to this build`);
 	}
@@ -81,14 +83,9 @@ async function githubJob(runtime: TenantRuntime, event: GitHubJob, deps: JobDeps
 		if (!reported.ok) throw reported.error;
 		return;
 	}
-	// «Погас» is best effort: the deploy is delivered whatever happens to it.
-	const resolved =
-		signal === null
-			? null
-			: await resolveBestEffort(runtime, signal, 'deployment.success', deps.log);
+	// «Погас» never holds the deploy back; a transient failure of it becomes its own job.
+	if (signal !== null) await resolveBestEffort(runtime, signal, 'deployment.success', deps.log);
 	await deployJob(runtime, githubDeployFact(event), 'github', deps);
-	// A transient failure is retried with the whole job once the deploy is in: both paths are idempotent.
-	if (resolved !== null) throw resolved.retry;
 }
 
 async function deployJob(
@@ -232,23 +229,22 @@ export async function reportLogged(
 }
 
 /**
- * «Погас» on a deploy path (a GitHub success, a Vercel preview, a Dokploy deploy): best effort, it never blocks the
- * delivery. Success writes the usual line. A failure that may clear (5xx, 429, network) writes the error line and is
- * returned, for a job to rethrow after its own work; one that will not (the incident project missing, a 4xx) is a
- * warn line once per cause per process, and null is returned.
+ * «Погас» on a deploy path (a GitHub success, a Vercel preview, a Dokploy deploy): it never blocks the delivery and
+ * never makes it run twice. Success writes the usual line. A failure that may clear (5xx, 429, network) writes the
+ * error line and queues the signal as its own `incident.resolve` job, which the queue retries alone; one that will
+ * not (the incident project missing, a 4xx) is a warn line once per cause per process.
  */
 export async function resolveBestEffort(
 	runtime: TenantRuntime,
 	signal: IncidentSignal,
 	event: string,
 	log: Log,
-): Promise<{ retry: unknown } | null> {
+): Promise<void> {
 	const started = performance.now();
 	const line = { event, tenant: runtime.tenant.id, source: signal.source, key: signal.key };
 	try {
 		const result = await runtime.incidents.report(signal);
 		log({ ...line, action: result.action, workItemId: result.workItemId, ms: since(started) });
-		return null;
 	} catch (error) {
 		if (isRetryable(error)) {
 			log({
@@ -259,7 +255,8 @@ export async function resolveBestEffort(
 				ms: since(started),
 				error: describeError(error),
 			});
-			return { retry: error };
+			runtime.submit('incident.resolve', null, signal);
+			return;
 		}
 		// A missing project was already warned about, once, by the tenant's incident reporter.
 		if (!(error instanceof IncidentProjectMissing)) {
@@ -269,8 +266,17 @@ export async function resolveBestEffort(
 				error: cause,
 			});
 		}
-		return null;
 	}
+}
+
+/** A deploy path's «Погас» that failed for a transient reason: retried alone, the deploy is not run again. */
+async function resolveJob(
+	runtime: TenantRuntime,
+	signal: IncidentSignal,
+	deps: JobDeps,
+): Promise<void> {
+	const reported = await reportLogged(runtime, signal, 'incident.resolve', deps.log);
+	if (!reported.ok) throw reported.error;
 }
 
 /** Grafana alerts: a new firing or a new resolution is a mark on the dashboards; a replay (noop) or an error is not. */

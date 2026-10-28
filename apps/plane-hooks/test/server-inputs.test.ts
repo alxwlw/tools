@@ -119,12 +119,16 @@ describe('Vercel', () => {
 		]);
 		expect(w.store.inboxPending()).toEqual([]);
 
-		// «Погас» is best effort: a transient Plane failure on it is an error line, the preview is still delivered.
+		// A transient Plane failure of «Погас» never holds the preview: 200, the preview is delivered, and the
+		// resolve goes through later as its own incident.resolve job.
 		const down = world();
 		const item = down.plane.addWorkItem('OPS-12', 'In Progress');
+		let reports = 0;
 		down.runtime().incidents = {
 			report: async () => {
-				throw new PlaneApiError(500, 'GET', '/work-items/');
+				reports += 1;
+				if (reports === 1) throw new PlaneApiError(500, 'GET', '/work-items/');
+				return { action: 'commented', workItemId: 'inc-1' };
 			},
 		};
 		expect((await down.send(vercelRequest('acme', await preview()))).status).toBe(200);
@@ -135,7 +139,10 @@ describe('Vercel', () => {
 		expect(down.lines('deployment.succeeded').map((l) => [l.level, l.action, l.error])).toEqual([
 			['error', 'error', 'PlaneApiError: Plane GET /work-items/ → 500'],
 		]);
-		expect(down.store.inboxPending()).toEqual([]);
+		expect(down.lines('incident.resolve').map((l) => [l.source, l.action])).toEqual([
+			['vercel', 'commented'],
+		]);
+		expect([down.store.inboxPending(), down.store.inboxFailedList()]).toEqual([[], []]);
 	});
 
 	test('Vercel: подпись не того вида — 401 до тела; верного вида, но чужая — 401 после; подписанный не-JSON — 400', async () => {
@@ -388,12 +395,16 @@ describe('Dokploy', () => {
 		const down = world();
 		down.plane.failNext('createWorkItem', new PlaneApiError(500, 'POST', '/work-items/'));
 		expect((await down.send(dokployRequest('acme', build('error')))).status).toBe(502);
-		// «Погас» of a deploy is best effort: the Deployment is still recorded and Dokploy gets 200.
+		// «Погас» of a deploy never holds it: the Deployment is recorded, Dokploy gets 200, the resolve goes
+		// through later as its own incident.resolve job.
 		const blocked = world();
 		blocked.gh.branch('acme/api', 'main', SHA);
+		let reports = 0;
 		blocked.runtime().incidents = {
 			report: async () => {
-				throw new PlaneApiError(500, 'GET', '/work-items/');
+				reports += 1;
+				if (reports === 1) throw new PlaneApiError(500, 'GET', '/work-items/');
+				return { action: 'commented', workItemId: 'inc-1' };
 			},
 		};
 		expect((await blocked.send(dokployRequest('acme', build('success')))).status).toBe(200);
@@ -403,7 +414,10 @@ describe('Dokploy', () => {
 		expect(blocked.lines('dokploy.deployed').map((l) => [l.level, l.action])).toEqual([
 			['error', 'error'],
 		]);
-		expect(blocked.store.inboxPending()).toEqual([]);
+		expect(blocked.lines('incident.resolve').map((l) => [l.source, l.key, l.action])).toEqual([
+			['dokploy', 'dokploy:api:build', 'commented'],
+		]);
+		expect([blocked.store.inboxPending(), blocked.store.inboxFailedList()]).toEqual([[], []]);
 	});
 
 	test('проекта инцидентов нет: превью Vercel и деплой Dokploy — 200, задачи выполнены, одна строка warn', async () => {
