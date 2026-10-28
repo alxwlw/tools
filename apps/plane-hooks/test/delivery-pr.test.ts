@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handlePullRequest } from '../src/delivery/pr.ts';
+import { causeKey } from '../src/delivery/sync.ts';
 import { GitHubApiError, type Pull } from '../src/github/client.ts';
 import type { GitHubEvent } from '../src/github/webhook.ts';
 import { PlaneApiError } from '../src/plane.ts';
@@ -75,6 +76,25 @@ describe('handlePullRequest', () => {
 		expect(w.stateOf(body)).toBe('eng-in-progress');
 		expect(w.linksOf(body)).toHaveLength(1);
 		expect(w.plane.commentsOf(body)).toEqual([]);
+	});
+
+	test('переход — SyncDeps.moved с причиной сразу после записи статуса; сбой записи — без moved', async () => {
+		const w = deliveryWorld();
+		w.item('ENG-1', 'In Progress');
+		await handlePullRequest(w.deps, event({ draft: false }, 'ready_for_review'));
+		expect(w.moves).toEqual([
+			{ key: 'ENG-1', from: 'In Progress', to: 'In Review', cause: 'pr:acme/api#7' },
+		]);
+		const failing = deliveryWorld();
+		failing.item('ENG-1', 'In Progress');
+		failing.plane.failNext('setWorkItemState');
+		await expect(
+			handlePullRequest(failing.deps, event({ draft: false }, 'ready_for_review')),
+		).rejects.toThrow();
+		expect(failing.moves).toEqual([]);
+		expect(
+			causeKey({ kind: 'deploy', repo: 'acme/api', environment: 'staging', sha: 'abc1234' }),
+		).toBe('deploy:acme/api:staging:abc1234');
 	});
 
 	test('повтор той же доставки — ссылки не дублируются, комментарий перехода один', async () => {
