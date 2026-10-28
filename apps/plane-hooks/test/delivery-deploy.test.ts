@@ -454,7 +454,10 @@ describe('handleDeploy: откат и диапазон', () => {
 		expect(w.gh.calls.filter((c) => c.startsWith('compare '))).toEqual([
 			'compare acme/api a2...a2',
 		]);
-		expect(w.gh.calls).toContain('listDeployments acme/api staging 20');
+		// The first listing is the base lookup; the later ones are `contains`.
+		expect(w.gh.calls.find((c) => c.startsWith('listDeployments'))).toBe(
+			'listDeployments acme/api staging 20',
+		);
 	});
 
 	function longChain(w: ReturnType<typeof setup>) {
