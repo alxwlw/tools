@@ -1,4 +1,4 @@
-// Copy of apps/plane-discord/test/capture.test.ts; keep in sync until a shared package exists.
+// Adapted from apps/plane-discord/test/capture.test.ts.
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +32,28 @@ test('POST: x-plane-* сохранены, Authorization нет, тело бай�
 	expect(line.headers['x-plane-signature']).toBe('ab');
 	expect(line.headers.authorization).toBeUndefined();
 	expect(Buffer.from(line.bodyBase64 as string, 'base64')).toEqual(Buffer.from(body));
+});
+
+test('POST: заголовки GitHub и Vercel (событие, подпись, target-id) сохранены', async () => {
+	const line = await describeRequest(
+		new Request('http://x/hooks/github', {
+			method: 'POST',
+			body: '{}',
+			headers: {
+				'x-github-event': 'installation',
+				'x-hub-signature-256': 'sha256=ab',
+				'x-github-hook-installation-target-id': '1',
+				'x-vercel-signature': 'cd',
+				Authorization: 'Bearer s',
+			},
+		}),
+		new Date(),
+	);
+	expect(line.headers['x-github-event']).toBe('installation');
+	expect(line.headers['x-hub-signature-256']).toBe('sha256=ab');
+	expect(line.headers['x-github-hook-installation-target-id']).toBe('1');
+	expect(line.headers['x-vercel-signature']).toBe('cd');
+	expect(line.headers.authorization).toBeUndefined();
 });
 
 test('метаданные: ts, метод, sha256 тела; HEAD без тела', async () => {

@@ -1,4 +1,4 @@
-// Copy of apps/plane-discord/scripts/capture.ts; keep in sync until a shared package exists.
+// Adapted from apps/plane-discord/scripts/capture.ts: also keeps GitHub and Vercel delivery headers.
 // One-off receiver for the Plane App probe: records every request it gets, byte for byte.
 // Run: bun scripts/capture.ts (CAPTURE_DIR defaults to /captures).
 import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -14,8 +14,8 @@ export type CaptureLine = {
 	bodySha256: string | null;
 };
 
-// Authorization and cookies never reach the capture volume.
-const KEEP_HEADER = /^(x-plane-.*|content-type|user-agent)$/;
+// Plane, GitHub and Vercel delivery headers are kept; Authorization and cookies never reach the capture volume.
+const KEEP_HEADER = /^(x-plane-.*|x-github-.*|x-hub-signature.*|x-vercel-.*|content-type|user-agent)$/;
 
 const sha256Hex = (bytes: Uint8Array): string =>
 	new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
