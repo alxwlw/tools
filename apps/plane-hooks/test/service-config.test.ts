@@ -210,6 +210,12 @@ describe('loadServiceConfig', () => {
 	});
 
 	const shapeCases: Array<[string, (file: Json) => void, string]> = [
+		[
+			'projects = []',
+			(f) => (f.tenants[0].delivery.projects = []),
+			'delivery.projects must be an object',
+		],
+		['workspace = 5', (f) => (f.tenants[0].workspace = 5), 'tenants[0].workspace must be'],
 		['tenants — объект', (f) => (f.tenants = {}), 'tenants file must be an object'],
 		[
 			'projects = 5',
