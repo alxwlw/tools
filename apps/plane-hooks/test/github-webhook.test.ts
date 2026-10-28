@@ -167,6 +167,49 @@ describe('разбор доставки', () => {
 		}
 	});
 
+	test('все семь состояний деплоя принимаются как есть', () => {
+		for (const state of [
+			'success',
+			'failure',
+			'error',
+			'inactive',
+			'in_progress',
+			'queued',
+			'pending',
+		]) {
+			const d = deploymentStatusDelivery(state);
+			expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({ state });
+		}
+	});
+
+	test('деплой без id, sha или environment, дробный id — BadPayload', () => {
+		for (const deployment of [
+			{ id: undefined },
+			{ id: 1.5 },
+			{ sha: '' },
+			{ environment: undefined },
+		]) {
+			const d = deploymentStatusDelivery('success', deployment);
+			expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		}
+	});
+
+	test('repository.full_name не owner/name, installation без id, дробный number — BadPayload', () => {
+		const badRepo = pullDelivery('opened', {}, { repository: { full_name: 'noslash' } });
+		expect(() => parseGitHubDelivery(badRepo.headers, badRepo.raw)).toThrow(BadPayload);
+		const noInstallId = pullDelivery('opened', {}, { installation: {} });
+		expect(() => parseGitHubDelivery(noInstallId.headers, noInstallId.raw)).toThrow(BadPayload);
+		const fractional = pullDelivery('opened', { number: 1.5 });
+		expect(() => parseGitHubDelivery(fractional.headers, fractional.raw)).toThrow(BadPayload);
+	});
+
+	test('PR без html_url или head.ref — BadPayload', () => {
+		for (const pull of [{ html_url: undefined }, { head: { ref: '' } }, { base: undefined }]) {
+			const d = pullDelivery('opened', pull);
+			expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		}
+	});
+
 	test('неизвестное состояние деплоя — BadPayload', () => {
 		const d = deploymentStatusDelivery('exploded');
 		expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);

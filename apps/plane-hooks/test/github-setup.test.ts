@@ -189,6 +189,16 @@ describe('callback', () => {
 			new Error('network down'),
 			new Response('not json', { status: 201 }),
 			Response.json({ id: 1 }, { status: 201 }),
+			...[
+				{ id: 0 },
+				{ id: 1.5 },
+				{ id: '7' },
+				{ slug: '' },
+				{ pem: '' },
+				{ webhook_secret: '' },
+				{ owner: {} },
+				{ owner: null },
+			].map((over) => Response.json({ ...conversion, ...over }, { status: 201 })),
 		]) {
 			const h = harness(reply);
 			const res = await githubCallback(callbackUrl('abc123', state), h.deps);
