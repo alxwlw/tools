@@ -1,6 +1,6 @@
 // Turns a captured GitHub, Vercel or Dokploy delivery (or an API response) into a committable
 // fixture `{headers, body}`: owners, repositories, people, ids, shas, emails and hosts are replaced.
-// Run: bun scripts/sanitize-fixture.ts <github|vercel|dokploy> <file> [--capture] > fixture.json
+// Run: bun scripts/sanitize-fixture.ts <github|vercel|dokploy> <file> [--capture] > out.json
 // With --capture <file> is the `N-<hash>.json` metadata of scripts/capture.ts (its `.bin` sits beside);
 // without it <file> is a plain JSON body (an API response) and the headers are empty.
 import { createHash } from 'node:crypto';
@@ -78,8 +78,8 @@ function eachLeaf(
 // ---------------------------------------------------------------- GitHub
 
 /**
- * Owner and repository -> `acme/api` (every further repository `acme/repoN`), logins -> `octocat`
- * (further ones `octocatN`; a login that owns a repository becomes `acme`), `id` -> a sequence,
+ * Owner and repository -> `acme/api` (every further repository `acme/repo2`, ...), logins -> `octocat`
+ * (further ones `octocat2`, ...; a login that owns a repository becomes `acme`), `id` -> a sequence,
  * `node_id` -> `<N>_kwDOexample`, shas -> a deterministic fake, emails -> `octocat@example.com`.
  */
 export function sanitizeGithub(value: unknown): unknown {
