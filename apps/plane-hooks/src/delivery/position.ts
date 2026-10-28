@@ -1,7 +1,7 @@
 import type { DeliveryConfig, RepoRule } from '../config.ts';
 import type { Pull } from '../github/client.ts';
 import type { StateSummary } from '../plane.ts';
-import { stateByName } from './states.ts';
+import { isTarget, stateByName } from './states.ts';
 
 type Renames = Readonly<Record<string, string | null>>;
 
@@ -40,7 +40,8 @@ export async function pullPosition(
 /** The project's name of a chain step after its renames; null — never set there. */
 function projectName(chain: readonly string[], i: number, renames: Renames): string | null {
 	const name = chain[i] as string;
-	return Object.hasOwn(renames, name) ? (renames[name] ?? null) : name;
+	const key = Object.keys(renames).find((k) => k.toLowerCase() === name.toLowerCase());
+	return key === undefined ? name : (renames[key] ?? null);
 }
 
 /** Walks the chain back from `index` until a state the project has (after its renames); null — none. */
@@ -53,7 +54,7 @@ export function resolveStep(
 	for (let i = index; i >= 0; i--) {
 		const name = projectName(chain, i, renames);
 		const found = name === null ? null : stateByName(states, name);
-		if (found) return found;
+		if (found && isTarget(found)) return found;
 	}
 	return null;
 }
@@ -68,7 +69,9 @@ export function missingSteps(
 	const missing: string[] = [];
 	for (let i = 0; i <= index; i++) {
 		const name = projectName(chain, i, renames);
-		if (name !== null && !stateByName(states, name)) missing.push(name);
+		if (name === null) continue;
+		const found = stateByName(states, name);
+		if (!found || !isTarget(found)) missing.push(name);
 	}
 	return missing;
 }

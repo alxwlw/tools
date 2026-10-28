@@ -82,7 +82,7 @@ describe('syncTask: цепочка PR', () => {
 		expect(w.stateOf(id)).toBe('eng-in-review');
 		const [comment, ...rest] = w.plane.commentsOf(id);
 		expect(rest).toEqual([]);
-		expect(comment?.external_id).toBe('state:eng-in-review:pr:acme/api#1:d1');
+		expect(comment?.external_id).toBe(`state:${id}:eng-in-review:pr:acme/api#1:d1`);
 		expect(comment?.external_source).toBe('plane-hooks');
 		expect(comment?.comment_html).toBe(
 			'<p>Статус → <b>In Review</b>: <a href="https://github.com/acme/api/pull/1">acme/api#1</a></p>',
@@ -433,8 +433,8 @@ describe('syncTask: комментарии перехода', () => {
 		await w.plane.setWorkItemState('p-eng', id, 'eng-in-progress');
 		await syncTask(w.deps, 'ENG-1', w.pr(null, 'd2'));
 		expect(w.plane.commentsOf(id).map((c) => c.external_id)).toEqual([
-			'state:eng-in-review:pr:acme/api#1:d1',
-			'state:eng-in-review:pr:acme/api#1:d2',
+			`state:${id}:eng-in-review:pr:acme/api#1:d1`,
+			`state:${id}:eng-in-review:pr:acme/api#1:d2`,
 		]);
 	});
 
@@ -453,7 +453,9 @@ describe('syncTask: комментарии перехода', () => {
 			sha: 'abcdef1234567',
 		});
 		const [comment] = w.plane.commentsOf(id);
-		expect(comment?.external_id).toBe('state:eng-on-staging:deploy:acme/api:staging:abcdef1234567');
+		expect(comment?.external_id).toBe(
+			`state:${id}:eng-on-staging:deploy:acme/api:staging:abcdef1234567`,
+		);
 		expect(comment?.comment_html).toBe(
 			'<p>Статус → <b>On staging</b>: деплой <code>abcdef1</code> в <code>staging</code></p>',
 		);
@@ -538,6 +540,126 @@ describe('syncTask: края', () => {
 		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
 		await syncTask(w.deps, 'ENG-1', w.pr());
 		expect(w.gh.calls.filter((c) => c === 'getPull acme/api#1')).toHaveLength(1);
+	});
+});
+
+function tenantProjects(projects: Record<string, Record<string, string | null>>) {
+	const base = tenantOf().delivery as NonNullable<Tenant['delivery']>;
+	return tenantOf({ delivery: { ...base, projects } });
+}
+
+describe('syncTask: разбор ревью r0', () => {
+	function twoTasks(w: ReturnType<typeof world>) {
+		const a = w.item('ENG-1', 'In Review', [['acme/api', 1]]);
+		const b = w.item('ENG-2', 'In Review', [['acme/api', 1]]);
+		w.gh.commit('m1', [], 'merge');
+		w.gh
+			.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 ENG-2 fix' })
+			.mergePull('acme/api', 1, 'm1');
+		w.gh.deploy('acme/api', 'staging', 'm1', 'success');
+		return [a, b] as const;
+	}
+
+	test('один деплой двигает две задачи проекта — по комментарию на каждую', async () => {
+		const w = world();
+		const [a, b] = twoTasks(w);
+		const cause = { kind: 'deploy' as const, repo: 'acme/api', environment: 'staging', sha: 'm1' };
+		await syncTask(w.deps, 'ENG-1', cause);
+		await syncTask(w.deps, 'ENG-2', cause);
+		expect(w.plane.commentsOf(a)).toHaveLength(1);
+		expect(w.plane.commentsOf(b)).toHaveLength(1);
+		expect([w.stateOf(a), w.stateOf(b)]).toEqual(['eng-on-staging', 'eng-on-staging']);
+	});
+
+	test('один PR с двумя ключами — по комментарию на каждую задачу', async () => {
+		const w = world();
+		const [a, b] = twoTasks(w);
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		await syncTask(w.deps, 'ENG-2', w.pr());
+		expect(w.plane.commentsOf(a)).toHaveLength(1);
+		expect(w.plane.commentsOf(b)).toHaveLength(1);
+	});
+
+	test('человек перевёл задачу в Done, пока шли запросы, — состояние остаётся', async () => {
+		const w = world();
+		const id = w.item('ENG-1', 'In Progress', [['acme/api', 1]]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		let first = true;
+		w.deps.github = async () => {
+			if (first) {
+				first = false;
+				await w.plane.setWorkItemState('p-eng', id, 'eng-done');
+			}
+			return w.gh;
+		};
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toMatchObject({ action: 'noop' });
+		expect(w.stateOf(id)).toBe('eng-done');
+		expect(w.plane.commentsOf(id)).toHaveLength(0);
+	});
+
+	test('сбой записи комментария — повтор даёт один комментарий и переход', async () => {
+		const w = world();
+		const id = w.item('ENG-1', 'In Progress', [['acme/api', 1]]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		w.plane.failNext('createComment');
+		await expect(syncTask(w.deps, 'ENG-1', w.pr())).rejects.toThrow();
+		expect(w.stateOf(id)).toBe('eng-in-progress');
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toMatchObject({ action: 'moved' });
+		expect(w.plane.commentsOf(id)).toHaveLength(1);
+		expect(w.stateOf(id)).toBe('eng-in-review');
+	});
+
+	test('сбой записи состояния после комментария — повтор не дублирует комментарий', async () => {
+		const w = world();
+		const id = w.item('ENG-1', 'In Progress', [['acme/api', 1]]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		w.plane.failNext('setWorkItemState');
+		await expect(syncTask(w.deps, 'ENG-1', w.pr())).rejects.toThrow();
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.plane.commentsOf(id)).toHaveLength(1);
+		expect(w.stateOf(id)).toBe('eng-in-review');
+	});
+
+	test('ключ переименования без учёта регистра', async () => {
+		const w = world(tenantProjects({ QA: { done: 'Ready for retest' } }));
+		const id = w.item('QA-1', 'In Progress', [['acme/api', 1]]);
+		w.gh.commit('m1', [], 'merge');
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'QA-1 api' }).mergePull('acme/api', 1, 'm1');
+		w.gh.deploy('acme/api', 'production', 'm1', 'success');
+		await syncTask(w.deps, 'QA-1', w.pr());
+		expect(w.stateOf(id)).toBe('qa-ready-for-retest');
+	});
+
+	test('переименование в несуществующее состояние — шаг назад и один warn', async () => {
+		const w = world(tenantProjects({ ENG: { 'On staging': 'Staged' } }));
+		const id = w.item('ENG-1', 'In Progress', [['acme/api', 1]]);
+		w.gh.commit('m1', [], 'merge');
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' }).mergePull('acme/api', 1, 'm1');
+		w.gh.deploy('acme/api', 'staging', 'm1', 'success');
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.stateOf(id)).toBe('eng-in-review');
+		expect(w.warns).toEqual([
+			{ reason: 'state_missing:ENG:Staged', entry: { project: 'ENG', state: 'Staged' } },
+		]);
+	});
+
+	test('projects называет проект, которого нет в Plane, — warn', async () => {
+		const w = world(tenantProjects({ NOPE: { Done: 'X' } }));
+		w.item('ENG-1', 'In Progress');
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.warns).toEqual([{ reason: 'project_missing:NOPE', entry: { project: 'NOPE' } }]);
+	});
+
+	test('переименование в Cancelled не делает его целью', async () => {
+		const w = world(tenantProjects({ ENG: { Done: 'Cancelled' } }));
+		const id = w.item('ENG-1', 'In Progress', [['acme/infra', 2]]);
+		w.gh.commit('m2', [], 'merge');
+		w.gh
+			.pull({ repo: 'acme/infra', number: 2, title: 'ENG-1 infra' })
+			.mergePull('acme/infra', 2, 'm2');
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.stateOf(id)).toBe('eng-in-review');
+		expect(w.warns.map((x) => x.reason)).toEqual(['state_missing:ENG:Cancelled']);
 	});
 });
 

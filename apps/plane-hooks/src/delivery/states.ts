@@ -22,6 +22,11 @@ export function isMovable(state: StateSummary, hold: readonly string[]): boolean
 	return MOVABLE_GROUPS.has(state.group) && !hold.some((h) => h.toLowerCase() === name);
 }
 
+/** A state a task may be moved onto: cancelled and unknown groups never are. */
+export function isTarget(state: StateSummary): boolean {
+	return state.group in GROUP_RANK;
+}
+
 export function stateByName(states: readonly StateSummary[], name: string): StateSummary | null {
 	const wanted = name.toLowerCase();
 	return states.find((s) => s.name.toLowerCase() === wanted) ?? null;

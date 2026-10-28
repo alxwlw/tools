@@ -102,6 +102,9 @@ export async function syncTask(
 	if (deps.tenant.incidents?.project === identifier) return skipped('incident project');
 
 	const identifiers = new Set((await deps.projects()).map((p) => p.identifier));
+	for (const name of Object.keys(delivery.projects)) {
+		if (!identifiers.has(name)) deps.warnOnce(`project_missing:${name}`, { project: name });
+	}
 	const candidates = await pullsOf(deps, delivery, key, item, identifiers, extra);
 	if (candidates.length === 0) return noop('no pulls');
 
@@ -128,18 +131,22 @@ export async function syncTask(
 	}
 	if (unresolved || target === null) return noop('unresolved');
 
-	const current = states.find((s) => s.id === item.state);
+	// The task may have been moved by a person while the awaits above ran: decide on a fresh read.
+	const fresh = await deps.plane.getWorkItem(item.project, item.id);
+	const current = states.find((s) => s.id === fresh.state);
 	if (!current) return noop('unknown state');
 	if (!isMovable(current, delivery.hold)) return noop('hold');
 	if (compareStates(target, current) <= 0) return noop('not forward');
 
-	await deps.plane.setWorkItemState(item.project, item.id, target.id);
+	// Comment first: its external_id makes a repeat harmless (409), so a failed state write is retried whole.
 	const { reason, html } = transitionComment(cause, target.name);
 	await deps.plane.createComment(item.project, item.id, {
 		comment_html: html,
-		external_id: `state:${target.id}:${reason}`,
+		// Plane's duplicate check spans the project: the work item id keeps two tasks of one PR apart.
+		external_id: `state:${item.id}:${target.id}:${reason}`,
 		external_source: SOURCE,
 	});
+	await deps.plane.setWorkItemState(item.project, item.id, target.id);
 	return { key, action: 'moved', from: current.name, to: target.name };
 }
 
