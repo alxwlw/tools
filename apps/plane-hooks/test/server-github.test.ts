@@ -268,13 +268,30 @@ describe('GitHub: деплой', () => {
 		expect([reports, w.lines('job.retry').length, w.lines('job.dropped').length]).toEqual([
 			2, 1, 0,
 		]);
+		// The retry is for the resolve's own failure, rethrown after the deploy.
+		expect(w.lines('job.retry').map((l) => l.error)).toEqual(['Plane GET /work-items/ → 503']);
 		expect(stateOf(w, id)).toBe('eng-on-staging');
 		expect(
 			w.plane.commentsOf(id).filter((c) => c.external_id.startsWith('deployed:')),
 		).toHaveLength(1);
-		expect(w.lines('deployment.success').map((l) => [l.level, l.action])).toEqual([
-			['error', 'error'],
-			[undefined, 'noop'],
+		const line = { event: 'deployment.success', tenant: 'acme', source: 'github' };
+		expect(w.lines('deployment.success')).toEqual([
+			{
+				...line,
+				key: 'deploy:acme/api:staging',
+				level: 'error',
+				action: 'error',
+				workItemId: null,
+				ms: expect.any(Number),
+				error: 'PlaneApiError: Plane GET /work-items/ → 503',
+			},
+			{
+				...line,
+				key: 'deploy:acme/api:staging',
+				action: 'noop',
+				workItemId: null,
+				ms: expect.any(Number),
+			},
 		]);
 		expect(w.store.inboxFailedList()).toEqual([]);
 	});
