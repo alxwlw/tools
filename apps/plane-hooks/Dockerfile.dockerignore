@@ -1,0 +1,7 @@
+# Context is the repository root; only what the Dockerfile copies goes in.
+**
+!apps/plane-hooks/tsconfig.json
+!apps/plane-hooks/src
+!apps/plane-hooks/scripts
+!packages/plane-app/package.json
+!packages/plane-app/src
