@@ -213,6 +213,15 @@ describe('syncTask: куда нельзя', () => {
 		expect(w.plane.calls).not.toContain('setWorkItemState');
 	});
 
+	test('цель равна текущему состоянию — не пишем', async () => {
+		const w = world();
+		w.item('ENG-1', 'In Review', [['acme/api', 1]]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toMatchObject({ action: 'noop' });
+		expect(w.plane.calls).not.toContain('setWorkItemState');
+		expect(w.plane.calls).not.toContain('createComment');
+	});
+
 	test('только вперёд: из On staging назад в In Review не идёт', async () => {
 		const w = world();
 		const id = w.item('ENG-1', 'On staging', [['acme/api', 1]]);
@@ -349,6 +358,8 @@ describe('syncTask: PR, которого хаб не видит', () => {
 			to: 'In Review',
 		});
 		expect(w.stateOf(id)).toBe('eng-in-review');
+		// No rule or no App: the hub does not even ask GitHub.
+		expect(w.gh.calls.some((c) => c.includes('zzz/lib') || c.includes('other/api'))).toBe(false);
 	});
 
 	test('ключ только в описании PR — задача не двигается', async () => {
@@ -474,6 +485,15 @@ describe('позиции', () => {
 		});
 	});
 
+	test('смёрджен без известного merge-коммита — ревью, деплои не спрашиваются', async () => {
+		const never = async () => {
+			throw new Error('contains must not be asked');
+		};
+		expect(await pullPosition({ ...merged, mergeSha: null }, api, rules, never)).toMatchObject({
+			index: 0,
+		});
+	});
+
 	test('смёрджен без окружений — конец дороги; с окружениями — самое дальнее выкаченное', async () => {
 		const asked: string[] = [];
 		const deployedTo =
@@ -542,6 +562,18 @@ describe('containsVia', () => {
 		gh.deploy('acme/api', 'staging', 'c2', 'success');
 		gh.removeCommit('c2');
 		expect(await contains('acme/api', 'staging', 'c1')).toBe(false);
+	});
+
+	test('упавший запрос не запоминается — следующий повторяет его', async () => {
+		const gh = new FakeGitHub().commit('c1', [], 'one');
+		gh.deploy('acme/api', 'production', 'c1', 'success');
+		let attempts = 0;
+		const contains = containsVia(async () => {
+			if (attempts++ === 0) throw new Error('network');
+			return gh;
+		});
+		await expect(contains('acme/api', 'production', 'c1')).rejects.toThrow('network');
+		expect(await contains('acme/api', 'production', 'c1')).toBe(true);
 	});
 
 	test('ответ запоминается по репозиторию, окружению и sha', async () => {
