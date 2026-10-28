@@ -153,10 +153,17 @@ export class FakePlane implements PlaneApi {
 
 	seedWorkItem(project: string, fields: Partial<FakeWorkItem> = {}): FakeWorkItem {
 		const sequence = ++this.#sequence;
+		// The key number skips numbers a project already uses (an explicit `addWorkItem('ENG-3', …)`).
+		let keyNumber = fields.sequence ?? sequence;
+		while (
+			fields.sequence === undefined &&
+			this.workItems.some((w) => w.project === project && w.sequence === keyNumber)
+		)
+			keyNumber++;
 		const item: FakeWorkItem = {
 			id: `w${sequence}`,
 			project,
-			sequence,
+			sequence: keyNumber,
 			state: this.#defaultState(project),
 			name: `seeded ${sequence}`,
 			description_html: '',

@@ -69,4 +69,21 @@ describe('FakePlane: доставка', () => {
 		expect(err).toBeInstanceOf(PlaneApiError);
 		expect((err as PlaneApiError).status).toBe(404);
 	});
+
+	test('автономерация пропускает номера, занятые явным ключом', async () => {
+		const plane = FakePlane.delivery();
+		plane.addWorkItem('ENG-3', 'Todo');
+		for (let i = 0; i < 5; i++)
+			await plane.createWorkItem('p-eng', {
+				name: `n${i}`,
+				description_html: '',
+				priority: 'none',
+				labels: [],
+				external_id: `e${i}`,
+				external_source: 'test',
+			});
+		const numbers = plane.workItems.map((w) => w.sequence);
+		expect(new Set(numbers).size).toBe(numbers.length);
+		expect((await plane.getWorkItemByKey('ENG-3'))?.id).toBe(plane.workItems[0]?.id as string);
+	});
 });

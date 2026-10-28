@@ -3,15 +3,17 @@
  * Contract probe for the Plane API calls plane-hooks relies on.
  *
  * Authenticates as the "plane-hooks" Plane App bot (client_credentials token of a workspace
- * installation), the way the service does. Creates two throwaway work items (one of them archived and unarchived on the
- * way) and one label in PLANE_HOOKS_PROJECT_ID, one throwaway release in the
- * workspace, exercises every call, prints «вызов — ожидание — факт» and deletes
- * what it created. Three sections — work items, archive, releases — run
+ * installation), the way the service does. Creates throwaway work items (one of them archived and unarchived on the
+ * way, one for links and a comment edit) and one label in PLANE_HOOKS_PROJECT_ID, one
+ * throwaway release in the workspace, exercises every call, prints «вызов — ожидание — факт»
+ * and deletes what it created. Four sections — work items, archive, Plane App
+ * (states, links, comment edit), releases — run
  * independently: a section that throws records one ✗ row and the next one still
  * runs. A workspace whose plan has no releases (402) skips the release section.
  * Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
  *
- * It needs a real API token, so the owner runs it.
+ * Env: PLANE_HOOKS_PLANE_URL, PLANE_HOOKS_WORKSPACE, PLANE_HOOKS_PROJECT_ID and the app's
+ * PLANE_HOOKS_PROBE_CLIENT_ID / _CLIENT_SECRET / _INSTALLATION_ID. It needs a real installation, so the owner runs it.
  */
 
 import { botTokenAuth } from '@alxwlw/plane-app';
