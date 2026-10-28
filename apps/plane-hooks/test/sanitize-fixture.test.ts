@@ -168,6 +168,7 @@ test('sanitizeHeaders оставляет событие, отбрасывает 
 		'x-github-hook-installation-target-id': '123456',
 		'x-hub-signature-256': 'sha256=abc',
 		'x-hub-signature': 'sha1=abc',
+		'x-vercel-signature': 'deadbeef',
 		'user-agent': 'GitHub-Hookshot/abc',
 		'content-type': 'application/json',
 	});
@@ -207,4 +208,80 @@ test('cli --capture читает метаданные и .bin, без --capture 
 		body: { sender: { login: 'octocat' } },
 	});
 	expect(() => cli(['nope', plain])).toThrow('usage:');
+});
+
+test('разные значения получают разные замены, одинаковые — одинаковые', () => {
+	const dokploy = sanitizeDokploy({
+		a: { repository: 'org-one/first', owner: 'org-one', domain: 'one.private.io' },
+		b: { repository: 'org-two/second', owner: 'org-two', domain: 'two.private.io' },
+		c: {
+			repository: 'org-one/first',
+			applicationName: 'x',
+			project: 'p',
+			note: 'see https://host.private.io/x',
+		},
+	}) as Record<string, Record<string, string>>;
+	expect(dokploy.a).toEqual({ repository: 'acme/api', owner: 'acme', domain: 'app1.example.com' });
+	expect(dokploy.b).toEqual({
+		repository: 'acme/repo2',
+		owner: 'acme',
+		domain: 'app2.example.com',
+	});
+	expect(dokploy.c).toEqual({
+		repository: 'acme/api',
+		applicationName: 'example-app-1',
+		project: 'example-project-1',
+		note: 'see https://host3.example.com/x',
+	});
+	const vercel = sanitizeVercel({
+		a: {
+			team: { id: 'tm-1', name: 'team one' },
+			user: { id: 'u-1' },
+			project: { name: 'site-one' },
+		},
+		b: {
+			team: { id: 'tm-2' },
+			user: { id: 'u-2' },
+			project: { name: 'site-two' },
+			deployment: { name: 'site-one' },
+		},
+		meta: { githubCommitRepo: 'r1', githubRepoId: '9001', githubCommitAuthorLogin: 'p1' },
+		meta2: { githubCommitRepo: 'r2', githubRepoId: '9002', githubCommitAuthorLogin: 'p2' },
+	}) as Record<string, any>;
+	expect(vercel.a).toEqual({
+		team: { id: 'user_example1', name: 'acme' },
+		user: { id: 'user_example2' },
+		project: { name: 'app1' },
+	});
+	expect(vercel.b.project.name).toBe('app2');
+	expect(vercel.b.deployment.name).toBe('app1');
+	expect(vercel.b.user.id).toBe('user_example4');
+	expect(vercel.meta).toEqual({
+		githubCommitRepo: 'api',
+		githubRepoId: '1',
+		githubCommitAuthorLogin: 'octocat',
+	});
+	expect(vercel.meta2).toEqual({
+		githubCommitRepo: 'repo2',
+		githubRepoId: '2',
+		githubCommitAuthorLogin: 'octocat2',
+	});
+});
+
+test('sanitizeVercel не трогает id вида dpl_/prj_/team_ в чужих полях и чистит почту', () => {
+	const out = sanitizeVercel({ id: 'dpl_A1', mail: 'x@y.io', ref: 'team_Z9' }) as Record<
+		string,
+		string
+	>;
+	expect(out).toEqual({ id: 'dpl_example1', mail: 'octocat@example.com', ref: 'team_example1' });
+});
+
+test('cli без --capture и без заголовков в метаданных даёт пустые заголовки', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sanitize-'));
+	const meta = join(dir, '2-abcdef12.json');
+	writeFileSync(meta, '{}');
+	writeFileSync(join(dir, '2-abcdef12.bin'), '{}');
+	expect(JSON.parse(cli(['vercel', meta, '--capture']))).toEqual({ headers: {}, body: {} });
+	expect(() => cli(['github'])).toThrow('usage:');
+	expect(() => cli([])).toThrow('usage:');
 });
