@@ -15,7 +15,8 @@ export type CaptureLine = {
 };
 
 // Plane, GitHub and Vercel delivery headers are kept; Authorization and cookies never reach the capture volume.
-const KEEP_HEADER = /^(x-plane-.*|x-github-.*|x-hub-signature.*|x-vercel-.*|content-type|user-agent)$/;
+const KEEP_HEADER =
+	/^(x-plane-.*|x-github-.*|x-hub-signature.*|x-vercel-.*|content-type|user-agent)$/;
 
 const sha256Hex = (bytes: Uint8Array): string =>
 	new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
