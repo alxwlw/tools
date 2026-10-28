@@ -96,31 +96,35 @@ export class Store {
 		payload: string,
 		at: string,
 	): number | null {
-		return this.#db.transaction((): number | null => {
-			if (deliveryId !== null) {
-				const seen = this.#db
-					.query('SELECT id, status FROM inbox WHERE delivery_id = ?')
-					.get(deliveryId) as { id: number; status: string } | null;
-				if (seen !== null) {
-					if (seen.status !== 'failed') return null;
-					this.#db
+		return (
+			this.#db
+				.transaction((): number | null => {
+					if (deliveryId !== null) {
+						const seen = this.#db
+							.query('SELECT id, status FROM inbox WHERE delivery_id = ?')
+							.get(deliveryId) as { id: number; status: string } | null;
+						if (seen !== null) {
+							if (seen.status !== 'failed') return null;
+							this.#db
+								.query(
+									`UPDATE inbox SET status = 'pending', payload = ?, error = NULL, at = ? WHERE id = ?`,
+								)
+								.run(payload, isoOf(at), seen.id);
+							return seen.id;
+						}
+					}
+					const row = this.#db
 						.query(
-							`UPDATE inbox SET status = 'pending', payload = ?, error = NULL, at = ? WHERE id = ?`,
-						)
-						.run(payload, isoOf(at), seen.id);
-					return seen.id;
-				}
-			}
-			const row = this.#db
-				.query(
-					`INSERT INTO inbox (tenant, kind, delivery_id, payload, status, at)
+							`INSERT INTO inbox (tenant, kind, delivery_id, payload, status, at)
 					VALUES (?, ?, ?, ?, 'pending', ?) RETURNING id`,
-				)
-				.get(tenant, kind, deliveryId, payload, isoOf(at)) as { id: number };
-			return row.id;
-			// IMMEDIATE takes the write lock up front, through busy_timeout: a deferred transaction that has read
-			// and then needs to write fails at once with SQLITE_BUSY while another connection holds the lock.
-		}).immediate();
+						)
+						.get(tenant, kind, deliveryId, payload, isoOf(at)) as { id: number };
+					return row.id;
+				})
+				// IMMEDIATE takes the write lock up front, through busy_timeout: a deferred transaction that has read
+				// and then needs to write fails at once with SQLITE_BUSY while another connection holds the lock.
+				.immediate()
+		);
 	}
 
 	/** The payload is dropped: it can carry PR titles and bodies. */
