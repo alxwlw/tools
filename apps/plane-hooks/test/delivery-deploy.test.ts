@@ -516,6 +516,8 @@ describe('handleDeploy: откат и диапазон', () => {
 		const w = setup();
 		w.gh.commit('c0', [], 'init');
 		for (let i = 1; i <= 251; i++) w.gh.commit(`c${i}`, [`c${i - 1}`], `chore ${i}`);
+		w.gh.pull({ repo: REPO, number: 7, title: 'ENG-2 early' }).mergePull(REPO, 7, 'c10');
+		const early = w.item('ENG-2', 'In Review');
 		w.gh.commit('m1', ['c251'], 'Merge pull request #5');
 		w.gh
 			.pull({ repo: REPO, number: 5, title: 'ENG-1 release', head: 'staging' })
@@ -535,7 +537,10 @@ describe('handleDeploy: откат и диапазон', () => {
 		expect(w.stateOf(id)).toBe('eng-done');
 		expect(w.releases).toHaveLength(1);
 		expect(w.releases[0]?.draft.headline).toBe('ENG-1 release');
-		expect(w.releases[0]?.items).toEqual([{ key: 'ENG-1', workItemId: id }]);
+		expect(w.releases[0]?.items).toEqual([
+			{ key: 'ENG-2', workItemId: early },
+			{ key: 'ENG-1', workItemId: id },
+		]);
 		expect(w.warns.filter((x) => x.reason.startsWith('compare_'))).toHaveLength(1);
 	});
 
