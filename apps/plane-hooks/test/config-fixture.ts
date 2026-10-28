@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
-import type { ServiceConfig, Tenant } from '../src/config.ts';
+import { DEFAULT_PRIORITY, type ServiceConfig, type Tenant } from '../src/config.ts';
 
 export const TEST_KEY_PEM = generateKeyPairSync('rsa', {
 	modulusLength: 2048,
@@ -26,7 +26,7 @@ export function tenantOf(overrides: Partial<Tenant> = {}): Tenant {
 				webhookSecret: 'gh-secret',
 			},
 		],
-		incidents: { project: 'INC' },
+		incidents: { project: 'INC', priority: DEFAULT_PRIORITY },
 		delivery: {
 			states: { review: 'In Review', done: 'Done' },
 			hold: ['Blocked'],

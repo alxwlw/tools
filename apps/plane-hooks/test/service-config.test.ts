@@ -46,6 +46,28 @@ function message(
 const without = (...names: string[]) =>
 	Object.fromEntries(Object.entries(ENV).filter(([name]) => !names.includes(name)));
 
+describe('loadServiceConfig: incidents.priority', () => {
+	test('priority из конфига перекрывает умолчание по ячейке', () => {
+		const config = load(
+			(f) => (f.tenants[0].incidents.priority = { critical: { staging: 'medium' } }),
+		);
+		expect(config.tenants[0]?.incidents?.priority.critical).toEqual({
+			'*': 'urgent',
+			staging: 'medium',
+		});
+		expect(config.tenants[0]?.incidents?.priority.warning).toEqual({
+			'*': 'high',
+			staging: 'medium',
+		});
+	});
+
+	test('неизвестный приоритет — ошибка с путём', () => {
+		expect(
+			message((f) => (f.tenants[0].incidents.priority = { critical: { '*': 'low' } })),
+		).toContain('tenants[0].incidents.priority.critical.* must be urgent, high or medium');
+	});
+});
+
 describe('loadServiceConfig', () => {
 	test('пример tenants.example.json грузится целиком', () => {
 		expect(loadServiceConfig(ENV, () => EXAMPLE)).toEqual({

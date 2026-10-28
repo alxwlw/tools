@@ -101,13 +101,24 @@ export type DeliveryConfig = {
 	/** Project identifier → target state name → that project's state name, or null: never set there. */
 	projects: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
 };
+/** Severity (or `*`) → environment (or `*`) → work-item priority of a firing alert. */
+export type PriorityTable = Readonly<
+	Record<string, Readonly<Record<string, 'urgent' | 'high' | 'medium'>>>
+>;
+/** The table the README documents; a tenant's `incidents.priority` is merged over it cell by cell. */
+export const DEFAULT_PRIORITY: PriorityTable = {
+	critical: { '*': 'urgent', staging: 'high' },
+	warning: { '*': 'high', staging: 'medium' },
+	'*': { '*': 'urgent', staging: 'high' },
+};
+const PRIORITIES: readonly string[] = ['urgent', 'high', 'medium'];
 export type DokployAppRule = { name: string; repo: string; environment: string };
 export type Tenant = {
 	id: string;
 	workspace: string;
 	plane: { clientId: string; clientSecret: string; appInstallationId: string };
 	github: readonly GitHubAppConfig[];
-	incidents: { project: string } | null;
+	incidents: { project: string; priority: PriorityTable } | null;
 	delivery: DeliveryConfig | null;
 	dokploy: readonly DokployAppRule[];
 	inputs: Readonly<Record<InputName, string | null>>;
@@ -318,13 +329,14 @@ function parseServiceTenant(
 		});
 	});
 
-	let incidents: { project: string } | null = null;
+	let incidents: Tenant['incidents'] = null;
 	if (raw.incidents !== undefined) {
 		const inc = obj(raw.incidents, `${at}.incidents`);
 		if (inc) {
-			unknownKeys(inc, ['project'], `${at}.incidents`);
+			unknownKeys(inc, ['project', 'priority'], `${at}.incidents`);
 			incidents = {
 				project: str(inc, 'project', `${at}.incidents`, PROJECT_IDENTIFIER, 'a project identifier'),
+				priority: parsePriority(inc.priority, `${at}.incidents.priority`, { fail, obj }),
 			};
 		}
 	}
@@ -396,6 +408,26 @@ type Helpers = {
 	obj: (value: unknown, path: string) => Obj | null;
 	list: (value: unknown, path: string) => unknown[];
 };
+
+/** `DEFAULT_PRIORITY` with the configured cells laid over it; an unset table is the default. */
+function parsePriority(
+	value: unknown,
+	at: string,
+	h: Pick<Helpers, 'fail' | 'obj'>,
+): PriorityTable {
+	if (value === undefined) return DEFAULT_PRIORITY;
+	const merged: Record<string, Record<string, 'urgent' | 'high' | 'medium'>> = {};
+	for (const [severity, row] of Object.entries(DEFAULT_PRIORITY)) merged[severity] = { ...row };
+	for (const [severity, envs] of Object.entries(h.obj(value, at) ?? {})) {
+		const rowObj = h.obj(envs, `${at}.${severity}`);
+		for (const [env, priority] of Object.entries(rowObj ?? {})) {
+			if (typeof priority === 'string' && PRIORITIES.includes(priority)) {
+				(merged[severity] ??= {})[env] = priority as 'urgent' | 'high' | 'medium';
+			} else h.fail(`${at}.${severity}.${env} must be urgent, high or medium`);
+		}
+	}
+	return merged;
+}
 
 function parseDelivery(d: Obj, at: string, h: Helpers): DeliveryConfig {
 	h.unknownKeys(d, ['states', 'hold', 'repos', 'projects'], at);

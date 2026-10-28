@@ -1,3 +1,4 @@
+import { DEFAULT_PRIORITY, type PriorityTable } from './config.ts';
 import { esc, link, p, truncate, utc } from './html.ts';
 import type { IncidentSignal } from './incident.ts';
 import { BadPayload, isRecord, isTimestamp, optString, stringMap } from './payload.ts';
@@ -9,13 +10,16 @@ const TITLE_MAX = 200;
  * the alert fingerprint is the incident key, its
  * startsAt the occurrence. Throws BadPayload on a body Grafana would not send.
  */
-export function parseGrafanaWebhook(body: unknown): IncidentSignal[] {
+export function parseGrafanaWebhook(
+	body: unknown,
+	table: PriorityTable = DEFAULT_PRIORITY,
+): IncidentSignal[] {
 	if (!isRecord(body) || !Array.isArray(body.alerts))
 		throw new BadPayload('grafana: body has no alerts[]');
-	return body.alerts.map((alert, index) => toSignal(alert, index));
+	return body.alerts.map((alert, index) => toSignal(alert, index, table));
 }
 
-function toSignal(alert: unknown, index: number): IncidentSignal {
+function toSignal(alert: unknown, index: number, table: PriorityTable): IncidentSignal {
 	const where = `grafana: alerts[${index}]`;
 	if (!isRecord(alert)) throw new BadPayload(`${where} is not an object`);
 	const fingerprint = optString(alert.fingerprint);
@@ -55,24 +59,25 @@ function toSignal(alert: unknown, index: number): IncidentSignal {
 		title,
 		bodyHtml: describeAlert(alert, labels, annotations),
 		noteHtml: p(`Сработал ${utc(startsAt)} UTC`),
-		priority: alertPriority(labels.severity, env),
+		priority: alertPriority(labels, table),
 		label: 'alert',
 		env,
 	};
 }
 
 /**
- * Work-item priority of a firing alert, by severity × env (spec § «Приоритет по severity»).
- * Severity is compared after trim + lowercase; `critical`, a missing or an unknown severity
- * keep the pre-severity rule, `warning` is one step lower.
+ * Work-item priority of a firing alert from the tenant's table: the severity row (compared after trim +
+ * lowercase; a missing or unknown severity uses the `*` row), then the env cell (else the row's `*`).
+ * `env` is the `env` label, `prod` when empty.
  */
 export function alertPriority(
-	severity: string | undefined,
-	env: string,
+	labels: Record<string, string>,
+	table: PriorityTable,
 ): 'urgent' | 'high' | 'medium' {
-	const level = (severity ?? '').trim().toLowerCase();
-	if (level === 'warning') return env === 'staging' ? 'medium' : 'high';
-	return env === 'staging' ? 'high' : 'urgent';
+	const level = (labels.severity ?? '').trim().toLowerCase();
+	const env = labels.env || 'prod';
+	const row = table[level] ?? table['*'];
+	return row?.[env] ?? row?.['*'] ?? table['*']?.[env] ?? table['*']?.['*'] ?? 'urgent';
 }
 
 function describeAlert(

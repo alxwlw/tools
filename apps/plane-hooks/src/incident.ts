@@ -186,3 +186,10 @@ export function createIncidentReporter(deps: {
 		},
 	};
 }
+
+/** Plane project id of an incident project identifier; a missing project is an error the caller turns into a retry. */
+export async function resolveIncidentProject(plane: PlaneApi, identifier: string): Promise<string> {
+	const project = (await plane.listProjects()).find((item) => item.identifier === identifier);
+	if (!project) throw new Error(`incident project ${identifier} not found`);
+	return project.id;
+}
