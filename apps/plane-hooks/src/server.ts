@@ -8,7 +8,7 @@ import { parseDokployWebhook, verifyDokploy } from './dokploy.ts';
 import { githubCallback, githubSetupPage } from './github/setup.ts';
 import { parseGitHubDelivery, verifyGitHubSignature } from './github/webhook.ts';
 import { parseGrafanaWebhook } from './grafana.ts';
-import { deployAnnotation, incidentAnnotation, reportLogged } from './jobs.ts';
+import { deployAnnotation, incidentAnnotation, reportLogged, resolveBestEffort } from './jobs.ts';
 import { describeError, type Log } from './log.ts';
 import { BadPayload } from './payload.ts';
 import { PLANE_HOOKS_SCOPES } from './plane.ts';
@@ -138,9 +138,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
 				return reported.ok ? text(200, 'ok') : text(502, 'plane failed');
 			}
 			case 'preview': {
-				const reported = await reportLogged(runtime, event.resolve, 'deployment.succeeded', log);
-				if (!reported.ok) return text(502, 'plane failed');
+				// The preview comment never waits for «Погас»: queued first, the resolve is best effort.
 				runtime.submit('vercel.preview', null, event.preview);
+				await resolveBestEffort(runtime, event.resolve, 'deployment.succeeded', log);
 				return text(200, 'ok');
 			}
 			case 'promoted':
@@ -190,9 +190,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
 				return reported.ok ? text(200, 'ok') : text(502, 'plane failed');
 			}
 			case 'deployed': {
-				const reported = await reportLogged(runtime, event.resolve, 'dokploy.deployed', log);
-				if (!reported.ok) return text(502, 'plane failed');
+				// The Deployment record never waits for «Погас»: queued first, the resolve is best effort.
 				runtime.submit('dokploy.deployed', null, event);
+				await resolveBestEffort(runtime, event.resolve, 'dokploy.deployed', log);
 				return text(200, 'ok');
 			}
 		}

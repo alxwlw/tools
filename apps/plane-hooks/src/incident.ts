@@ -187,9 +187,16 @@ export function createIncidentReporter(deps: {
 	};
 }
 
-/** Plane project id of an incident project identifier; a missing project is an error the caller turns into a retry. */
+/** The tenant's incident project is not in its workspace: a config error that no retry clears. */
+export class IncidentProjectMissing extends Error {
+	constructor(readonly identifier: string) {
+		super(`incident project ${identifier} not found`);
+	}
+}
+
+/** Plane project id of an incident project identifier; a missing project throws IncidentProjectMissing. */
 export async function resolveIncidentProject(plane: PlaneApi, identifier: string): Promise<string> {
 	const project = (await plane.listProjects()).find((item) => item.identifier === identifier);
-	if (!project) throw new Error(`incident project ${identifier} not found`);
+	if (!project) throw new IncidentProjectMissing(identifier);
 	return project.id;
 }

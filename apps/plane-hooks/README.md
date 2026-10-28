@@ -41,8 +41,12 @@ touched by the status rules.
 A disabled input (its secret unset), an unknown tenant and an unknown App answer 404 before the body is read,
 with no log line. Bodies over 4 MiB answer 413. A GitHub delivery is saved to the inbox and answered `202` at once
 (GitHub waits 10 s and never retries by itself); a repeat of a delivery already done answers `200 duplicate`.
-The incident part of Grafana, Vercel and Dokploy runs while the sender waits and answers `502` when Plane fails,
-so the sender retries; every write carries an `external_id`, so a retry duplicates nothing.
+The incident part of Grafana, Vercel and Dokploy (an alert, a failed deploy, build or backup, a Vercel production
+deploy, a backup that recovered) runs while the sender waits and answers `502` when Plane fails, so the sender
+retries; every write carries an `external_id`, so a retry duplicates nothing. «Погас» that comes with a deploy (a
+GitHub success, a Vercel preview, a Dokploy deploy) is best effort and never holds the deploy back: the deploy work
+is queued and done, a failure that may clear is an `error` line (a GitHub job is retried whole), any other — the
+incident project missing, a 4xx — one `warn` line per cause.
 
 ## Setting up a tenant
 

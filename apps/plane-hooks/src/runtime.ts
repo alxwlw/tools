@@ -6,6 +6,7 @@ import { createGitHubApp, type GitHubApp } from './github/app.ts';
 import type { GitHubApi } from './github/client.ts';
 import {
 	createIncidentReporter,
+	IncidentProjectMissing,
 	type IncidentReporter,
 	resolveIncidentProject,
 } from './incident.ts';
@@ -241,14 +242,13 @@ function incidentReporter(
 		return { report: () => Promise.resolve({ action: 'noop', workItemId: null }) };
 	}
 	const identifier = tenant.incidents.project;
-	const missing = `incident project ${identifier} not found`;
 	const projectId = ttl(
 		async () => {
 			try {
 				return await resolveIncidentProject(plane, identifier);
 			} catch (err) {
-				// One warn per process, not one per retry of the sender (Review Focus 5); the call still fails.
-				if (err instanceof Error && err.message === missing)
+				// One warn per process, not one per retry of the sender; the call still fails.
+				if (err instanceof IncidentProjectMissing)
 					warnOnce(`incident_project_missing:${identifier}`, { project: identifier });
 				throw err;
 			}

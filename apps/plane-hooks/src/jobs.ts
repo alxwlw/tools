@@ -5,8 +5,9 @@ import { containsVia, type SyncResult } from './delivery/sync.ts';
 import { type DokployEvent, recordDokployDeploy } from './dokploy.ts';
 import { deploymentSignal } from './github/failure.ts';
 import type { GitHubEvent } from './github/webhook.ts';
-import type { IncidentSignal } from './incident.ts';
+import { IncidentProjectMissing, type IncidentSignal } from './incident.ts';
 import { describeError, type Log } from './log.ts';
+import { isRetryable } from './queue.ts';
 import type { TenantRuntime } from './runtime.ts';
 import type { InboxJob, Store } from './store.ts';
 import type { VercelPreview } from './vercel.ts';
@@ -73,12 +74,21 @@ async function githubJob(runtime: TenantRuntime, event: GitHubJob, deps: JobDeps
 		return;
 	}
 	const signal = deploymentSignal(event, runtime.tenant, () => new Date(deps.now()));
-	if (signal !== null) {
+	if (event.state !== 'success') {
+		if (signal === null) return;
+		// A failed deploy opens an incident: a Plane failure is retried by the queue (the report is idempotent).
 		const reported = await reportLogged(runtime, signal, `deployment.${event.state}`, deps.log);
-		// The queue retries the whole job: the report and the deploy path are both idempotent.
 		if (!reported.ok) throw reported.error;
+		return;
 	}
-	if (event.state === 'success') await deployJob(runtime, githubDeployFact(event), 'github', deps);
+	// «Погас» is best effort: the deploy is delivered whatever happens to it.
+	const resolved =
+		signal === null
+			? null
+			: await resolveBestEffort(runtime, signal, 'deployment.success', deps.log);
+	await deployJob(runtime, githubDeployFact(event), 'github', deps);
+	// A transient failure is retried with the whole job once the deploy is in: both paths are idempotent.
+	if (resolved !== null) throw resolved.retry;
 }
 
 async function deployJob(
@@ -218,6 +228,48 @@ export async function reportLogged(
 			error: describeError(error),
 		});
 		return { ok: false, error };
+	}
+}
+
+/**
+ * «Погас» on a deploy path (a GitHub success, a Vercel preview, a Dokploy deploy): best effort, it never blocks the
+ * delivery. Success writes the usual line. A failure that may clear (5xx, 429, network) writes the error line and is
+ * returned, for a job to rethrow after its own work; one that will not (the incident project missing, a 4xx) is a
+ * warn line once per cause per process, and null is returned.
+ */
+export async function resolveBestEffort(
+	runtime: TenantRuntime,
+	signal: IncidentSignal,
+	event: string,
+	log: Log,
+): Promise<{ retry: unknown } | null> {
+	const started = performance.now();
+	const line = { event, tenant: runtime.tenant.id, source: signal.source, key: signal.key };
+	try {
+		const result = await runtime.incidents.report(signal);
+		log({ ...line, action: result.action, workItemId: result.workItemId, ms: since(started) });
+		return null;
+	} catch (error) {
+		if (isRetryable(error)) {
+			log({
+				...line,
+				level: 'error',
+				action: 'error',
+				workItemId: null,
+				ms: since(started),
+				error: describeError(error),
+			});
+			return { retry: error };
+		}
+		// A missing project was already warned about, once, by the tenant's incident reporter.
+		if (!(error instanceof IncidentProjectMissing)) {
+			const cause = describeError(error);
+			runtime.sync.warnOnce(`incident_resolve_failed:${signal.source}:${cause}`, {
+				source: signal.source,
+				error: cause,
+			});
+		}
+		return null;
 	}
 }
 

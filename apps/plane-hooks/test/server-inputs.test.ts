@@ -96,7 +96,7 @@ describe('Vercel', () => {
 		});
 	});
 
-	test('Vercel: прод успешен — только Погас и одна отметка деплоя; превью на сбое Plane — 502 и без задачи', async () => {
+	test('Vercel: прод успешен — только Погас и одна отметка деплоя; превью при сбое Погас — 200, комментарий превью всё равно', async () => {
 		const w = world();
 		const res = await w.send(
 			vercelRequest('acme', await vercelBody('vercel-deployment-succeeded.json')),
@@ -119,13 +119,22 @@ describe('Vercel', () => {
 		]);
 		expect(w.store.inboxPending()).toEqual([]);
 
+		// «Погас» is best effort: a transient Plane failure on it is an error line, the preview is still delivered.
 		const down = world();
 		const item = down.plane.addWorkItem('OPS-12', 'In Progress');
-		down.plane.failNext('findWorkItemByExternalId', new PlaneApiError(500, 'GET', '/work-items/'));
-		expect((await down.send(vercelRequest('acme', await preview()))).status).toBe(502);
-		// Vercel resends the whole delivery: nothing of it may have been queued yet.
-		expect(down.lines('delivery.noted')).toEqual([]);
-		expect(down.plane.commentsOf(item)).toEqual([]);
+		down.runtime().incidents = {
+			report: async () => {
+				throw new PlaneApiError(500, 'GET', '/work-items/');
+			},
+		};
+		expect((await down.send(vercelRequest('acme', await preview()))).status).toBe(200);
+		expect(down.lines('delivery.noted').map((l) => [l.key, l.kind, l.created])).toEqual([
+			['OPS-12', 'preview', true],
+		]);
+		expect(down.plane.commentsOf(item)).toHaveLength(1);
+		expect(down.lines('deployment.succeeded').map((l) => [l.level, l.action, l.error])).toEqual([
+			['error', 'error', 'PlaneApiError: Plane GET /work-items/ → 500'],
+		]);
 		expect(down.store.inboxPending()).toEqual([]);
 	});
 
@@ -360,7 +369,7 @@ describe('Dokploy', () => {
 		expect(w.gh.calls.some((call) => call.startsWith('createDeployment'))).toBe(false);
 	});
 
-	test('Dokploy: ошибка сборки — инцидент синхронно, деплой потом гасит его; сбой Plane — 502', async () => {
+	test('Dokploy: ошибка сборки — инцидент синхронно, сбой Plane — 502; деплой гасит его, сбой Погас деплой не держит', async () => {
 		const w = world();
 		w.gh.branch('acme/api', 'main', SHA);
 		expect((await w.send(dokployRequest('acme', build('error')))).status).toBe(200);
@@ -379,14 +388,45 @@ describe('Dokploy', () => {
 		const down = world();
 		down.plane.failNext('createWorkItem', new PlaneApiError(500, 'POST', '/work-items/'));
 		expect((await down.send(dokployRequest('acme', build('error')))).status).toBe(502);
+		// «Погас» of a deploy is best effort: the Deployment is still recorded and Dokploy gets 200.
 		const blocked = world();
-		blocked.plane.failNext(
-			'findWorkItemByExternalId',
-			new PlaneApiError(500, 'GET', '/work-items/'),
-		);
-		expect((await blocked.send(dokployRequest('acme', build('success')))).status).toBe(502);
+		blocked.gh.branch('acme/api', 'main', SHA);
+		blocked.runtime().incidents = {
+			report: async () => {
+				throw new PlaneApiError(500, 'GET', '/work-items/');
+			},
+		};
+		expect((await blocked.send(dokployRequest('acme', build('success')))).status).toBe(200);
+		expect(blocked.gh.calls.filter((call) => call.startsWith('createDeployment '))).toEqual([
+			`createDeployment acme/api production ${SHA}`,
+		]);
+		expect(blocked.lines('dokploy.deployed').map((l) => [l.level, l.action])).toEqual([
+			['error', 'error'],
+		]);
 		expect(blocked.store.inboxPending()).toEqual([]);
-		expect(blocked.gh.calls).toEqual([]);
+	});
+
+	test('проекта инцидентов нет: превью Vercel и деплой Dokploy — 200, задачи выполнены, одна строка warn', async () => {
+		const w = world({ tenants: [tenantOf({ incidents: { project: 'NOPE', priority: {} } })] });
+		const item = w.plane.addWorkItem('OPS-12', 'In Progress');
+		expect((await w.send(vercelRequest('acme', await preview()))).status).toBe(200);
+		expect(w.plane.commentsOf(item)).toHaveLength(1);
+		w.gh.branch('acme/api', 'main', SHA);
+		expect((await w.send(dokployRequest('acme', build('success')))).status).toBe(200);
+		expect(w.gh.calls.filter((call) => call.startsWith('createDeployment '))).toEqual([
+			`createDeployment acme/api production ${SHA}`,
+		]);
+		expect(w.lines('warning')).toEqual([
+			{
+				event: 'warning',
+				level: 'warn',
+				tenant: 'acme',
+				reason: 'incident_project_missing:NOPE',
+				project: 'NOPE',
+			},
+		]);
+		// Not a transient failure: no error line for it.
+		expect(w.logs.filter((l) => l.level === 'error')).toEqual([]);
 	});
 
 	test('Dokploy: удачный бэкап после упавшего — Погас того же …:backup; другое событие — ignored', async () => {

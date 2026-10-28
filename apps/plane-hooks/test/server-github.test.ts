@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import type { Tenant } from '../src/config.ts';
 import { PlaneApiError } from '../src/plane.ts';
 import { Store } from '../src/store.ts';
 import { FakePlane } from './fake-plane.ts';
@@ -173,8 +174,8 @@ describe('GitHub: доставка PR', () => {
 
 describe('GitHub: деплой', () => {
 	/** a0 ← a1 (ENG-1, PR #1 merged as a1); staging had a0 and now has a1. */
-	function deployWorld() {
-		const w = world();
+	function deployWorld(tenants?: Tenant[]) {
+		const w = world({ tenants });
 		w.gh.commit('a0', [], 'init');
 		w.gh.commit('a1', ['a0'], 'ENG-1 change (#1)');
 		w.gh
@@ -225,6 +226,96 @@ describe('GitHub: деплой', () => {
 		]);
 		expect(w.store.journalSince('2026-10-01T00:00:00Z').map((r) => r.cause)).toEqual([
 			'deploy:acme/api:staging:a1',
+		]);
+	});
+
+	test('проекта инцидентов нет: успешный деплой всё равно — Выкачено, переход, курсор; строка warn одна', async () => {
+		const { w, id, status } = deployWorld([
+			tenantOf({ incidents: { project: 'NOPE', priority: {} } }),
+		]);
+		expect((await w.send(githubRequest('deployment_status', status()))).status).toBe(202);
+		expect(stateOf(w, id)).toBe('eng-on-staging');
+		expect(w.plane.commentsOf(id).map((c) => c.external_id)).toContain(
+			`deployed:${id}:acme/api:staging:a1`,
+		);
+		expect(w.store.deployCursor('acme', 'acme/api', 'staging')?.sha).toBe('a1');
+		expect([w.lines('job.dropped'), w.store.inboxFailedList()]).toEqual([[], []]);
+		// A second deploy: still delivered, and the missing project is not warned about again.
+		w.gh.commit('a2', ['a1'], 'chore');
+		const second = w.gh.deploy('acme/api', 'staging', 'a2', 'success');
+		const next = statusPayload(
+			'success',
+			{ id: second, sha: 'a2', environment: 'staging', created_at: '2026-10-28T10:30:00Z' },
+			{ created_at: '2026-10-28T11:00:00Z' },
+		);
+		await w.send(githubRequest('deployment_status', next));
+		expect(w.store.deployCursor('acme', 'acme/api', 'staging')?.sha).toBe('a2');
+		expect(w.lines('warning').map((l) => l.reason)).toEqual(['incident_project_missing:NOPE']);
+		expect(w.logs.filter((l) => l.level === 'error')).toEqual([]);
+	});
+
+	test('Погас при успешном деплое падает 503 — деплой сделан, задача повторена, Выкачено одно', async () => {
+		const { w, id, status } = deployWorld();
+		let reports = 0;
+		w.runtime().incidents = {
+			report: async () => {
+				reports += 1;
+				if (reports === 1) throw new PlaneApiError(503, 'GET', '/work-items/');
+				return { action: 'noop', workItemId: null };
+			},
+		};
+		expect((await w.send(githubRequest('deployment_status', status()))).status).toBe(202);
+		expect([reports, w.lines('job.retry').length, w.lines('job.dropped').length]).toEqual([
+			2, 1, 0,
+		]);
+		expect(stateOf(w, id)).toBe('eng-on-staging');
+		expect(
+			w.plane.commentsOf(id).filter((c) => c.external_id.startsWith('deployed:')),
+		).toHaveLength(1);
+		expect(w.lines('deployment.success').map((l) => [l.level, l.action])).toEqual([
+			['error', 'error'],
+			[undefined, 'noop'],
+		]);
+		expect(w.store.inboxFailedList()).toEqual([]);
+	});
+
+	test('Погас при успешном деплое — 403: без повтора, деплой сделан, warn один на причину', async () => {
+		const { w, id, status } = deployWorld();
+		w.runtime().incidents = {
+			report: async () => {
+				throw new PlaneApiError(403, 'GET', '/work-items/');
+			},
+		};
+		await w.send(githubRequest('deployment_status', status()));
+		await w.send(githubRequest('deployment_status', status()));
+		expect([stateOf(w, id), w.lines('job.retry').length]).toEqual(['eng-on-staging', 0]);
+		expect(w.lines('warning')).toEqual([
+			{
+				event: 'warning',
+				level: 'warn',
+				tenant: 'acme',
+				reason: 'incident_resolve_failed:github:PlaneApiError: Plane GET /work-items/ → 403',
+				source: 'github',
+				error: 'PlaneApiError: Plane GET /work-items/ → 403',
+			},
+		]);
+	});
+
+	test('провал деплоя: проекта инцидентов нет — задача падает, как раньше (инцидент не потерян молча)', async () => {
+		const w = world({ tenants: [tenantOf({ incidents: { project: 'NOPE', priority: {} } })] });
+		const deploymentId = w.gh.deploy('acme/api', 'staging', 'a1', 'failure');
+		await w.send(
+			githubRequest(
+				'deployment_status',
+				statusPayload(
+					'failure',
+					{ id: deploymentId, sha: 'a1', environment: 'staging' },
+					{ created_at: '2026-10-28T10:00:00Z' },
+				),
+			),
+		);
+		expect(w.store.inboxFailedList().map((job) => job.error)).toEqual([
+			'incident project NOPE not found',
 		]);
 	});
 
