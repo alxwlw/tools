@@ -25,6 +25,7 @@ function event(state: StatusEvent['state'], deployment: Partial<StatusEvent['dep
 		},
 		state,
 		logUrl: 'https://example.com/deploys/501',
+		at: '2026-10-28T11:59:00.000Z',
 	} satisfies StatusEvent;
 }
 

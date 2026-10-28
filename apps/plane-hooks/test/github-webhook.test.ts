@@ -55,7 +55,7 @@ describe('подпись доставки', () => {
 describe('разбор доставки', () => {
 	test('черновой PR открыт — pull_request opened, draft true, appId из заголовка', () => {
 		const d = pullDelivery('opened', { draft: true });
-		expect(parseGitHubDelivery(d.headers, d.raw)).toEqual({
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toEqual({
 			kind: 'pull_request',
 			appId: APP_ID,
 			deliveryId: DELIVERY_ID,
@@ -77,21 +77,26 @@ describe('разбор доставки', () => {
 		});
 	});
 
-	test('appId берётся из заголовка, а не из тела', () => {
+	test('appId — тот, что выбрал маршрутизатор: заголовок target-id здесь не читается', () => {
 		const d = pullDelivery('opened', {}, {}, { 'x-github-hook-installation-target-id': '777' });
-		expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({ appId: 777 });
+		expect(parseGitHubDelivery(d.headers, d.raw, 31)).toMatchObject({ appId: 31 });
+		const ping = pingDelivery();
+		expect(parseGitHubDelivery(ping.headers, ping.raw, 32)).toEqual({ kind: 'ping', appId: 32 });
 	});
 
 	test('ready_for_review и reopened и converted_to_draft', () => {
 		for (const action of ['ready_for_review', 'reopened', 'converted_to_draft'] as const) {
 			const d = pullDelivery(action);
-			expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({ kind: 'pull_request', action });
+			expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({
+				kind: 'pull_request',
+				action,
+			});
 		}
 	});
 
 	test('merged — closed, merged true, mergeSha', () => {
 		const d = pullDelivery('closed', mergedPullBody());
-		const event = parseGitHubDelivery(d.headers, d.raw);
+		const event = parseGitHubDelivery(d.headers, d.raw, APP_ID);
 		expect(event).toMatchObject({
 			kind: 'pull_request',
 			action: 'closed',
@@ -101,37 +106,37 @@ describe('разбор доставки', () => {
 
 	test('закрыт без merge — merged false, mergeSha null, хотя GitHub прислал пробный sha', () => {
 		const d = pullDelivery('closed', { state: 'closed', merged: false });
-		expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({
 			pull: { merged: false, mergeSha: null },
 		});
 	});
 
 	test('тело PR null — пустая строка', () => {
 		const d = pullDelivery('opened', { body: null });
-		expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({ pull: { body: '' } });
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({ pull: { body: '' } });
 	});
 
 	test('edited с изменением заголовка — edited; без изменения заголовка — null', () => {
 		const withTitle = pullDelivery('edited', {}, { changes: { title: { from: 'Old title' } } });
-		expect(parseGitHubDelivery(withTitle.headers, withTitle.raw)).toMatchObject({
+		expect(parseGitHubDelivery(withTitle.headers, withTitle.raw, APP_ID)).toMatchObject({
 			action: 'edited',
 		});
 		const bodyOnly = pullDelivery('edited', {}, { changes: { body: { from: 'old' } } });
-		expect(parseGitHubDelivery(bodyOnly.headers, bodyOnly.raw)).toBeNull();
+		expect(parseGitHubDelivery(bodyOnly.headers, bodyOnly.raw, APP_ID)).toBeNull();
 		const noChanges = pullDelivery('edited');
-		expect(parseGitHubDelivery(noChanges.headers, noChanges.raw)).toBeNull();
+		expect(parseGitHubDelivery(noChanges.headers, noChanges.raw, APP_ID)).toBeNull();
 	});
 
 	test('synchronize, labeled — null', () => {
 		for (const action of ['synchronize', 'labeled']) {
 			const d = pullDelivery(action);
-			expect(parseGitHubDelivery(d.headers, d.raw)).toBeNull();
+			expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toBeNull();
 		}
 	});
 
 	test('deployment_status success — deployment с creator и environment, state success', () => {
 		const d = deploymentStatusDelivery('success');
-		expect(parseGitHubDelivery(d.headers, d.raw)).toEqual({
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toEqual({
 			kind: 'deployment_status',
 			appId: APP_ID,
 			deliveryId: DELIVERY_ID,
@@ -146,12 +151,13 @@ describe('разбор доставки', () => {
 			},
 			state: 'success',
 			logUrl: 'https://example.com/deploys/501',
+			at: '2026-10-20T10:06:00.000Z',
 		});
 	});
 
 	test('deployment_status без log_url — logUrl null; пустое описание остаётся пустым', () => {
 		const d = deploymentStatusDelivery('failure', { description: null }, { log_url: '' });
-		expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({
 			state: 'failure',
 			logUrl: null,
 			deployment: { description: null },
@@ -161,7 +167,7 @@ describe('разбор доставки', () => {
 	test('deployment без creator (null) — creator пустая строка, доставка не отвергается', () => {
 		for (const creator of [null, {}]) {
 			const d = deploymentStatusDelivery('success', { creator });
-			expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({
+			expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({
 				deployment: { creator: '' },
 			});
 		}
@@ -178,7 +184,7 @@ describe('разбор доставки', () => {
 			'pending',
 		]) {
 			const d = deploymentStatusDelivery(state);
-			expect(parseGitHubDelivery(d.headers, d.raw)).toMatchObject({ state });
+			expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({ state });
 		}
 	});
 
@@ -190,73 +196,93 @@ describe('разбор доставки', () => {
 			{ environment: undefined },
 		]) {
 			const d = deploymentStatusDelivery('success', deployment);
-			expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+			expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(BadPayload);
 		}
 	});
 
 	test('repository.full_name не owner/name, installation без id, дробный number — BadPayload', () => {
 		const badRepo = pullDelivery('opened', {}, { repository: { full_name: 'noslash' } });
-		expect(() => parseGitHubDelivery(badRepo.headers, badRepo.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(badRepo.headers, badRepo.raw, APP_ID)).toThrow(BadPayload);
 		const noInstallId = pullDelivery('opened', {}, { installation: {} });
-		expect(() => parseGitHubDelivery(noInstallId.headers, noInstallId.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(noInstallId.headers, noInstallId.raw, APP_ID)).toThrow(
+			BadPayload,
+		);
 		const fractional = pullDelivery('opened', { number: 1.5 });
-		expect(() => parseGitHubDelivery(fractional.headers, fractional.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(fractional.headers, fractional.raw, APP_ID)).toThrow(
+			BadPayload,
+		);
 	});
 
 	test('PR без html_url или head.ref — BadPayload', () => {
 		for (const pull of [{ html_url: undefined }, { head: { ref: '' } }, { base: undefined }]) {
 			const d = pullDelivery('opened', pull);
-			expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+			expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(BadPayload);
 		}
 	});
 
 	test('неизвестное состояние деплоя — null (событие игнорируется, не 400); не строка — BadPayload', () => {
 		const d = deploymentStatusDelivery('exploded');
-		expect(parseGitHubDelivery(d.headers, d.raw)).toBeNull();
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toBeNull();
 		const bad = deploymentStatusDelivery('success', {}, { state: 5 });
-		expect(() => parseGitHubDelivery(bad.headers, bad.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(bad.headers, bad.raw, APP_ID)).toThrow(BadPayload);
 	});
 
 	test('installation — null; ping — ping', () => {
 		const inst = installationDelivery();
-		expect(parseGitHubDelivery(inst.headers, inst.raw)).toBeNull();
+		expect(parseGitHubDelivery(inst.headers, inst.raw, APP_ID)).toBeNull();
 		const ping = pingDelivery();
-		expect(parseGitHubDelivery(ping.headers, ping.raw)).toEqual({ kind: 'ping', appId: APP_ID });
+		expect(parseGitHubDelivery(ping.headers, ping.raw, APP_ID)).toEqual({
+			kind: 'ping',
+			appId: APP_ID,
+		});
 	});
 
 	test('чужое событие — null, даже с битым телом', () => {
 		const d = deliveryOf('star', 'not json');
-		expect(parseGitHubDelivery(d.headers, d.raw)).toBeNull();
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toBeNull();
 	});
 
 	test('битый JSON — BadPayload', () => {
 		const d = deliveryOf('pull_request', '{"action":');
-		expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(BadPayload);
 	});
 
 	test('PR без number — BadPayload', () => {
 		const d = pullDelivery('opened', { number: undefined });
-		expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(BadPayload);
 	});
 
 	test('нет installation, нет repository, нет заголовка доставки — BadPayload', () => {
 		const noInstall = pullDelivery('opened', {}, { installation: undefined });
-		expect(() => parseGitHubDelivery(noInstall.headers, noInstall.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(noInstall.headers, noInstall.raw, APP_ID)).toThrow(BadPayload);
 		const noRepo = pullDelivery('opened', {}, { repository: undefined });
-		expect(() => parseGitHubDelivery(noRepo.headers, noRepo.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(noRepo.headers, noRepo.raw, APP_ID)).toThrow(BadPayload);
 		const noId = pullDelivery('opened', {}, {}, { 'x-github-delivery': null });
-		expect(() => parseGitHubDelivery(noId.headers, noId.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(noId.headers, noId.raw, APP_ID)).toThrow(BadPayload);
 	});
 
-	test('нет или кривой x-github-hook-installation-target-id — BadPayload', () => {
-		for (const value of [null, 'abc', '0', '-1', '1.5', '1e3', '0x10']) {
-			const d = pullDelivery('opened', {}, {}, { 'x-github-hook-installation-target-id': value });
-			expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+	test('deployment_status: at — created_at самого статуса в ISO, не время создания деплоя', () => {
+		const d = deploymentStatusDelivery(
+			'success',
+			{ created_at: '2026-10-20T09:00:00Z' },
+			{ created_at: '2026-10-20T12:06:00+02:00' },
+		);
+		expect(parseGitHubDelivery(d.headers, d.raw, APP_ID)).toMatchObject({
+			at: '2026-10-20T10:06:00.000Z',
+		});
+	});
+
+	test('deployment_status без created_at или с не-временем — BadPayload', () => {
+		for (const created_at of [undefined, '', 'yesterday', 1_791_281_400_000]) {
+			const d = deploymentStatusDelivery('success', {}, { created_at });
+			expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(
+				'deployment_status.created_at',
+			);
 		}
 	});
 
 	test('тело — не объект: BadPayload', () => {
 		const d = deliveryOf('pull_request', '[]');
-		expect(() => parseGitHubDelivery(d.headers, d.raw)).toThrow(BadPayload);
+		expect(() => parseGitHubDelivery(d.headers, d.raw, APP_ID)).toThrow(BadPayload);
 	});
 });

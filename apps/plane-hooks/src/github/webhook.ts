@@ -28,6 +28,8 @@ export type GitHubEvent =
 			deployment: Deployment;
 			state: DeploymentState;
 			logUrl: string | null;
+			/** `deployment_status.created_at` as ISO: when this status was set — the time the deploy took effect. */
+			at: string;
 	  };
 
 const PULL_ACTIONS: readonly string[] = [
@@ -122,14 +124,18 @@ function deploymentOf(repo: string, raw: Record<string, unknown>): Deployment {
 	};
 }
 
-/** null — an event or action plane-hooks ignores (installation, labeled, synchronize, edited without a title change…). Throws BadPayload. */
-export function parseGitHubDelivery(headers: Headers, raw: Uint8Array): GitHubEvent | null {
+/**
+ * null — an event or action plane-hooks ignores (installation, labeled, synchronize, edited without a title change…).
+ * Throws BadPayload. `appId` is the App the router already chose by `x-github-hook-installation-target-id` (and
+ * verified the signature for): the router is the one place that header is parsed.
+ */
+export function parseGitHubDelivery(
+	headers: Headers,
+	raw: Uint8Array,
+	appId: number,
+): GitHubEvent | null {
 	const event = headers.get('x-github-event');
 	if (event !== 'ping' && event !== 'pull_request' && event !== 'deployment_status') return null;
-
-	const appHeader = headers.get('x-github-hook-installation-target-id') ?? '';
-	const appId = /^\d+$/.test(appHeader) ? positiveInt(Number(appHeader)) : null;
-	if (appId === null) throw bad('x-github-hook-installation-target-id is missing or not an id');
 
 	let payload: unknown;
 	try {
@@ -171,6 +177,9 @@ export function parseGitHubDelivery(headers: Headers, raw: Uint8Array): GitHubEv
 	if (typeof state !== 'string') throw bad('deployment_status.state is missing');
 	// A state GitHub adds later is ignored, not a 400: failed deliveries raise health alarms.
 	if (!DEPLOYMENT_STATES.includes(state)) return null;
+	// The deploy path orders deploys by this time and drops an older one as stale: no stand-in for a missing one.
+	const at = Date.parse(optString(status.created_at) ?? '');
+	if (Number.isNaN(at)) throw bad('deployment_status.created_at is missing or not a time');
 	return {
 		kind: 'deployment_status',
 		appId,
@@ -179,5 +188,6 @@ export function parseGitHubDelivery(headers: Headers, raw: Uint8Array): GitHubEv
 		deployment: deploymentOf(repo, record(payload, 'deployment')),
 		state: state as DeploymentState,
 		logUrl: optString(status.log_url),
+		at: new Date(at).toISOString(),
 	};
 }
