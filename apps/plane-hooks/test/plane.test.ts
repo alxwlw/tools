@@ -621,6 +621,26 @@ describe('PlaneClient: проекты, ссылки, правка коммент
 		expect(await failure(client.listStates('p1'))).toBeInstanceOf(Error);
 	});
 
+	test('listStates: sequence строкой или бесконечность — ошибка разбора', async () => {
+		const row = '"id": "s1", "name": "Todo", "group": "unstarted", "default": false';
+		const asString = stub([{ status: 200, raw: `[{${row}, "sequence": "25000"}]` }]);
+		expect(await failure(asString.client.listStates('p1'))).toBeInstanceOf(Error);
+		const infinite = stub([{ status: 200, raw: `[{${row}, "sequence": 1e999}]` }]);
+		expect(await failure(infinite.client.listStates('p1'))).toBeInstanceOf(Error);
+	});
+
+	test('listComments: external_source не строка — null', async () => {
+		const { client } = stub([
+			{
+				status: 200,
+				body: [
+					{ id: 'c1', external_id: 'x', external_source: 5, created_at: '2026-10-06T10:00:00Z' },
+				],
+			},
+		]);
+		expect((await client.listComments('p1', 'w1'))[0]?.external_source).toBeNull();
+	});
+
 	const link = { url: 'https://github.com/acme/api/pull/12', title: 'GitHub: acme/api#12' };
 	const linksPath = `${ROOT}/projects/p1/work-items/w1/links/`;
 
