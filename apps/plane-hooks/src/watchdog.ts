@@ -1,7 +1,7 @@
 // Adapted from apps/plane-miro/src/watchdog.ts: silence per input, Plane access and GitHub App health.
 import { PlaneAuthError } from '@alxwlw/plane-app';
 
-import { INPUT_NAMES } from './config.ts';
+import { SILENCE_INPUTS } from './config.ts';
 import type { Log } from './log.ts';
 import { PlaneApiError } from './plane.ts';
 import type { Runtimes, TenantRuntime } from './runtime.ts';
@@ -120,9 +120,13 @@ function checkSilence(
 	tenant: string,
 	runtime: TenantRuntime,
 ): void {
-	for (const input of INPUT_NAMES) {
+	for (const input of SILENCE_INPUTS) {
 		const hours = runtime.tenant.silenceHours[input];
-		if (hours === undefined || runtime.tenant.inputs[input] === null) continue;
+		const off =
+			input === 'github'
+				? runtime.tenant.github.length === 0
+				: runtime.tenant.inputs[input] === null;
+		if (hours === undefined || off) continue;
 		const key = `${tenant}:${input}`;
 		const quiet = deps.now - Math.max(runtime.lastDelivery.get(input) ?? 0, deps.startedAt);
 		if (quiet > hours * HOUR_MS) {

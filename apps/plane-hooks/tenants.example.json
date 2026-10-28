@@ -29,7 +29,7 @@
 					{ "name": "api", "repo": "acme/api", "branch": "main", "environment": "production" }
 				]
 			},
-			"silenceHours": { "vercel": 72 }
+			"silenceHours": { "vercel": 72, "github": 24 }
 		}
 	]
 }

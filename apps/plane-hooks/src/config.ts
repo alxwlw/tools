@@ -48,7 +48,8 @@ export type Tenant = {
 	delivery: DeliveryConfig | null;
 	dokploy: readonly DokployAppRule[];
 	inputs: Readonly<Record<InputName, string | null>>;
-	silenceHours: Readonly<Partial<Record<InputName, number>>>;
+	/** Per watched input — the tenant inputs and `github` (any App of the tenant) — the longest silence allowed. */
+	silenceHours: Readonly<Partial<Record<SilenceInput, number>>>;
 };
 export type ServiceConfig = {
 	port: number;
@@ -59,6 +60,9 @@ export type ServiceConfig = {
 
 /** The per-tenant inputs, in the order the startup line lists them. */
 export const INPUT_NAMES: readonly InputName[] = ['grafana', 'vercel', 'dokploy'];
+/** What `silenceHours` may watch: the tenant inputs and the deliveries of the tenant's GitHub Apps. */
+export type SilenceInput = InputName | 'github';
+export const SILENCE_INPUTS: readonly SilenceInput[] = [...INPUT_NAMES, 'github'];
 const NAME_RE = /^[a-z][a-z0-9]{0,15}$/;
 const NAME_HINT = 'a-z then up to 15 of a-z0-9';
 const ENV_SEGMENT = /^[A-Za-z][A-Za-z0-9]{0,15}$/;
@@ -300,12 +304,12 @@ function parseServiceTenant(
 		}
 	}
 
-	const silenceHours: Partial<Record<InputName, number>> = {};
+	const silenceHours: Partial<Record<SilenceInput, number>> = {};
 	if (raw.silenceHours !== undefined) {
 		const silence = obj(raw.silenceHours, `${at}.silenceHours`);
 		if (silence) {
-			unknownKeys(silence, INPUT_NAMES, `${at}.silenceHours`);
-			for (const input of INPUT_NAMES) {
+			unknownKeys(silence, SILENCE_INPUTS, `${at}.silenceHours`);
+			for (const input of SILENCE_INPUTS) {
 				const hours = silence[input];
 				if (hours === undefined) continue;
 				if (typeof hours !== 'number' || !Number.isInteger(hours) || hours < 1 || hours > 720)

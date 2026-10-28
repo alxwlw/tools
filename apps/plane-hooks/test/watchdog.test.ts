@@ -222,6 +222,27 @@ describe('сторож: тишина входов', () => {
 		expect(w.logs.map((l) => l.event)).toEqual(['input.silent', 'input.alive', 'input.silent']);
 	});
 
+	test('GitHub: вебхук App молчит дольше silenceHours.github — input.silent с input github; доставка — alive', async () => {
+		const w = setup([tenantOf({ silenceHours: { github: 24 } })]);
+		const runtime = w.runtimes.tenants.get('acme');
+		const lines = (event: string) => w.logs.filter((l) => l.event === event);
+		await w.check(START + 24 * HOUR);
+		expect(lines('input.silent')).toEqual([]);
+		await w.check(START + 25 * HOUR);
+		expect(lines('input.silent')).toEqual([
+			{ event: 'input.silent', level: 'error', tenant: 'acme', input: 'github', hours: 25 },
+		]);
+		runtime?.lastDelivery.set('github', START + 26 * HOUR);
+		await w.check(START + 27 * HOUR);
+		expect(lines('input.alive')).toEqual([
+			{ event: 'input.alive', tenant: 'acme', input: 'github' },
+		]);
+		// A tenant without Apps has no GitHub input to watch.
+		const none = setup([tenantOf({ github: [], silenceHours: { github: 1 } })]);
+		await none.check(START + 1000 * HOUR);
+		expect(none.logs).toEqual([]);
+	});
+
 	test('отсчёт — от старта, если доставка была раньше старта', async () => {
 		const w = setup([tenantOf({ github: [] })]);
 		w.runtimes.tenants.get('acme')?.lastDelivery.set('vercel', START - 100 * HOUR);

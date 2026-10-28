@@ -225,10 +225,20 @@ describe('loadServiceConfig', () => {
 
 	test('silenceHours — только известные входы, 1..720', () => {
 		const text = message((file) => {
-			file.tenants[0].silenceHours = { vercel: 0, github: 5 };
+			file.tenants[0].silenceHours = { vercel: 0, deploy: 5, github: 0 };
 		});
 		expect(text).toContain('tenants[0].silenceHours.vercel');
-		expect(text).toContain('tenants[0].silenceHours.github is not a known key');
+		expect(text).toContain('tenants[0].silenceHours.deploy is not a known key');
+		expect(text).toContain('tenants[0].silenceHours.github must be an integer 1..720');
+	});
+
+	test('silenceHours.github — вход доставок GitHub App, грузится', () => {
+		const config = loadServiceConfig(ENV, () => {
+			const file = JSON.parse(EXAMPLE);
+			file.tenants[0].silenceHours = { github: 24 };
+			return JSON.stringify(file);
+		});
+		expect(config.tenants[0]?.silenceHours).toEqual({ github: 24 });
 	});
 
 	const shapeCases: Array<[string, (file: Json) => void, string]> = [

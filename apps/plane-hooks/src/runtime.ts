@@ -1,6 +1,6 @@
 import { botTokenAuth, type Fetch } from '@alxwlw/plane-app';
 
-import type { GitHubAppConfig, InputName, ServiceConfig, Tenant } from './config.ts';
+import type { GitHubAppConfig, ServiceConfig, SilenceInput, Tenant } from './config.ts';
 import type { DeployDeps } from './delivery/deploy.ts';
 import { createGitHubApp, type GitHubApp } from './github/app.ts';
 import type { GitHubApi } from './github/client.ts';
@@ -42,7 +42,7 @@ export type TenantRuntime = {
 	 */
 	sync: Omit<DeployDeps, 'contains'>;
 	/** Last accepted delivery per input, for the watchdog. */
-	lastDelivery: Map<InputName | 'github', number>;
+	lastDelivery: Map<SilenceInput, number>;
 	/**
 	 * Saves the delivery in the inbox, then queues it; false — a GitHub delivery id already done or pending.
 	 * The job ends in `inboxDone`, or in `inboxFailed` once the queue drops it.

@@ -48,7 +48,7 @@ export function tenantOf(overrides: Partial<Tenant> = {}): Tenant {
 			vercel: 'vercel-secret',
 			dokploy: 'dokploy-secret',
 		},
-		silenceHours: { vercel: 72 },
+		silenceHours: { vercel: 72, github: 24 },
 		...overrides,
 	};
 }

@@ -151,7 +151,7 @@ message at startup.
 					{ "name": "api", "repo": "acme/api", "branch": "main", "environment": "production" }
 				]
 			},
-			"silenceHours": { "vercel": 72 }
+			"silenceHours": { "vercel": 72, "github": 24 }
 		}
 	]
 }
@@ -184,7 +184,9 @@ message at startup.
 
 - **`dokploy.apps`** — the Dokploy application name (`applicationName` of the notification), the repository,
   the branch Dokploy builds and the environment name of the GitHub Deployment.
-- **`silenceHours`** — per input (`grafana`, `vercel`, `dokploy`), how long it may stay silent (1..720 h).
+- **`silenceHours`** — per input (`grafana`, `vercel`, `dokploy`, and `github` for the deliveries of all the
+  tenant's Apps), how long it may stay silent (1..720 h). `github` catches an App webhook switched off in GitHub,
+  which neither fails a delivery nor breaks `GET /app`.
 
 ## Environment
 
