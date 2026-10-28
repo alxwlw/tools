@@ -67,6 +67,9 @@ describe('страница установки', () => {
 	test('имя App из владельца: acme-corp → plane-hooks-acmecorp, 1password → g1password', async () => {
 		expect((await page('acme-corp', 'org')).html).toContain('plane-hooks-acmecorp');
 		expect((await page('1password', 'org')).html).toContain('plane-hooks-g1password');
+		const long = await page('a'.repeat(20), 'org');
+		expect(long.html).toContain(`plane-hooks-${'a'.repeat(16)}`);
+		expect(long.html).not.toContain(`plane-hooks-${'a'.repeat(17)}`);
 	});
 
 	test('владелец с символами вне логина GitHub не попадает в адрес как есть', async () => {
@@ -133,7 +136,7 @@ describe('callback', () => {
 	};
 
 	function harness(reply: Response | Error) {
-		const calls: { url: string; method: string | undefined }[] = [];
+		const calls: { url: string; method: string | undefined; accept: string | undefined }[] = [];
 		const logs: unknown[] = [];
 		return {
 			calls,
@@ -142,7 +145,11 @@ describe('callback', () => {
 				tenants: [tenant],
 				nowSeconds: NOW,
 				fetch: async (url: string, init: RequestInit) => {
-					calls.push({ url, method: init.method });
+					calls.push({
+						url,
+						method: init.method,
+						accept: (init.headers as Record<string, string>).Accept,
+					});
 					if (reply instanceof Error) throw reply;
 					return reply;
 				},
@@ -189,6 +196,8 @@ describe('callback', () => {
 			new Error('network down'),
 			new Response('not json', { status: 201 }),
 			Response.json({ id: 1 }, { status: 201 }),
+			Response.json([], { status: 201 }),
+			Response.json(null, { status: 201 }),
 			...[
 				{ id: 0 },
 				{ id: 1.5 },
@@ -214,7 +223,11 @@ describe('callback', () => {
 		const h = harness(Response.json(conversion, { status: 201 }));
 		const res = await githubCallback(callbackUrl('abc123', state), h.deps);
 		expect(h.calls).toEqual([
-			{ url: 'https://api.github.com/app-manifests/abc123/conversions', method: 'POST' },
+			{
+				url: 'https://api.github.com/app-manifests/abc123/conversions',
+				method: 'POST',
+				accept: 'application/vnd.github+json',
+			},
 		]);
 		expect(res.status).toBe(200);
 		expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
