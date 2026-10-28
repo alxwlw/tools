@@ -2,7 +2,8 @@
 /**
  * Contract probe for the Plane API calls plane-hooks relies on.
  *
- * Creates two throwaway work items (one of them archived and unarchived on the
+ * Authenticates as the "plane-hooks" Plane App bot (client_credentials token of a workspace
+ * installation), the way the service does. Creates two throwaway work items (one of them archived and unarchived on the
  * way) and one label in PLANE_HOOKS_PROJECT_ID, one throwaway release in the
  * workspace, exercises every call, prints «вызов — ожидание — факт» and deletes
  * what it created. Three sections — work items, archive, releases — run
@@ -13,7 +14,10 @@
  * It needs a real API token, so the owner runs it.
  */
 
+import { botTokenAuth } from '@alxwlw/plane-app';
+
 import type { ReleaseDraft } from '../src/deploy-note.ts';
+import { PLANE_HOOKS_SCOPES } from '../src/plane.ts';
 import { changelogHtml } from '../src/release.ts';
 
 // A module, so top-level await type-checks.
@@ -37,7 +41,9 @@ const REQUIRED = [
 	'PLANE_HOOKS_PLANE_URL',
 	'PLANE_HOOKS_WORKSPACE',
 	'PLANE_HOOKS_PROJECT_ID',
-	'PLANE_HOOKS_PLANE_API_KEY',
+	'PLANE_HOOKS_PROBE_CLIENT_ID',
+	'PLANE_HOOKS_PROBE_CLIENT_SECRET',
+	'PLANE_HOOKS_PROBE_INSTALLATION_ID',
 ] as const;
 
 const missing = REQUIRED.filter((name) => !process.env[name]);
@@ -54,12 +60,20 @@ const project = `${base}/projects/${env.PLANE_HOOKS_PROJECT_ID}`;
 const SOURCE = 'plane-hooks-probe';
 const tag = `probe-${crypto.randomUUID()}`;
 
+const auth = botTokenAuth({
+	planeUrl: env.PLANE_HOOKS_PLANE_URL,
+	clientId: env.PLANE_HOOKS_PROBE_CLIENT_ID,
+	clientSecret: env.PLANE_HOOKS_PROBE_CLIENT_SECRET,
+	appInstallationId: env.PLANE_HOOKS_PROBE_INSTALLATION_ID,
+	scopes: PLANE_HOOKS_SCOPES,
+});
+
 type Reply = { status: number; body: any };
 
 async function call(method: string, url: string, body?: unknown): Promise<Reply> {
 	const res = await fetch(url, {
 		method,
-		headers: { 'X-API-Key': env.PLANE_HOOKS_PLANE_API_KEY, 'Content-Type': 'application/json' },
+		headers: { ...(await auth.headers()), 'Content-Type': 'application/json' },
 		body: body === undefined ? undefined : JSON.stringify(body),
 		signal: AbortSignal.timeout(10_000),
 	});
@@ -304,6 +318,75 @@ async function archiveSection(doneId: string | undefined): Promise<void> {
 	);
 }
 
+let linkItemId: string | null = null;
+
+/** Calls added for the delivery core: state order, links (twice), comment edit. */
+async function planeAppSection(): Promise<void> {
+	const states = await call('GET', `${project}/states/`);
+	const stateRows = rowsOf(states.body);
+	const ordered = stateRows.every(
+		(s) => typeof s?.sequence === 'number' && typeof s?.name === 'string',
+	);
+	row(
+		'15',
+		'GET /states/: name и sequence',
+		'200, у каждого состояния name и числовой sequence',
+		`${states.status}, ${stateRows.map((s) => `${s?.name}:${s?.sequence}`).join(', ')}`,
+		states.status === 200 && stateRows.length > 0 && ordered,
+	);
+
+	const linkTag = `${tag}-links`;
+	const create = await call('POST', `${project}/work-items/`, {
+		name: `plane-hooks probe ${linkTag}`,
+		priority: 'none',
+		external_id: linkTag,
+		external_source: SOURCE,
+	});
+	linkItemId = typeof create.body?.id === 'string' ? create.body.id : null;
+	row('15', 'POST /work-items/ (для ссылок)', '201 {id}', `${create.status}`, linkItemId !== null);
+	if (linkItemId === null) return;
+	const itemUrl = `${project}/work-items/${linkItemId}`;
+
+	const link = {
+		url: `https://github.com/example-org/app/pull/${Date.now()}`,
+		title: 'GitHub: example-org/app#1',
+	};
+	const first = await call('POST', `${itemUrl}/links/`, link);
+	row('15', 'POST /links/', '201', `${first.status}`, first.status === 201);
+	const second = await call('POST', `${itemUrl}/links/`, link);
+	const listed = rowsOf((await call('GET', `${itemUrl}/links/?per_page=100`)).body);
+	row(
+		'15',
+		'POST /links/ повтор того же URL',
+		'400, URL есть в GET /links/',
+		`${second.status}, в списке: ${listed.some((l) => l?.url === link.url) ? 'есть' : 'нет'}`,
+		second.status === 400 && listed.some((l) => l?.url === link.url),
+	);
+
+	const comment = await call('POST', `${itemUrl}/comments/`, {
+		comment_html: '<p>до</p>',
+		external_id: `${linkTag}:c`,
+		external_source: SOURCE,
+	});
+	const commentId = typeof comment.body?.id === 'string' ? comment.body.id : null;
+	row('15', 'POST /comments/', '201 {id}', `${comment.status}`, commentId !== null);
+	if (commentId === null) return;
+	const patched = await call('PATCH', `${itemUrl}/comments/${commentId}/`, {
+		comment_html: '<p>после</p>',
+	});
+	const listedComments = rowsOf((await call('GET', `${itemUrl}/comments/?per_page=100`)).body);
+	const mine = listedComments.find((c) => c?.id === commentId);
+	row(
+		'15',
+		'PATCH /comments/{id}/ comment_html',
+		'200, список отдаёт новый текст и external_source',
+		`${patched.status}, external_source: ${mine?.external_source ?? '—'}, html: ${mine?.comment_html ?? '—'}`,
+		patched.status === 200 &&
+			mine?.comment_html === '<p>после</p>' &&
+			mine?.external_source === SOURCE,
+	);
+}
+
 try {
 	await section('задачи', async () => {
 		const projects = await call('GET', `${base}/projects/`);
@@ -469,6 +552,7 @@ try {
 	});
 
 	await section('архив', () => archiveSection(doneStateId));
+	await section('Plane App', () => planeAppSection());
 
 	await section('релизы', async () => {
 		const releaseTag = `${tag}-release`;
@@ -570,6 +654,19 @@ try {
 			body: null,
 		}));
 		row('—', 'DELETE /releases/{id}/ (уборка)', '204', `${del.status}`, del.status === 204);
+	}
+	if (linkItemId) {
+		const del = await call('DELETE', `${project}/work-items/${linkItemId}/`).catch(() => ({
+			status: 0,
+			body: null,
+		}));
+		row(
+			'—',
+			'DELETE /work-items/{id}/ (уборка, ссылки)',
+			'204',
+			`${del.status}`,
+			del.status === 204,
+		);
 	}
 	if (itemId) {
 		const del = await call('DELETE', `${project}/work-items/${itemId}/`).catch(() => ({

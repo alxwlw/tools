@@ -1,7 +1,7 @@
 import { enabledInputs, loadConfig } from './config.ts';
 import { postDeployNotes } from './deploy-note.ts';
 import { createIncidentReporter } from './incident.ts';
-import { PlaneClient } from './plane.ts';
+import { apiKeyAuth, PlaneClient } from './plane.ts';
 import { publishRelease } from './release.ts';
 import { createHandler, describeError, MAX_BODY_BYTES, text } from './server.ts';
 import { ttl } from './ttl.ts';
@@ -12,7 +12,7 @@ const config = loadConfig(process.env);
 const plane = new PlaneClient({
 	baseUrl: config.planeUrl,
 	workspace: config.workspace,
-	apiKey: config.planeApiKey,
+	auth: apiKeyAuth(config.planeApiKey),
 });
 const projectIdentifiers = ttl(
 	async (): Promise<ReadonlySet<string>> => new Set(await plane.listProjectIdentifiers()),

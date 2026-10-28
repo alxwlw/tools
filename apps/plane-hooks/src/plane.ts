@@ -1,3 +1,5 @@
+import type { PlaneAuth } from '@alxwlw/plane-app';
+
 import { isRecord } from './payload.ts';
 import { SlidingWindow } from './rate.ts';
 
@@ -30,9 +32,45 @@ export type NewRelease = {
 /** `created: false` — Plane answered 409: an object with this external_id already exists, and `id` is that object. */
 export type Upsert = { id: string; created: boolean };
 
-export type WorkItemRef = { id: string; project: string; state: string };
-export type CommentSummary = { id: string; external_id: string | null; created_at: string };
-export type StateSummary = { id: string; group: string; default: boolean };
+/** `sequenceId` is the number in the key (`ENG-12` → 12). */
+export type WorkItemRef = { id: string; project: string; state: string; sequenceId: number };
+export type CommentSummary = {
+	id: string;
+	external_id: string | null;
+	external_source: string | null;
+	created_at: string;
+};
+export type StateSummary = {
+	id: string;
+	name: string;
+	group: string;
+	sequence: number;
+	default: boolean;
+};
+export type ProjectSummary = { id: string; identifier: string };
+export type LinkSummary = { id: string; url: string };
+
+/** Scopes of the "plane-hooks" Plane App registration; the release scope is appended once the probe names it. */
+export const PLANE_HOOKS_SCOPES: readonly string[] = [
+	'projects:read',
+	'projects.work_items:read',
+	'projects.work_items:write',
+	'projects.work_items.comments:read',
+	'projects.work_items.comments:write',
+	'projects.work_items.links:read',
+	'projects.work_items.links:write',
+	'projects.states:read',
+	'projects.labels:read',
+	'projects.labels:write',
+];
+
+/** Static API-key auth for the old single-tenant service; removed with it. */
+export function apiKeyAuth(key: string): PlaneAuth {
+	return {
+		headers: () => Promise.resolve({ 'X-API-Key': key }),
+		invalidate() {},
+	};
+}
 export type LabelSummary = { id: string; name: string };
 
 /**
@@ -58,6 +96,20 @@ export interface PlaneApi {
 	setWorkItemState(projectId: string, workItemId: string, stateId: string): Promise<void>;
 	createComment(projectId: string, workItemId: string, comment: NewComment): Promise<Upsert>;
 	listComments(projectId: string, workItemId: string): Promise<CommentSummary[]>;
+	updateComment(
+		projectId: string,
+		workItemId: string,
+		commentId: string,
+		html: string,
+	): Promise<void>;
+	listLinks(projectId: string, workItemId: string): Promise<LinkSummary[]>;
+	/** A duplicate URL (Plane answers 400 and the URL is already listed) is 'exists'; any other 400 throws. */
+	createLink(
+		projectId: string,
+		workItemId: string,
+		link: { url: string; title: string },
+	): Promise<'created' | 'exists'>;
+	listProjects(): Promise<ProjectSummary[]>;
 	/** `key` is `OPS-12`; null when Plane answers 404. */
 	getWorkItemByKey(key: string): Promise<WorkItemRef | null>;
 	listProjectIdentifiers(): Promise<string[]>;
@@ -90,7 +142,7 @@ type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 export type PlaneClientOptions = {
 	baseUrl: string;
 	workspace: string;
-	apiKey: string;
+	auth: PlaneAuth;
 	timeoutMs?: number;
 	fetch?: Fetch;
 	/** Every request waits here first; default — one SlidingWindow of PLANE_RATE_MAX per PLANE_RATE_WINDOW_MS. */
@@ -108,14 +160,14 @@ export const RELEASE_ITEMS_MAX = 100;
 
 export class PlaneClient implements PlaneApi {
 	readonly #root: string;
-	readonly #apiKey: string;
+	readonly #auth: PlaneAuth;
 	readonly #timeoutMs: number;
 	readonly #fetch: Fetch;
 	readonly #limiter: { acquire(): Promise<void> };
 
 	constructor(options: PlaneClientOptions) {
 		this.#root = `${options.baseUrl.replace(/\/+$/, '')}/api/v1/workspaces/${encodeURIComponent(options.workspace)}`;
-		this.#apiKey = options.apiKey;
+		this.#auth = options.auth;
 		this.#timeoutMs = options.timeoutMs ?? 10_000;
 		this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
 		this.#limiter =
@@ -187,7 +239,47 @@ export class PlaneClient implements PlaneApi {
 			id: field(row, 'id'),
 			external_id:
 				typeof row.external_id === 'string' && row.external_id !== '' ? row.external_id : null,
+			external_source: optionalString(row.external_source),
 			created_at: field(row, 'created_at'),
+		}));
+	}
+
+	async updateComment(
+		projectId: string,
+		workItemId: string,
+		commentId: string,
+		html: string,
+	): Promise<void> {
+		await this.#request(
+			'PATCH',
+			`/projects/${projectId}/work-items/${workItemId}/comments/${commentId}/`,
+			{ comment_html: html },
+		);
+	}
+
+	async listLinks(projectId: string, workItemId: string): Promise<LinkSummary[]> {
+		const rows = await this.#listAll(`/projects/${projectId}/work-items/${workItemId}/links/`);
+		return rows.map((row) => ({ id: field(row, 'id'), url: field(row, 'url') }));
+	}
+
+	async createLink(
+		projectId: string,
+		workItemId: string,
+		link: { url: string; title: string },
+	): Promise<'created' | 'exists'> {
+		const path = `/projects/${projectId}/work-items/${workItemId}/links/`;
+		const res = await this.#request('POST', path, link, [400]);
+		if (res.status !== 400) return 'created';
+		// Plane answers 400 for a URL the work item already has, and for anything else it dislikes.
+		const rows = await this.#listAll(path);
+		if (rows.some((row) => row.url === link.url)) return 'exists';
+		throw new PlaneApiError(400, 'POST', path);
+	}
+
+	async listProjects(): Promise<ProjectSummary[]> {
+		return (await this.#listAll('/projects/')).map((row) => ({
+			id: field(row, 'id'),
+			identifier: field(row, 'identifier'),
 		}));
 	}
 
@@ -208,7 +300,9 @@ export class PlaneClient implements PlaneApi {
 	async listStates(projectId: string): Promise<StateSummary[]> {
 		return (await this.#listAll(`/projects/${projectId}/states/`)).map((row) => ({
 			id: field(row, 'id'),
+			name: field(row, 'name'),
 			group: field(row, 'group'),
+			sequence: numberField(row, 'sequence'),
 			default: row.default === true,
 		}));
 	}
@@ -289,18 +383,25 @@ export class PlaneClient implements PlaneApi {
 		body?: unknown,
 		allowed: readonly number[] = [],
 	): Promise<{ status: number; body: unknown }> {
-		// Waiting for a slot happens before the per-call timeout starts: a queued request never times out unsent.
-		await this.#limiter.acquire();
-		const res = await this.#fetch(`${this.#root}${path}`, {
-			method,
-			headers: {
-				'X-API-Key': this.#apiKey,
-				'Content-Type': 'application/json',
-				Accept: 'application/json',
-			},
-			body: body === undefined ? undefined : JSON.stringify(body),
-			signal: AbortSignal.timeout(this.#timeoutMs),
-		});
+		const url = `${this.#root}${path}`;
+		let res: Response;
+		// A 401 means the bot token was revoked or expired early: drop it and repeat the request once.
+		for (let attempt = 0; ; attempt++) {
+			// Waiting for a slot happens before the per-call timeout starts: a queued request never times out unsent.
+			await this.#limiter.acquire();
+			res = await this.#fetch(url, {
+				method,
+				headers: {
+					...(await this.#auth.headers()),
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+				},
+				body: body === undefined ? undefined : JSON.stringify(body),
+				signal: AbortSignal.timeout(this.#timeoutMs),
+			});
+			if (res.status !== 401 || attempt > 0) break;
+			this.#auth.invalidate();
+		}
 		const text = await res.text();
 		const cleanPath = path.split('?')[0] as string;
 		if (!res.ok && !allowed.includes(res.status))
@@ -325,6 +426,22 @@ function field(value: unknown, key: string): string {
 	return found;
 }
 
+function numberField(value: unknown, key: string): number {
+	const found = isRecord(value) ? value[key] : undefined;
+	if (typeof found !== 'number' || !Number.isFinite(found))
+		throw new Error(`Plane response: no number field "${key}"`);
+	return found;
+}
+
+function optionalString(value: unknown): string | null {
+	return typeof value === 'string' && value !== '' ? value : null;
+}
+
 function workItemRef(value: unknown): WorkItemRef {
-	return { id: field(value, 'id'), project: field(value, 'project'), state: field(value, 'state') };
+	return {
+		id: field(value, 'id'),
+		project: field(value, 'project'),
+		state: field(value, 'state'),
+		sequenceId: numberField(value, 'sequence_id'),
+	};
 }

@@ -1,7 +1,11 @@
+import type { PlaneAuth } from '@alxwlw/plane-app';
 import { describe, expect, test } from 'bun:test';
+
 import {
+	apiKeyAuth,
 	type NewRelease,
 	type NewWorkItem,
+	PLANE_HOOKS_SCOPES,
 	PlaneApiError,
 	PlaneClient,
 	RELEASE_ITEMS_MAX,
@@ -29,7 +33,7 @@ function stub(replies: Reply[]) {
 	const client = new PlaneClient({
 		baseUrl: 'https://plane.test/',
 		workspace: 'example-ws',
-		apiKey: 'key-1',
+		auth: apiKeyAuth('key-1'),
 		fetch,
 	});
 	return { calls, client };
@@ -105,26 +109,31 @@ describe('PlaneClient: поиск', () => {
 	test('по ключу: 404 → null, 200 → ref', async () => {
 		const { calls, client } = stub([
 			{ status: 404, raw: '<html>not found</html>' },
-			{ status: 200, body: { id: 'w12', project: 'p-ops', state: 's1', name: 'x' } },
+			{
+				status: 200,
+				body: { id: 'w12', project: 'p-ops', state: 's1', sequence_id: 12, name: 'x' },
+			},
 		]);
 		expect(await client.getWorkItemByKey('OPS-99')).toBeNull();
 		expect(await client.getWorkItemByKey('OPS-12')).toEqual({
 			id: 'w12',
 			project: 'p-ops',
 			state: 's1',
+			sequenceId: 12,
 		});
 		expect(calls[1]?.url).toBe(`${ROOT}/work-items/OPS-12/`);
 	});
 
 	test('getWorkItem и смена состояния', async () => {
 		const { calls, client } = stub([
-			{ status: 200, body: { id: 'w1', project: 'p1', state: 's-done' } },
+			{ status: 200, body: { id: 'w1', project: 'p1', state: 's-done', sequence_id: 7 } },
 			{ status: 200, body: { id: 'w1', project: 'p1', state: 's-backlog' } },
 		]);
 		expect(await client.getWorkItem('p1', 'w1')).toEqual({
 			id: 'w1',
 			project: 'p1',
 			state: 's-done',
+			sequenceId: 7,
 		});
 		await client.setWorkItemState('p1', 'w1', 's-backlog');
 		expect(calls[1]?.method).toBe('PATCH');
@@ -168,7 +177,10 @@ describe('PlaneClient: архив', () => {
 
 	test('isWorkItemArchived: деталь 200 → false, архивный список не читается', async () => {
 		const { calls, client } = stub([
-			{ status: 200, body: { id: 'w1', project: 'p1', state: 's1', archived_at: null } },
+			{
+				status: 200,
+				body: { id: 'w1', project: 'p1', state: 's1', sequence_id: 1, archived_at: null },
+			},
 		]);
 		expect(await client.isWorkItemArchived('p1', 'w1')).toBe(false);
 		expect(calls.map((c) => [c.method, c.url])).toEqual([
@@ -214,7 +226,14 @@ describe('PlaneClient: списки', () => {
 			{
 				status: 200,
 				body: {
-					results: [{ id: 'c1', external_id: 'k:a:firing', created_at: '2026-10-06T10:00:00Z' }],
+					results: [
+						{
+							id: 'c1',
+							external_id: 'k:a:firing',
+							external_source: 'plane-hooks',
+							created_at: '2026-10-06T10:00:00Z',
+						},
+					],
 					next_page_results: true,
 					next_cursor: '100:1:0',
 				},
@@ -222,15 +241,27 @@ describe('PlaneClient: списки', () => {
 			{
 				status: 200,
 				body: {
-					results: [{ id: 'c2', external_id: null, created_at: '2026-10-06T10:05:00Z' }],
+					results: [
+						{
+							id: 'c2',
+							external_id: null,
+							external_source: '',
+							created_at: '2026-10-06T10:05:00Z',
+						},
+					],
 					next_page_results: false,
 					next_cursor: '100:2:0',
 				},
 			},
 		]);
 		expect(await client.listComments('p1', 'w1')).toEqual([
-			{ id: 'c1', external_id: 'k:a:firing', created_at: '2026-10-06T10:00:00Z' },
-			{ id: 'c2', external_id: null, created_at: '2026-10-06T10:05:00Z' },
+			{
+				id: 'c1',
+				external_id: 'k:a:firing',
+				external_source: 'plane-hooks',
+				created_at: '2026-10-06T10:00:00Z',
+			},
+			{ id: 'c2', external_id: null, external_source: null, created_at: '2026-10-06T10:05:00Z' },
 		]);
 		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/?per_page=100`);
 		expect(calls[1]?.url).toBe(
@@ -243,14 +274,14 @@ describe('PlaneClient: списки', () => {
 			{
 				status: 200,
 				body: [
-					{ id: 's1', group: 'backlog', default: true, name: 'Backlog' },
-					{ id: 's2', group: 'completed', default: false, name: 'Done' },
+					{ id: 's1', group: 'backlog', default: true, name: 'Backlog', sequence: 15000 },
+					{ id: 's2', group: 'completed', default: false, name: 'Done', sequence: 45000 },
 				],
 			},
 		]);
 		expect(await client.listStates('p1')).toEqual([
-			{ id: 's1', group: 'backlog', default: true },
-			{ id: 's2', group: 'completed', default: false },
+			{ id: 's1', name: 'Backlog', group: 'backlog', sequence: 15000, default: true },
+			{ id: 's2', name: 'Done', group: 'completed', sequence: 45000, default: false },
 		]);
 	});
 
@@ -326,7 +357,7 @@ describe('PlaneClient: ошибки', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			apiKey: 'k',
+			auth: apiKeyAuth('k'),
 			timeoutMs: 20,
 			fetch: hang,
 		});
@@ -344,7 +375,7 @@ describe('ограничитель темпа', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			apiKey: 'key-1',
+			auth: apiKeyAuth('key-1'),
 			limiter: {
 				acquire: async () => {
 					events.push('acquire');
@@ -371,7 +402,7 @@ describe('ограничитель темпа', () => {
 		const client = new PlaneClient({
 			baseUrl: 'https://plane.test',
 			workspace: 'example-ws',
-			apiKey: 'key-1',
+			auth: apiKeyAuth('key-1'),
 			timeoutMs: 20,
 			limiter: { acquire: () => Bun.sleep(60) },
 			fetch: async (_url, init) => {
@@ -477,5 +508,172 @@ describe('PlaneClient: релизы', () => {
 		const err = await failure(client.createRelease(release));
 		expect(err).toBeInstanceOf(PlaneApiError);
 		expect((err as PlaneApiError).status).toBe(403);
+	});
+});
+
+describe('PlaneClient: бот-токен Plane App', () => {
+	function authStub(replies: Reply[]) {
+		let issued = 0;
+		let invalidated = 0;
+		const auth: PlaneAuth = {
+			headers: async () => ({ Authorization: `Bearer tok-${++issued}` }),
+			invalidate: () => {
+				invalidated++;
+			},
+		};
+		const calls: Call[] = [];
+		const client = new PlaneClient({
+			baseUrl: 'https://plane.test',
+			workspace: 'example-ws',
+			auth,
+			fetch: async (url, init) => {
+				calls.push({
+					url,
+					method: init.method ?? 'GET',
+					headers: init.headers as Record<string, string>,
+					body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
+				});
+				const reply = replies.shift();
+				if (!reply) throw new Error('unexpected request');
+				return new Response(reply.body === undefined ? '' : JSON.stringify(reply.body), {
+					status: reply.status,
+				});
+			},
+		});
+		return { calls, client, invalidated: () => invalidated };
+	}
+
+	test('заголовки авторизации берутся у PlaneAuth на каждый запрос', async () => {
+		const { calls, client } = authStub([
+			{ status: 200, body: [] },
+			{ status: 200, body: [] },
+		]);
+		await client.listLabels('p1');
+		await client.listLabels('p1');
+		expect(calls.map((c) => c.headers.Authorization)).toEqual(['Bearer tok-1', 'Bearer tok-2']);
+		expect(calls[0]?.headers['X-API-Key']).toBeUndefined();
+	});
+
+	test('401 сбрасывает токен и повторяет запрос один раз', async () => {
+		const { calls, client, invalidated } = authStub([
+			{ status: 401, body: { detail: 'expired' } },
+			{ status: 200, body: [{ id: 'l1', name: 'bug' }] },
+		]);
+		expect(await client.listLabels('p1')).toEqual([{ id: 'l1', name: 'bug' }]);
+		expect(invalidated()).toBe(1);
+		expect(calls.map((c) => c.headers.Authorization)).toEqual(['Bearer tok-1', 'Bearer tok-2']);
+	});
+
+	test('второй 401 подряд — PlaneApiError 401, токен сброшен один раз', async () => {
+		const { calls, client, invalidated } = authStub([{ status: 401 }, { status: 401 }]);
+		const err = await failure(client.listLabels('p1'));
+		expect(err).toBeInstanceOf(PlaneApiError);
+		expect((err as PlaneApiError).status).toBe(401);
+		expect(invalidated()).toBe(1);
+		expect(calls).toHaveLength(2);
+	});
+
+	test('apiKeyAuth отдаёт заголовок X-API-Key', async () => {
+		expect(await apiKeyAuth('k-9').headers()).toEqual({ 'X-API-Key': 'k-9' });
+	});
+
+	test('скоупы Plane App — ровно десять из Global Constraints', () => {
+		expect(PLANE_HOOKS_SCOPES).toEqual([
+			'projects:read',
+			'projects.work_items:read',
+			'projects.work_items:write',
+			'projects.work_items.comments:read',
+			'projects.work_items.comments:write',
+			'projects.work_items.links:read',
+			'projects.work_items.links:write',
+			'projects.states:read',
+			'projects.labels:read',
+			'projects.labels:write',
+		]);
+	});
+});
+
+describe('PlaneClient: проекты, ссылки, правка комментария', () => {
+	test('listProjects — id и идентификатор', async () => {
+		const { calls, client } = stub([
+			{
+				status: 200,
+				body: {
+					results: [
+						{ id: 'p-eng', identifier: 'ENG', name: 'Engineering' },
+						{ id: 'p-qa', identifier: 'QA', name: 'Quality' },
+					],
+					next_page_results: false,
+				},
+			},
+		]);
+		expect(await client.listProjects()).toEqual([
+			{ id: 'p-eng', identifier: 'ENG' },
+			{ id: 'p-qa', identifier: 'QA' },
+		]);
+		expect(calls[0]?.url).toBe(`${ROOT}/projects/?per_page=100`);
+	});
+
+	test('listStates без sequence — ошибка разбора', async () => {
+		const { client } = stub([
+			{ status: 200, body: [{ id: 's1', name: 'Todo', group: 'unstarted', default: false }] },
+		]);
+		expect(await failure(client.listStates('p1'))).toBeInstanceOf(Error);
+	});
+
+	const link = { url: 'https://github.com/acme/api/pull/12', title: 'GitHub: acme/api#12' };
+	const linksPath = `${ROOT}/projects/p1/work-items/w1/links/`;
+
+	test('createLink: 201 — created, тело {url, title}', async () => {
+		const { calls, client } = stub([{ status: 201, body: { id: 'k1', ...link } }]);
+		expect(await client.createLink('p1', 'w1', link)).toBe('created');
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.method).toBe('POST');
+		expect(calls[0]?.url).toBe(linksPath);
+		expect(calls[0]?.body).toEqual(link);
+	});
+
+	test('createLink: 400, а URL уже в списке ссылок — exists', async () => {
+		const { calls, client } = stub([
+			{ status: 400, body: { error: 'URL already exists' } },
+			{
+				status: 200,
+				body: { results: [{ id: 'k1', url: link.url }], next_page_results: false },
+			},
+		]);
+		expect(await client.createLink('p1', 'w1', link)).toBe('exists');
+		expect(calls[1]?.method).toBe('GET');
+		expect(calls[1]?.url).toBe(`${linksPath}?per_page=100`);
+	});
+
+	test('createLink: другой 400 (URL в списке нет) — PlaneApiError 400', async () => {
+		const { client } = stub([
+			{ status: 400, body: { url: ['Enter a valid URL.'] } },
+			{
+				status: 200,
+				body: {
+					results: [{ id: 'k1', url: 'https://example.com/other' }],
+					next_page_results: false,
+				},
+			},
+		]);
+		const err = await failure(client.createLink('p1', 'w1', link));
+		expect(err).toBeInstanceOf(PlaneApiError);
+		expect((err as PlaneApiError).status).toBe(400);
+	});
+
+	test('listLinks — id и url', async () => {
+		const { client } = stub([
+			{ status: 200, body: [{ id: 'k1', url: link.url, title: link.title }] },
+		]);
+		expect(await client.listLinks('p1', 'w1')).toEqual([{ id: 'k1', url: link.url }]);
+	});
+
+	test('updateComment — PATCH comment_html', async () => {
+		const { calls, client } = stub([{ status: 200, body: { id: 'c1' } }]);
+		await client.updateComment('p1', 'w1', 'c1', '<p>новый</p>');
+		expect(calls[0]?.method).toBe('PATCH');
+		expect(calls[0]?.url).toBe(`${ROOT}/projects/p1/work-items/w1/comments/c1/`);
+		expect(calls[0]?.body).toEqual({ comment_html: '<p>новый</p>' });
 	});
 });
