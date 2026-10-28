@@ -38,9 +38,10 @@ const errorName = (error: unknown): string => (error instanceof Error ? error.na
 /**
  * Design §5 «Тихая смерть», run every 15 minutes: per tenant the silence of each input in `silenceHours` and the
  * bot's access to Plane; per GitHub App whether it still exists and whether GitHub failed to deliver to us.
- * Error lines only on a change of state, an `…_ok` / `input.alive` line on recovery. A check that fails for
- * another reason (Plane or GitHub down) is `watchdog.failed` and changes no state; one tenant or App never
- * stops the others.
+ * Error lines only on a change of state, an `…_ok` / `input.alive` line on recovery. Any failure of `GET /app`,
+ * transport errors included, is `github.app_unreachable` (`health()` answers appOk false). A Plane check that fails
+ * for another reason (Plane down) and a `health()` that throws are `watchdog.failed` and change no state; one
+ * tenant or App never stops the others.
  */
 export async function checkHealth(deps: {
 	runtimes: Runtimes;

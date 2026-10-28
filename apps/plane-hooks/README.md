@@ -179,6 +179,7 @@ message at startup.
   | `warning`        | high                       | medium            |
   | missing or other | urgent                     | high              |
 
+  The `severity` label is compared after trim and lower-casing; a missing or empty `env` label counts as `prod`.
   Failed GitHub deploys get `urgent` on a release environment, else `high`; Vercel `high` (production) or
   `medium`; failed Dokploy builds and backups `high`.
 
@@ -229,6 +230,20 @@ error: unset it to turn the input off. The `listening` line at startup lists eac
 - **Limitation.** Environments are matched by commit ancestry (`compare`): promote branches between environments
   with a merge commit, not a squash, or the next environment sees new commits instead of the ones already there.
 
+### Incidents
+
+Each incident has a key: for Grafana the alert fingerprint; for a failed GitHub deploy
+`deploy:<owner>/<repo>:<environment>`; for Vercel `deploy:<project id>:<target>:<branch>`; for Dokploy
+`dokploy:<application>:build` and `dokploy:<application>[/<database or volume>]:backup`.
+
+- The first firing signal of a key creates a work item in the incident project.
+- A repeated firing signal adds a comment.
+- If the work item is closed, it is reopened to the project's default state.
+- If it is archived, it is unarchived first, then reopened.
+- A resolution adds the comment «Погас» (resolved). It never closes the work item and never unarchives it: closing
+  stays a human decision.
+- A repeated delivery of the same event is a no-op (deduplicated by `external_id`).
+
 ## State
 
 One SQLite file (`PLANE_HOOKS_DB`, `/data` on a named volume — the image hands `/data` to the `bun` user):
@@ -256,7 +271,8 @@ Every 15 minutes, log lines with `level: "error"` only when a state changes (and
 
 - `plane.auth_failed` / `plane.auth_ok` — the bot cannot list the workspace's projects (401/403, or Plane refused
   the token request). Plane being down is `watchdog.failed` and changes nothing.
-- `github.app_unreachable` / `github.app_ok` — `GET /app` fails: the App was deleted or its key revoked.
+- `github.app_unreachable` / `github.app_ok` — `GET /app` fails, whatever the cause: the App was deleted, its key
+  revoked, or GitHub cannot be reached (transport errors included).
 - `github.deliveries_failed` (with `failed`, the count) / `github.deliveries_ok` — GitHub recorded failed
   deliveries to the hub since the last check.
 - `input.silent` / `input.alive` — an input listed in `silenceHours` got nothing for longer than that, counted
