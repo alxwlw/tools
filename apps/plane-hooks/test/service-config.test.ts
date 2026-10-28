@@ -209,6 +209,121 @@ describe('loadServiceConfig', () => {
 		expect(text).toContain('tenants[0].silenceHours.github is not a known key');
 	});
 
+	const shapeCases: Array<[string, (file: Json) => void, string]> = [
+		['тенант — не объект', (f) => (f.tenants[0] = 5), 'tenants[0] must be an object'],
+		[
+			'plane: лишний ключ',
+			(f) => (f.tenants[0].plane.x = 1),
+			'tenants[0].plane.x is not a known key',
+		],
+		['plane — не объект', (f) => (f.tenants[0].plane = 1), 'tenants[0].plane must be an object'],
+		['workspace пуст', (f) => (f.tenants[0].workspace = ' '), 'tenants[0].workspace must be'],
+		['github — не массив', (f) => (f.tenants[0].github = {}), 'tenants[0].github must be an array'],
+		['github: лишний ключ', (f) => (f.tenants[0].github[0].x = 1), 'tenants[0].github[0].x is not'],
+		['appId — не число', (f) => (f.tenants[0].github[0].appId = '1'), 'github[0].appId must be'],
+		['appId — 0', (f) => (f.tenants[0].github[0].appId = 0), 'github[0].appId must be'],
+		['appId — дробь', (f) => (f.tenants[0].github[0].appId = 1.5), 'github[0].appId must be'],
+		['incidents: лишний ключ', (f) => (f.tenants[0].incidents.x = 1), 'incidents.x is not a known'],
+		[
+			'incidents.project — не идентификатор',
+			(f) => (f.tenants[0].incidents.project = 'inc'),
+			'incidents.project must be',
+		],
+		['dokploy: лишний ключ', (f) => (f.tenants[0].dokploy.x = 1), 'dokploy.x is not a known'],
+		[
+			'dokploy.apps[0]: лишний ключ',
+			(f) => (f.tenants[0].dokploy.apps[0].x = 1),
+			'dokploy.apps[0].x is not',
+		],
+		[
+			'dokploy.apps — не массив',
+			(f) => (f.tenants[0].dokploy.apps = 1),
+			'dokploy.apps must be an array',
+		],
+		[
+			'dokploy: повтор имени',
+			(f) => f.tenants[0].dokploy.apps.push({ ...f.tenants[0].dokploy.apps[0] }),
+			'dokploy.apps[1].name is a duplicate',
+		],
+		[
+			'silenceHours — дробь',
+			(f) => (f.tenants[0].silenceHours.vercel = 1.5),
+			'silenceHours.vercel must be',
+		],
+		[
+			'silenceHours — строка',
+			(f) => (f.tenants[0].silenceHours.vercel = '5'),
+			'silenceHours.vercel must be',
+		],
+		['delivery: лишний ключ', (f) => (f.tenants[0].delivery.x = 1), 'delivery.x is not a known'],
+		[
+			'states: лишний ключ',
+			(f) => (f.tenants[0].delivery.states.x = 1),
+			'delivery.states.x is not',
+		],
+		['hold — число', (f) => (f.tenants[0].delivery.hold = [5]), 'delivery.hold[0] must be'],
+		[
+			'hold — пустая строка',
+			(f) => (f.tenants[0].delivery.hold = [' ']),
+			'delivery.hold[0] must be',
+		],
+		['repos[0]: лишний ключ', (f) => (f.tenants[0].delivery.repos[0].x = 1), 'repos[0].x is not'],
+		[
+			'environments[0]: лишний ключ',
+			(f) => (f.tenants[0].delivery.repos[0].environments[0].x = 1),
+			'environments[0].x is not',
+		],
+		[
+			'release — не boolean',
+			(f) => (f.tenants[0].delivery.repos[0].environments[0].release = 'yes'),
+			'environments[0].release must be a boolean',
+		],
+		[
+			'projects: значение — число',
+			(f) => (f.tenants[0].delivery.projects = { QA: { Done: 5 } }),
+			'projects.QA.Done must be',
+		],
+		[
+			'projects: значение — пустая строка',
+			(f) => (f.tenants[0].delivery.projects = { QA: { Done: ' ' } }),
+			'projects.QA.Done must be',
+		],
+		[
+			'повтор id тенанта',
+			(f) => f.tenants.push({ ...f.tenants[0] }),
+			'tenants[1].id is a duplicate',
+		],
+		['корень с лишним ключом', (f) => (f.extra = 1), 'tenants file must be an object'],
+		['корень без tenants', (f) => delete f.tenants, 'tenants file must be an object'],
+	];
+	for (const [name, edit, expected] of shapeCases)
+		test(`форма: ${name}`, () => {
+			expect(message(edit)).toContain(expected);
+		});
+
+	test('нет секрета Plane — называет переменную', () => {
+		expect(message(() => {}, without('PLANE_HOOKS_ACME_PLANE_SECRET'))).toContain(
+			'missing env PLANE_HOOKS_ACME_PLANE_SECRET',
+		);
+	});
+
+	test('нет ключа GitHub App — называет переменную', () => {
+		expect(message(() => {}, without('PLANE_HOOKS_GH_ACME_PRIVATE_KEY'))).toContain(
+			'missing env PLANE_HOOKS_GH_ACME_PRIVATE_KEY',
+		);
+	});
+
+	test('PORT = 0 и дробный — ошибка; PLANE_HOOKS_CONFIG читает другой путь', () => {
+		expect(message(() => {}, { ...ENV, PORT: '0' })).toContain('PORT must be');
+		expect(message(() => {}, { ...ENV, PORT: '80.5' })).toContain('PORT must be');
+		let asked = '';
+		loadServiceConfig({ ...ENV, PLANE_HOOKS_CONFIG: '/etc/t.json' }, (path) => {
+			asked = path;
+			return EXAMPLE;
+		});
+		expect(asked).toBe('/etc/t.json');
+	});
+
 	test('PORT и URL', () => {
 		const text = message(() => {}, {
 			...ENV,
@@ -236,5 +351,6 @@ describe('matchRepo', () => {
 	test('чужой владелец — null', () => {
 		expect(matchRepo(rules, 'other/api')).toBeNull();
 		expect(matchRepo(rules, 'acme-evil/api')).toBeNull();
+		expect(matchRepo([{ repo: 'acme', environments: [] }], 'acme/api')).toBeNull();
 	});
 });
