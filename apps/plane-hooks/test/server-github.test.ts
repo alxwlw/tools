@@ -423,6 +423,12 @@ describe('GitHub: очередь и входящие', () => {
 				delivery: 'redeliver-done',
 			},
 		]);
+		// The first one was accepted, the repeat is the duplicate — in that order.
+		expect(
+			w.logs
+				.filter((l) => l.delivery === 'redeliver-done' && l.input === 'github')
+				.map((l) => l.event),
+		).toEqual(['delivery.accepted', 'delivery.duplicate']);
 		expect(stateOf(w, id)).toBe('eng-in-review');
 
 		const failedWorld = world();

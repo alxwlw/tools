@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { IncidentResult } from '../src/incident.ts';
+import { describeError } from '../src/log.ts';
 import { PlaneApiError } from '../src/plane.ts';
 import { MAX_BODY_BYTES } from '../src/server.ts';
 import { fixtureBytes } from './fixtures.ts';
@@ -407,5 +408,16 @@ describe('Grafana: отметки на дашбордах', () => {
 		};
 		await w.handler(grafanaRequest('acme', await fixtureBytes('grafana-firing.json')));
 		expect(w.logs[0]?.error).toBe('unknown error');
+	});
+
+	test('describeError: Error с бросающим message — «unknown error», не исключение', () => {
+		const hostile = new Error('x');
+		Object.defineProperty(hostile, 'message', {
+			get() {
+				throw new Error('no');
+			},
+		});
+		expect(describeError(hostile)).toBe('unknown error');
+		expect(describeError(new TypeError('fetch failed'))).toBe('TypeError: fetch failed');
 	});
 });

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { inbox, USAGE as INBOX_USAGE } from '../scripts/inbox.ts';
 import { journal, USAGE as JOURNAL_USAGE, sinceOf } from '../scripts/journal.ts';
-import { replayRequest } from '../scripts/replay.ts';
+import { replayRequest, USAGE as REPLAY_USAGE } from '../scripts/replay.ts';
 import { Store } from '../src/store.ts';
 import { BASE, DOKPLOY_SECRET, GRAFANA_TOKEN, VERCEL_SECRET, world } from './server-harness.ts';
 
@@ -73,7 +73,13 @@ describe('scripts/journal.ts', () => {
 		expect(run((print) => journal(['--from', '7d'], store, NOW, print)).out).toEqual([
 			JOURNAL_USAGE,
 		]);
-		for (const args of [[], ['--since', 'week'], ['--since', '7d', 'extra'], ['--from', '7d']])
+		for (const args of [
+			[],
+			['--since', 'week'],
+			['--since', '7d', 'extra'],
+			['--from', '7d'],
+			['--since', '7d', '--bogus'],
+		])
 			expect(run((print) => journal(args, store, NOW, print)).code).toBe(2);
 	});
 });
@@ -114,7 +120,16 @@ describe('scripts/replay.ts', () => {
 		expect(ping.w.lines('github.ping')).toHaveLength(1);
 		const named = replayRequest(['github', 'ping', 'acme'], env, '{}', readFile, () => 'd');
 		expect(named).toMatchObject({
-			headers: { 'x-github-hook-installation-target-id': '1000001', 'x-github-delivery': 'd' },
+			headers: {
+				'content-type': 'application/json',
+				'x-github-hook-installation-target-id': '1000001',
+				'x-github-delivery': 'd',
+			},
+		});
+		// Without PLANE_HOOKS_CONFIG the file is the image's default path.
+		const { PLANE_HOOKS_CONFIG: _, ...bare } = env;
+		expect(replayRequest(['github', 'ping'], bare, '{}', readFile, () => 'd')).toMatchObject({
+			path: '/hooks/github',
 		});
 	});
 
@@ -136,7 +151,15 @@ describe('scripts/replay.ts', () => {
 			['acme', 'grafana', 'x'],
 			['github', 'Ping'],
 		])
-			expect(replayRequest(args, env, '{}', readFile)).toHaveProperty('error');
+			expect(replayRequest(args, env, '{}', readFile)).toEqual({ error: REPLAY_USAGE });
+		expect(REPLAY_USAGE).toStartWith(
+			'usage: bun scripts/replay.ts <tenant> grafana|vercel|dokploy',
+		);
+		// A file without tenants, or with a null App, names no App instead of failing to read.
+		for (const file of ['{}', '{"tenants":[{"github":[null]}]}'])
+			expect(replayRequest(['github', 'ping'], env, '{}', () => file)).toEqual({
+				error: 'name the App: ',
+			});
 		expect(JSON.stringify(replayRequest(['acme', 'deploy'], env, '{}', readFile))).not.toContain(
 			VERCEL_SECRET,
 		);
