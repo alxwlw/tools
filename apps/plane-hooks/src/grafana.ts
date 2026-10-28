@@ -76,9 +76,12 @@ export function alertPriority(
 ): 'urgent' | 'high' | 'medium' {
 	const level = (labels.severity ?? '').trim().toLowerCase();
 	const env = labels.env || 'prod';
-	const row = table[level] ?? {};
-	const fallback = table['*'] ?? {};
-	return row[env] ?? row['*'] ?? fallback[env] ?? fallback['*'] ?? 'urgent';
+	// Label values are attacker-chosen: own properties only, or `constructor` would answer with a function.
+	const own = <T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
+		record && Object.hasOwn(record, key) ? record[key] : undefined;
+	const row = own(table, level);
+	const fallback = own(table, '*');
+	return own(row, env) ?? own(row, '*') ?? own(fallback, env) ?? own(fallback, '*') ?? 'urgent';
 }
 
 function describeAlert(

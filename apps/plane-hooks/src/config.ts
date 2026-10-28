@@ -111,6 +111,8 @@ export const DEFAULT_PRIORITY: PriorityTable = {
 	warning: { '*': 'high', staging: 'medium' },
 	'*': { '*': 'urgent', staging: 'high' },
 };
+// Keys that would write into or shadow Object.prototype when used on a plain object.
+const UNSAFE_KEYS: readonly string[] = ['__proto__', 'constructor', 'prototype'];
 const PRIORITIES: readonly string[] = ['urgent', 'high', 'medium'];
 export type DokployAppRule = { name: string; repo: string; environment: string };
 export type Tenant = {
@@ -419,8 +421,16 @@ function parsePriority(
 	const merged: Record<string, Record<string, 'urgent' | 'high' | 'medium'>> = {};
 	for (const [severity, row] of Object.entries(DEFAULT_PRIORITY)) merged[severity] = { ...row };
 	for (const [severity, envs] of Object.entries(h.obj(value, at) ?? {})) {
+		if (UNSAFE_KEYS.includes(severity)) {
+			h.fail(`${at}.${severity} is not an allowed key`);
+			continue;
+		}
 		const rowObj = h.obj(envs, `${at}.${severity}`);
 		for (const [env, priority] of Object.entries(rowObj ?? {})) {
+			if (UNSAFE_KEYS.includes(env)) {
+				h.fail(`${at}.${severity}.${env} is not an allowed key`);
+				continue;
+			}
 			if (typeof priority === 'string' && PRIORITIES.includes(priority)) {
 				(merged[severity] ??= {})[env] = priority as 'urgent' | 'high' | 'medium';
 			} else h.fail(`${at}.${severity}.${env} must be urgent, high or medium`);

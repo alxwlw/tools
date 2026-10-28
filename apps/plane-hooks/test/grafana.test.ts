@@ -185,6 +185,15 @@ describe('alertPriority: severity × env', () => {
 		expect(alertPriority({ severity: 'critical' }, table)).toBe('medium');
 	});
 
+	test('метки с именами из Object.prototype не дают функцию вместо приоритета', () => {
+		for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+			expect(alertPriority({ severity: 'critical', env: name }, DEFAULT_PRIORITY)).toBe('urgent');
+			expect(alertPriority({ severity: name, env: 'prod' }, DEFAULT_PRIORITY)).toBe('urgent');
+			expect(alertPriority({ severity: name, env: 'staging' }, DEFAULT_PRIORITY)).toBe('high');
+			expect(alertPriority({ severity: 'warning', env: name }, DEFAULT_PRIORITY)).toBe('high');
+		}
+	});
+
 	test('порядок поиска: ячейка строки, * строки, ячейка строки *, * строки *, urgent', () => {
 		const table = {
 			warning: { dev: 'high', '*': 'medium' },

@@ -80,6 +80,24 @@ describe('incidents.priority', () => {
 		);
 	});
 
+	test('__proto__, constructor, prototype в priority — ошибка с путём, прототип цел', () => {
+		const raw = (priority: string) => `{"project":"INC","priority":${priority}}`;
+		const load = (priority: string) => {
+			const file = `{"tenants":[{"id":"acme","workspace":"w","plane":{"clientId":"c","appInstallationId":"i"},"github":[{"name":"acme","appId":1000001,"owner":"acme"}],"incidents":${raw(priority)}}]}`;
+			return loadServiceConfig(ENV, () => file);
+		};
+		expect(() => load('{"__proto__":{"x":"high"}}')).toThrow(
+			'tenants[0].incidents.priority.__proto__ is not an allowed key',
+		);
+		expect(() => load('{"warning":{"__proto__":"high"}}')).toThrow(
+			'tenants[0].incidents.priority.warning.__proto__ is not an allowed key',
+		);
+		expect(() => load('{"constructor":{"x":"high"}}')).toThrow('priority.constructor is not');
+		expect(() => load('{"a":{"prototype":"high"}}')).toThrow('priority.a.prototype is not');
+		expect(({} as Record<string, unknown>).x).toBeUndefined();
+		expect(Object.getPrototypeOf(DEFAULT_PRIORITY)).toBe(Object.prototype);
+	});
+
 	test('умолчание не мутируется слиянием', () => {
 		tenantWith({ project: 'INC', priority: { warning: { prod: 'medium' } } });
 		expect(DEFAULT_PRIORITY.warning).toEqual({ '*': 'high', staging: 'medium' });
