@@ -1,7 +1,7 @@
 import { type PlaneApi, PlaneApiError, type Priority, type WorkItemRef } from './plane.ts';
 import { ttl } from './ttl.ts';
 
-export type Source = 'grafana' | 'vercel' | 'github';
+export type Source = 'grafana' | 'vercel' | 'github' | 'dokploy';
 export type IncidentLabel = 'alert' | 'deploy-failed';
 
 /**
