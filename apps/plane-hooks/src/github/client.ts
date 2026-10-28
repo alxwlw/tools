@@ -215,7 +215,7 @@ function toDeployment(repo: string, value: unknown): Deployment {
 		environment: str(rec, 'environment', 'deployment'),
 		// GitHub's schema makes the creator nullable (a deleted account); '' never equals a login.
 		creator:
-			rec.creator === null || rec.creator === undefined
+			rec.creator === null
 				? ''
 				: str(recordAt(rec.creator, 'deployment.creator'), 'login', 'deployment.creator'),
 		description: nullableText(rec, 'description', 'deployment'),

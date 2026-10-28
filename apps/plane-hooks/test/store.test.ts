@@ -55,6 +55,17 @@ describe('Store: курсор деплоя', () => {
 		const second = new Store(path);
 		expect(second.deployCursor('acme', 'acme/api', 'production')).toBe('sha-z');
 		second.close();
+		const raw = new Database(path);
+		expect((raw.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe(
+			'wal',
+		);
+		raw.close();
+	});
+
+	test('после close запросы не проходят', () => {
+		const store = new Store(':memory:');
+		store.close();
+		expect(() => store.deployCursor('acme', 'acme/api', 'staging')).toThrow();
 	});
 
 	test('версия схемы — PRAGMA user_version; чужая более новая версия — ошибка', () => {

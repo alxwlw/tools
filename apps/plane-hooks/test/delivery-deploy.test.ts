@@ -359,13 +359,102 @@ describe('handleDeploy: откат и диапазон', () => {
 	test('без id деплоя (promote) — база: любой успешный деплой с другим sha', async () => {
 		const w = history();
 		w.gh.deploy(REPO, 'staging', 'a0', 'success');
-		w.gh.deploy(REPO, 'staging', 'a1', 'success');
+		w.gh.deploy(REPO, 'staging', 'a2', 'success');
 		w.item('ENG-1', 'In Review');
 		w.item('ENG-2', 'In Review');
 
-		const result = await handleDeploy(w.deps, fact('a1', { deploymentId: null }));
+		const result = await handleDeploy(w.deps, fact('a2', { deploymentId: null }));
 
-		expect(keysOf(result)).toEqual(['ENG-1']);
+		// a1 has no deployment of its own: it is in the range a0..a2.
+		expect(keysOf(result)).toEqual(['ENG-1', 'ENG-2']);
+	});
+
+	test('два прямых push без PR в диапазоне — обе задачи, коммиты не склеиваются', async () => {
+		const w = setup();
+		w.gh
+			.commit('a0', [], 'init')
+			.commit('a1', ['a0'], 'ENG-4 one')
+			.commit('a2', ['a1'], 'ENG-6 two');
+		w.item('ENG-4', 'In Progress');
+		w.item('ENG-6', 'In Progress');
+		w.cursor.set(REPO, 'staging', 'a0');
+		w.gh.deploy(REPO, 'staging', 'a2', 'success');
+
+		const result = await handleDeploy(w.deps, fact('a2'));
+
+		expect(keysOf(result)).toEqual(['ENG-4', 'ENG-6']);
+	});
+
+	test('задача двух PR диапазона — ссылки на оба, оба в тексте Выкачено', async () => {
+		const w = setup();
+		w.gh.commit('a0', [], 'init');
+		squash(w, 'a1', 'a0', 1, 'ENG-1');
+		squash(w, 'a2', 'a1', 2, 'ENG-1');
+		w.gh.deploy(REPO, 'staging', 'a2', 'success');
+		w.cursor.set(REPO, 'staging', 'a0');
+		const id = w.item('ENG-1', 'In Review');
+
+		const result = await handleDeploy(w.deps, fact('a2'));
+
+		expect(result.notes).toEqual([{ key: 'ENG-1', workItemId: id, created: true }]);
+		expect(w.linksOf(id).map((l) => l.url)).toEqual([
+			'https://github.com/acme/api/pull/1',
+			'https://github.com/acme/api/pull/2',
+		]);
+		expect(w.plane.commentsOf(id)[0]?.comment_html).toContain(
+			'PR: <a href="https://github.com/acme/api/pull/1">acme/api#1</a>, <a href="https://github.com/acme/api/pull/2">acme/api#2</a>',
+		);
+	});
+
+	test('длинный sha: в title и в тексте Выкачено — первые 7 символов', async () => {
+		const w = setup();
+		const sha = '0123456789abcdef0123456789abcdef01234567';
+		w.gh.commit('a0', [], 'init').commit(sha, ['a0'], 'ENG-1 direct');
+		const id = w.item('ENG-1', 'In Progress');
+		w.cursor.set(REPO, 'staging', 'a0');
+		w.gh.deploy(REPO, 'staging', sha, 'success');
+
+		const result = await handleDeploy(w.deps, fact(sha, { logUrl: null }));
+
+		expect(result.title).toBe('acme/api → staging · 0123456');
+		expect(w.plane.commentsOf(id)[0]?.comment_html).toBe(
+			'<p>Выкачено: <code>acme/api</code> → staging · <code>0123456</code></p>',
+		);
+	});
+
+	test('откат: обратный compare не нашёл sha — Откачено никому, курсор сдвинут', async () => {
+		const w = history();
+		w.cursor.set(REPO, 'staging', 'a2');
+		let calls = 0;
+		const github = new Proxy(w.gh, {
+			get(target, prop) {
+				if (prop === 'compare') {
+					return async (repo: string, base: string, head: string) =>
+						++calls === 1 ? target.compare(repo, base, head) : null;
+				}
+				const value = Reflect.get(target, prop, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+		});
+
+		const result = await handleDeploy({ ...w.deps, github: async () => github }, fact('a0'));
+
+		expect(result).toMatchObject({ action: 'rolled_back', notes: [] });
+		expect(w.cursor.get(REPO, 'staging')).toBe('a0');
+	});
+
+	test('первый деплой окружения: база не ищется через compare, прошлые деплои просмотрены (20)', async () => {
+		const w = history();
+		w.gh.deploy(REPO, 'staging', 'a2', 'success');
+		w.item('ENG-2', 'In Review');
+
+		await handleDeploy(w.deps, fact('a2', { deploymentId: 1 }));
+
+		// Without a base there is nothing to compare from; the only compare is syncTask's `contains` (a2 against a2).
+		expect(w.gh.calls.filter((c) => c.startsWith('compare '))).toEqual([
+			'compare acme/api a2...a2',
+		]);
+		expect(w.gh.calls).toContain('listDeployments acme/api staging 20');
 	});
 
 	function longChain(w: ReturnType<typeof setup>) {
@@ -596,5 +685,47 @@ describe('handleDeploy: ignored, релиз, сбои', () => {
 		expect(w.commentIds(ops)[0]).toBe(`deployed:${ops}:acme/api:staging:a2`);
 		expect(w.warns.some((x) => x.reason === 'plane_forbidden:ENG')).toBe(true);
 		expect(w.cursor.get(REPO, 'staging')).toBe('a2');
+	});
+
+	test('задача исчезла между чтением и комментарием (404) — пропущена, остальные доставлены', async () => {
+		const w = setup();
+		w.gh.commit('a0', [], 'init');
+		squash(w, 'a1', 'a0', 1, 'ENG-1');
+		squash(w, 'a2', 'a1', 2, 'ENG-2');
+		for (const sha of ['a0', 'a2']) w.gh.deploy(REPO, 'staging', sha, 'success');
+		const first = w.item('ENG-1', 'In Review');
+		const second = w.item('ENG-2', 'In Review');
+		w.cursor.set(REPO, 'staging', 'a0');
+		w.plane.failNext('createComment', new PlaneApiError(404, 'POST', '/comments/'));
+
+		const result = await handleDeploy(w.deps, fact('a2', { deploymentId: 2 }));
+
+		expect(keysOf(result)).toEqual(['ENG-2']);
+		expect(w.plane.commentsOf(first)).toEqual([]);
+		expect(w.stateOf(second)).toBe('eng-on-staging');
+		expect(w.warns.some((x) => x.reason === 'plane_not_found:ENG')).toBe(true);
+		expect(w.cursor.get(REPO, 'staging')).toBe('a2');
+	});
+
+	test('прод: прямой push без PR — релиз без заголовка, runUrl пуст без ссылки на прогон', async () => {
+		const w = setup();
+		w.gh.commit('a0', [], 'init').commit('a1', ['a0'], 'ENG-4 hotfix');
+		w.gh.deploy(REPO, 'production', 'a0', 'success');
+		const last = w.gh.deploy(REPO, 'production', 'a1', 'success');
+		w.item('ENG-4', 'In Progress');
+
+		await handleDeploy(
+			w.deps,
+			fact('a1', { environment: 'production', deploymentId: last, logUrl: null }),
+		);
+
+		expect(w.releases).toHaveLength(1);
+		expect(w.releases[0]?.draft).toEqual({
+			repository: REPO,
+			sha: 'a1',
+			at: '2026-10-28T10:00:00.000Z',
+			runUrl: '',
+			commits: [{ sha: 'a1', message: 'ENG-4 hotfix' }],
+		});
 	});
 });

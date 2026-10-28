@@ -6,7 +6,7 @@ import { describeError } from '../server.ts';
 import { ownedKeys } from './keys.ts';
 import { deployedHtml, rolledBackHtml } from './notes.ts';
 import { tolerateGone } from './pr.ts';
-import { SOURCE, type SyncDeps, type SyncResult, syncTask } from './sync.ts';
+import { SOURCE, type SyncCause, type SyncDeps, type SyncResult, syncTask } from './sync.ts';
 
 const PAST_DEPLOYMENTS = 20;
 
@@ -177,8 +177,8 @@ export async function handleDeploy(deps: DeployDeps, fact: DeployFact): Promise<
 			out.notes.push({ key, workItemId: item.id, created: comment.created });
 			items.push({ key, workItemId: item.id });
 			if (!rolledBack) {
-				const cause = {
-					kind: 'deploy' as const,
+				const cause: SyncCause = {
+					kind: 'deploy',
 					repo: fact.repo,
 					environment: fact.environment,
 					sha: fact.sha,

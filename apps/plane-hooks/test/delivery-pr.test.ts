@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handlePullRequest } from '../src/delivery/pr.ts';
-import type { Pull } from '../src/github/client.ts';
+import { GitHubApiError, type Pull } from '../src/github/client.ts';
 import type { GitHubEvent } from '../src/github/webhook.ts';
 import { PlaneApiError } from '../src/plane.ts';
 import { tenantOf } from './config-fixture.ts';
@@ -151,6 +151,11 @@ describe('handlePullRequest', () => {
 			event({ title: 'ENG-1 and OPS-5', head: 'x', body: '' }),
 		);
 		expect(result.linked).toBe(1);
+		expect(result.synced.find((x) => x.key === 'ENG-1')).toEqual({
+			key: 'ENG-1',
+			action: 'skipped',
+			reason: 'plane refused',
+		});
 		expect(w.linksOf(ops)).toHaveLength(1);
 		// warnOnce dedupes in the caller: the link step and the sync step each report the project.
 		const forbidden = w.warns.filter((x) => x.reason.startsWith('plane_'));
@@ -178,5 +183,12 @@ describe('handlePullRequest', () => {
 		w.item('ENG-1', 'In Progress');
 		w.plane.failNext('createLink', new PlaneApiError(500, 'POST', '/links/'));
 		await expect(handlePullRequest(w.deps, event({ head: 'x', body: '' }))).rejects.toThrow('500');
+	});
+
+	test('чужая ошибка со статусом 403 (GitHub) не принимается за отказ Plane', async () => {
+		const w = deliveryWorld();
+		w.item('ENG-1', 'In Progress');
+		w.plane.failNext('createLink', new GitHubApiError(403, 'GET', '/x'));
+		await expect(handlePullRequest(w.deps, event({ head: 'x', body: '' }))).rejects.toThrow('403');
 	});
 });
