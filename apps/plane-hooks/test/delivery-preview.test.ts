@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handlePreview, vercelDeployFact } from '../src/delivery/preview.ts';
+import { PlaneApiError } from '../src/plane.ts';
 import type { VercelHookEvent, VercelPreview } from '../src/vercel.ts';
 import { tenantOf } from './config-fixture.ts';
 import { deliveryWorld } from './delivery-world.ts';
@@ -36,6 +37,7 @@ describe('handlePreview', () => {
 			'<p>Превью <code>web</code>: <a href="https://web-abc-example.vercel.app">https://web-abc-example.vercel.app</a> · ветка <code>feat/ENG-1-retries</code> · <code>0123456</code></p>',
 		]);
 		expect(w.commentIds(id)).toEqual([`preview:${id}:web`]);
+		expect(w.plane.commentsOf(id)[0]?.external_source).toBe('plane-hooks');
 
 		const next = { ...PREVIEW, url: 'https://web-def-example.vercel.app', sha: OTHER_SHA };
 		expect(await handlePreview(w.deps, next)).toEqual([{ key: 'ENG-1', action: 'updated' }]);
@@ -132,6 +134,41 @@ describe('handlePreview', () => {
 		expect(text(w, id)[0]).toContain('web-def-example');
 	});
 
+	test('ссылка не http(s) — показывается кодом, а не ссылкой', async () => {
+		const w = deliveryWorld();
+		const id = w.item('ENG-1', 'In Progress');
+		await handlePreview(w.deps, { ...PREVIEW, url: 'javascript:alert(1)' });
+		expect(text(w, id)[0]).toContain('<code>javascript:alert(1)</code>');
+		expect(text(w, id)[0]).not.toContain('<a ');
+	});
+
+	test('задача недоступна (404) — пропускается с предупреждением, остальные получают комментарий', async () => {
+		const w = deliveryWorld();
+		const gone = w.item('ENG-2', 'In Progress');
+		const ok = w.item('ENG-1', 'In Progress');
+		w.gh.pull({
+			repo: 'acme/api',
+			number: 7,
+			title: 'ENG-2 ENG-1',
+			head: PREVIEW.branch as string,
+		});
+		const plane = new Proxy(w.plane, {
+			get: (target, name) => {
+				if (name === 'listComments')
+					return async (_project: string, itemId: string) => {
+						if (itemId === gone) throw new PlaneApiError(404, 'GET', '/comments/');
+						return target.listComments(_project, itemId);
+					};
+				const member = Reflect.get(target, name);
+				return typeof member === 'function' ? member.bind(target) : member;
+			},
+		});
+		const result = await handlePreview({ ...w.deps, plane }, PREVIEW);
+		expect(result).toEqual([{ key: 'ENG-1', action: 'created' }]);
+		expect(w.commentIds(ok)).toHaveLength(1);
+		expect(w.warns).toEqual([{ reason: 'plane_not_found:ENG', entry: { project: 'ENG' } }]);
+	});
+
 	test('текст экранируется: имя проекта и ветка с разметкой', async () => {
 		const w = deliveryWorld();
 		const id = w.item('ENG-1', 'In Progress');
@@ -194,6 +231,15 @@ describe('vercelDeployFact', () => {
 		expect(await vercelDeployFact(w.gh, { ...EVENT, repo: null })).toBeNull();
 		expect(await vercelDeployFact(w.gh, { ...EVENT, sha: null })).toBeNull();
 		expect(w.gh.calls).toEqual([]);
+	});
+
+	test('просматриваются последние 20 записей каждого окружения', async () => {
+		const w = deliveryWorld();
+		await vercelDeployFact(w.gh, EVENT);
+		expect(w.gh.calls).toEqual([
+			'listDeployments acme/api Production 20',
+			'listDeployments acme/api Production – web 20',
+		]);
 	});
 
 	test('url события null — logUrl null', async () => {

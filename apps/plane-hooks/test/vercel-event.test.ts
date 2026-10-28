@@ -181,6 +181,14 @@ describe('parseVercelEvent: promote и rollback', () => {
 		});
 	});
 
+	test('rollback без payload.project, но с именем из deployment — проект по имени', () => {
+		const ev = rollback((b) => {
+			delete b.payload.project;
+			b.payload.deployment = { name: 'terminal' };
+		});
+		expect(ev).toMatchObject({ kind: 'rolled_back', project: 'terminal' });
+	});
+
 	test('rollback с телом deployment — sha и repo оттуда', () => {
 		const ev = rollback((b) => {
 			b.payload.deployment = {
