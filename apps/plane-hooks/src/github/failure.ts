@@ -13,6 +13,7 @@ const TITLE_MAX = 200;
 export function deploymentSignal(
 	event: Extract<GitHubEvent, { kind: 'deployment_status' }>,
 	tenant: Tenant,
+	now: () => Date = () => new Date(),
 ): IncidentSignal | null {
 	const { deployment, state } = event;
 	if (state !== 'failure' && state !== 'error' && state !== 'success') return null;
@@ -23,7 +24,7 @@ export function deploymentSignal(
 
 	const key = `deploy:${deployment.repo}:${environment.name}`;
 	const sha7 = deployment.sha.slice(0, 7);
-	const at = new Date().toISOString();
+	const at = now().toISOString();
 	if (state === 'success') {
 		return {
 			status: 'resolved',

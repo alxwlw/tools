@@ -76,8 +76,9 @@ export function alertPriority(
 ): 'urgent' | 'high' | 'medium' {
 	const level = (labels.severity ?? '').trim().toLowerCase();
 	const env = labels.env || 'prod';
-	const row = table[level] ?? table['*'];
-	return row?.[env] ?? row?.['*'] ?? table['*']?.[env] ?? table['*']?.['*'] ?? 'urgent';
+	const row = table[level] ?? {};
+	const fallback = table['*'] ?? {};
+	return row[env] ?? row['*'] ?? fallback[env] ?? fallback['*'] ?? 'urgent';
 }
 
 function describeAlert(

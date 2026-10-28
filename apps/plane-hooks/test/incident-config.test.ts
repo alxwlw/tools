@@ -60,6 +60,14 @@ describe('incidents.priority', () => {
 		}
 	});
 
+	test('все три приоритета принимаются', () => {
+		const priority = tenantWith({
+			project: 'INC',
+			priority: { a: { x: 'urgent', y: 'high', z: 'medium' } },
+		})?.incidents?.priority;
+		expect(priority?.a).toEqual({ x: 'urgent', y: 'high', z: 'medium' });
+	});
+
 	test('строка severity — не объект: ошибка с путём', () => {
 		expect(() => tenantWith({ project: 'INC', priority: { warning: 'high' } })).toThrow(
 			'tenants[0].incidents.priority.warning must be an object',

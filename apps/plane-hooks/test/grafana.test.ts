@@ -179,10 +179,24 @@ describe('alertPriority: severity × env', () => {
 		expect(signal?.priority).toBe('medium');
 	});
 
-	test('пустой env — prod; неизвестная severity с собственной строкой без * берёт ячейку строки *', () => {
-		const table = { '*': { '*': 'urgent' }, info: { staging: 'medium' } } as const;
-		expect(alertPriority({ severity: 'info', env: '' }, table)).toBe('urgent');
-		expect(alertPriority({ severity: 'info', env: 'staging' }, table)).toBe('medium');
+	test('пустой env — prod: ячейка prod, а не *', () => {
+		const table = { '*': { '*': 'urgent', prod: 'medium' } } as const;
+		expect(alertPriority({ severity: 'critical', env: '' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'critical' }, table)).toBe('medium');
+	});
+
+	test('порядок поиска: ячейка строки, * строки, ячейка строки *, * строки *, urgent', () => {
+		const table = {
+			warning: { dev: 'high', '*': 'medium' },
+			info: { staging: 'high' },
+			'*': { prod: 'medium', '*': 'high' },
+		} as const;
+		expect(alertPriority({ severity: 'warning', env: 'dev' }, table)).toBe('high');
+		expect(alertPriority({ severity: 'warning', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'dev' }, table)).toBe('high');
+		expect(alertPriority({ severity: 'other', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'dev' }, {})).toBe('urgent');
 	});
 
 	test('пачка со смешанными severity и статусами', () => {
