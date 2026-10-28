@@ -127,6 +127,32 @@ describe('FakeGitHub pulls', () => {
 	});
 });
 
+describe('FakeGitHub repoVisibility и branchHead', () => {
+	test('visibility: заданное, null и по умолчанию private; ветка: заданная, null и неизвестная', async () => {
+		const gh = new FakeGitHub()
+			.visibility('acme/web', 'public')
+			.visibility('acme/hidden', null)
+			.branch('acme/api', 'main', 'sha-main')
+			.branch('acme/api', 'old', null);
+		expect(await gh.repoVisibility('acme/web')).toBe('public');
+		expect(await gh.repoVisibility('acme/hidden')).toBeNull();
+		expect(await gh.repoVisibility('acme/api')).toBe('private');
+		expect(await gh.branchHead('acme/api', 'main')).toBe('sha-main');
+		expect(await gh.branchHead('acme/api', 'old')).toBeNull();
+		expect(await gh.branchHead('acme/api', 'never')).toBeNull();
+		expect(await gh.branchHead('acme/other', 'main')).toBeNull();
+		expect(gh.calls).toEqual([
+			'repoVisibility acme/web',
+			'repoVisibility acme/hidden',
+			'repoVisibility acme/api',
+			'branchHead acme/api main',
+			'branchHead acme/api old',
+			'branchHead acme/api never',
+			'branchHead acme/other main',
+		]);
+	});
+});
+
 describe('FakeGitHub deployments', () => {
 	test('деплои: новые первыми, limit, окружение и репозиторий, последнее состояние', async () => {
 		const gh = new FakeGitHub();

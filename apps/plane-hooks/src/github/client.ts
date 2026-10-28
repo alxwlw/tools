@@ -29,6 +29,7 @@ export type Deployment = {
 	creator: string;
 	description: string | null;
 };
+export type Visibility = 'public' | 'private' | 'internal';
 export type DeploymentState =
 	| 'success'
 	| 'failure'
@@ -45,6 +46,10 @@ export interface GitHubApi {
 	openPullsForBranch(repo: string, branch: string): Promise<Pull[]>;
 	/** The commit's message; a sha that is gone (404/422) → null. */
 	getCommit(repo: string, sha: string): Promise<Commit | null>;
+	/** The repository's `visibility`; a repository the App cannot see (404) → null. */
+	repoVisibility(repo: string): Promise<Visibility | null>;
+	/** `commit.sha` of the branch's head; no such branch (404) → null. */
+	branchHead(repo: string, branch: string): Promise<string | null>;
 	/** 404/422 (a sha gone after force-push) → null. At most 250 commits; more → truncated: true. */
 	compare(repo: string, base: string, head: string): Promise<Comparison | null>;
 	/** Newest first, at most `limit` (pages of 100). */
@@ -93,6 +98,7 @@ const DEPLOYMENT_STATES: readonly string[] = [
 ];
 /** A sha that no longer exists answers 404 or 422, depending on the endpoint. */
 const GONE: readonly number[] = [404, 422];
+const VISIBILITIES: readonly string[] = ['public', 'private', 'internal'];
 const COMPARE_STATUSES: readonly string[] = ['ahead', 'behind', 'identical', 'diverged'];
 
 /** How one GitHub request is authorised and sent; the bearer is a JWT (App level) or an installation token. */
@@ -254,6 +260,23 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubApi {
 			const rec = recordAt(res.body, 'commit');
 			const inner = recordAt(rec.commit, 'commit.commit');
 			return { sha: str(rec, 'sha', 'commit'), message: str(inner, 'message', 'commit.commit') };
+		},
+
+		async repoVisibility(repo) {
+			const res = await call('GET', repoPath(repo), undefined, [404]);
+			if (res.status === 404) return null;
+			const visibility = str(recordAt(res.body, 'repository'), 'visibility', 'repository');
+			if (!VISIBILITIES.includes(visibility)) throw shape('GET', repoPath(repo), 'visibility');
+			return visibility as Visibility;
+		},
+
+		async branchHead(repo, branch) {
+			// A branch name may hold slashes: each segment is encoded, the separators stay.
+			const name = branch.split('/').map(encodeURIComponent).join('/');
+			const res = await call('GET', `${repoPath(repo)}/branches/${name}`, undefined, [404]);
+			if (res.status === 404) return null;
+			const commit = recordAt(recordAt(res.body, 'branch').commit, 'branch.commit');
+			return str(commit, 'sha', 'branch.commit');
 		},
 
 		async openPullsForBranch(repo, branch) {

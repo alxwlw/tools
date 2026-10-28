@@ -5,6 +5,7 @@ import type {
 	DeploymentState,
 	GitHubApi,
 	Pull,
+	Visibility,
 } from '../src/github/client.ts';
 
 const COMPARE_MAX_COMMITS = 250;
@@ -22,10 +23,24 @@ export class FakeGitHub implements GitHubApi {
 	/** Branch commits of merged PRs: GitHub reports the PR for them too, not only for the merge commit. */
 	readonly #branchCommits = new Map<string, string[]>();
 	readonly #deployments: StoredDeployment[] = [];
+	readonly #visibility = new Map<string, Visibility | null>();
+	readonly #branches = new Map<string, string | null>();
 	#nextDeploymentId = 1;
 
 	commit(sha: string, parents: string[], message: string): this {
 		this.#commits.set(sha, { parents, message });
+		return this;
+	}
+
+	/** What `repoVisibility` answers for the repo; null — the App cannot see it. Unset repos are private. */
+	visibility(repo: string, visibility: Visibility | null): this {
+		this.#visibility.set(repo, visibility);
+		return this;
+	}
+
+	/** Head of a branch; null — the branch is gone. An unset branch is gone too. */
+	branch(repo: string, branch: string, sha: string | null): this {
+		this.#branches.set(`${repo}@${branch}`, sha);
 		return this;
 	}
 
@@ -103,6 +118,16 @@ export class FakeGitHub implements GitHubApi {
 		this.calls.push(`getCommit ${repo} ${sha}`);
 		const node = this.#commits.get(sha);
 		return node === undefined ? null : { sha, message: node.message };
+	}
+
+	async repoVisibility(repo: string): Promise<Visibility | null> {
+		this.calls.push(`repoVisibility ${repo}`);
+		return this.#visibility.has(repo) ? (this.#visibility.get(repo) ?? null) : 'private';
+	}
+
+	async branchHead(repo: string, branch: string): Promise<string | null> {
+		this.calls.push(`branchHead ${repo} ${branch}`);
+		return this.#branches.get(`${repo}@${branch}`) ?? null;
 	}
 
 	async openPullsForBranch(repo: string, branch: string): Promise<Pull[]> {

@@ -150,6 +150,59 @@ describe('getCommit', () => {
 	});
 });
 
+describe('repoVisibility', () => {
+	test('repoVisibility — поле visibility; 404 — null', async () => {
+		const { calls, client } = stub([
+			{ status: 200, body: { full_name: 'acme/api', private: true, visibility: 'internal' } },
+			{ status: 200, body: { full_name: 'acme/web', private: false, visibility: 'public' } },
+			{ status: 404, body: { message: 'Not Found' } },
+		]);
+		expect(await client.repoVisibility('acme/api')).toBe('internal');
+		expect(await client.repoVisibility('acme/web')).toBe('public');
+		expect(await client.repoVisibility('acme/gone')).toBeNull();
+		expect(calls[0]).toMatchObject({ method: 'GET', url: `${API}/repos/acme/api` });
+	});
+
+	test('repoVisibility: чужое значение или 500 — ошибка, не догадка', async () => {
+		const { client } = stub([
+			{ status: 200, body: { visibility: 'secret' } },
+			{ status: 200, body: { private: true } },
+			{ status: 500, body: { message: 'boom' } },
+		]);
+		await expect(client.repoVisibility('acme/api')).rejects.toThrow('unexpected shape');
+		await expect(client.repoVisibility('acme/api')).rejects.toThrow('visibility is not a string');
+		await expect(client.repoVisibility('acme/api')).rejects.toThrow('→ 500');
+	});
+});
+
+describe('branchHead', () => {
+	test('branchHead — commit.sha ветки; 404 — null', async () => {
+		const sha = 'c'.repeat(40);
+		const { calls, client } = stub([
+			{ status: 200, body: { name: 'release/1.x', commit: { sha, url: 'x' } } },
+			{ status: 404, body: { message: 'Branch not found' } },
+		]);
+		expect(await client.branchHead('acme/api', 'release/1.x')).toBe(sha);
+		expect(calls[0]).toMatchObject({
+			method: 'GET',
+			url: `${API}/repos/acme/api/branches/release/1.x`,
+		});
+		expect(await client.branchHead('acme/api', 'gone')).toBeNull();
+	});
+
+	test('branchHead: символы в имени ветки кодируются, слеши остаются; 500 и ответ без sha — ошибка', async () => {
+		const { calls, client } = stub([
+			{ status: 200, body: { commit: { sha: 'abc' } } },
+			{ status: 500, body: { message: 'boom' } },
+			{ status: 200, body: { commit: {} } },
+		]);
+		await client.branchHead('acme/api', 'feat/a b#c');
+		expect(calls[0]?.url).toBe(`${API}/repos/acme/api/branches/feat/a%20b%23c`);
+		await expect(client.branchHead('acme/api', 'main')).rejects.toThrow('→ 500');
+		await expect(client.branchHead('acme/api', 'main')).rejects.toThrow('sha is not a string');
+	});
+});
+
 describe('compare', () => {
 	test('compare: 422 (sha исчез) — null, как 404', async () => {
 		const { client } = stub([{ status: 422, body: { message: 'No common ancestor' } }]);
