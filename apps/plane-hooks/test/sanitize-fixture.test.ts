@@ -285,3 +285,50 @@ test('cli без --capture и без заголовков в метаданны�
 	expect(() => cli(['github'])).toThrow('usage:');
 	expect(() => cli([])).toThrow('usage:');
 });
+
+test('sanitizeGithub оставляет логины ботов', () => {
+	const out = JSON.stringify(
+		sanitizeGithub({
+			repository: { full_name: 'example-org/monorepo' },
+			deployment: { creator: { login: 'vercel[bot]' } },
+			status: { creator: { login: 'github-actions[bot]' } },
+			sender: { login: 'someone' },
+		}),
+	);
+	expect(out).toContain('vercel[bot]');
+	expect(out).toContain('github-actions[bot]');
+	expect(out).not.toContain('someone');
+});
+
+test('sanitizeGithub чистит имена людей, организацию в ветке и неизвестные репозитории в URL', () => {
+	const out = sanitizeGithub({
+		repository: { full_name: 'example-org/monorepo' },
+		commits: [{ author: { name: 'Real Person' }, committer: { name: 'Real Committer' } }],
+		pusher: { name: 'Real Pusher' },
+		pull_request: {
+			head: { ref: 'feat/Example-Org-thing' },
+			url: 'https://api.github.com/repos/example-org/hidden-repo/pulls/3',
+		},
+	}) as any;
+	const flat = JSON.stringify(out);
+	for (const original of [
+		'Real Person',
+		'Real Committer',
+		'Real Pusher',
+		'Example-Org',
+		'hidden-repo',
+	]) {
+		expect(flat).not.toContain(original);
+	}
+	expect(out.pull_request.head.ref).toBe('feat/acme-thing');
+	expect(out.pull_request.url).toBe('https://api.github.com/repos/acme/repo2/pulls/3');
+	expect(out.commits[0].author.name).toBe('Octo Cat');
+});
+
+test('sanitizeVercel даёт разным dpl_ id разные замены', () => {
+	const out = sanitizeVercel({ a: 'dpl_aaa', b: 'dpl_bbb', c: 'dpl_aaa' }) as Record<
+		string,
+		string
+	>;
+	expect(out).toEqual({ a: 'dpl_example1', b: 'dpl_example2', c: 'dpl_example1' });
+});

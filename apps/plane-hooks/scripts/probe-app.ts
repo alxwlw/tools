@@ -101,6 +101,27 @@ class Probe {
 		console.log(line);
 		if (this.out !== undefined) writeFileSync(join(this.out, `${step}.json`), `${line}\n`);
 	}
+
+	/**
+	 * Deletes an object the probe created. A throw or a non-2xx answer never stops the next cleanup call;
+	 * the object is named on a `LEFT:` line and the run fails.
+	 */
+	async cleanup(
+		step: string,
+		kind: string,
+		id: string,
+		remove: () => Promise<Reply>,
+	): Promise<void> {
+		try {
+			const reply = await remove();
+			this.report(step, reply);
+			if (reply.status >= 300) console.log(`LEFT: ${kind} ${id}`);
+		} catch (err) {
+			this.failed++;
+			console.log(`LEFT: ${kind} ${id}`);
+			console.log(JSON.stringify({ step, error: err instanceof Error ? err.name : 'error' }));
+		}
+	}
 }
 
 async function send(
@@ -252,7 +273,7 @@ async function planeRelease(
 				external_id: `probe-${stamp}`,
 			}),
 		});
-		itemId = field(item.body, 'id');
+		itemId = item.status < 300 ? field(item.body, 'id') : undefined;
 		p.report('plane-item-create', { status: item.status, body: { id: itemId } });
 		const release = await send('POST', `${s.root}/releases/`, {
 			headers: s.auth,
@@ -263,7 +284,7 @@ async function planeRelease(
 				external_id: `probe-${stamp}`,
 			}),
 		});
-		releaseId = field(release.body, 'id');
+		releaseId = release.status < 300 ? field(release.body, 'id') : undefined;
 		p.report('plane-release-create', release);
 		if (releaseId !== undefined && itemId !== undefined) {
 			p.report(
@@ -276,17 +297,15 @@ async function planeRelease(
 		}
 	} finally {
 		if (releaseId !== undefined) {
-			p.report(
-				'plane-release-delete',
-				await send('DELETE', `${s.root}/releases/${releaseId}/`, { headers: s.auth }),
+			const id = releaseId;
+			await p.cleanup('plane-release-delete', 'release', id, () =>
+				send('DELETE', `${s.root}/releases/${id}/`, { headers: s.auth }),
 			);
 		}
 		if (itemId !== undefined) {
-			p.report(
-				'plane-item-delete',
-				await send('DELETE', `${s.root}/projects/${project}/work-items/${itemId}/`, {
-					headers: s.auth,
-				}),
+			const id = itemId;
+			await p.cleanup('plane-item-delete', 'work-item', id, () =>
+				send('DELETE', `${s.root}/projects/${project}/work-items/${id}/`, { headers: s.auth }),
 			);
 		}
 	}
@@ -430,7 +449,7 @@ async function ghDeploy(
 		}),
 	});
 	p.report('gh-deploy-create', created);
-	const id = field(created.body, 'id');
+	const id = created.status < 300 ? field(created.body, 'id') : undefined;
 	if (id === undefined) return;
 	try {
 		for (const state of ['success', 'inactive']) {
@@ -443,9 +462,8 @@ async function ghDeploy(
 			);
 		}
 	} finally {
-		p.report(
-			'gh-deploy-delete',
-			await send('DELETE', `${GITHUB}/repos/${repo}/deployments/${id}`, { headers: h }),
+		await p.cleanup('gh-deploy-delete', 'deployment', id, () =>
+			send('DELETE', `${GITHUB}/repos/${repo}/deployments/${id}`, { headers: h }),
 		);
 	}
 }

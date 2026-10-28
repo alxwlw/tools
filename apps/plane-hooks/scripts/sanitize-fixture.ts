@@ -19,6 +19,7 @@ type LeafRule = (
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/g;
 const SHA = /(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])/g;
+const PERSON_PARENTS = new Set(['author', 'committer', 'pusher', 'user', 'sender']);
 const AVATAR = /avatars\.githubusercontent\.com\/u\/\d+/g;
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -41,15 +42,18 @@ function numbering(): (value: string | number) => number {
 	};
 }
 
-/** Alternation of literals, longest first, matched case-insensitively and not inside a longer word. */
-function literalsRegExp(values: Iterable<string>): RegExp | null {
+/**
+ * Alternation of literals, longest first, matched case-insensitively and not inside a longer word.
+ * With `hyphenIsWord` false a hyphen counts as a boundary (`feat/Name-thing` matches `Name`).
+ */
+function literalsRegExp(values: Iterable<string>, hyphenIsWord = true): RegExp | null {
 	const parts = [...values]
 		.filter((v) => v !== '')
 		.sort((a, b) => b.length - a.length)
 		.map(escapeRegExp);
-	return parts.length === 0
-		? null
-		: new RegExp(`(?<![A-Za-z0-9-])(?:${parts.join('|')})(?![A-Za-z0-9-])`, 'gi');
+	if (parts.length === 0) return null;
+	const word = hyphenIsWord ? 'A-Za-z0-9-' : 'A-Za-z0-9';
+	return new RegExp(`(?<![${word}])(?:${parts.join('|')})(?![${word}])`, 'gi');
 }
 
 /** Rebuilds `node` with every leaf passed through `rule` (array elements keep the key of the array). */
@@ -97,7 +101,8 @@ export function sanitizeGithub(value: unknown): unknown {
 			repos.set(v.toLowerCase(), `acme/${name}`);
 			owners.add(full[1].toLowerCase());
 		}
-		if (key === 'login') logins.add(v);
+		// Bot logins (`vercel[bot]`) are public service names the receiver tells apart: kept.
+		if (key === 'login' && !/\[bot\]$/i.test(v)) logins.add(v);
 	});
 	const people = new Map<string, string>();
 	for (const login of logins) {
@@ -110,19 +115,35 @@ export function sanitizeGithub(value: unknown): unknown {
 	const names = new Map<string, string>([...repos].map(([k, v]) => [k, v]));
 	for (const o of owners) names.set(o, 'acme');
 	for (const [k, v] of people) names.set(k, v);
-	const literals = literalsRegExp(names.keys());
+	const literals = literalsRegExp(names.keys(), false);
+	// `<owner>/<repo>` of a known owner, including repositories that never had a `full_name`.
+	const pairs = literalsRegExp(owners, false);
+	const pairRe = pairs ? new RegExp(`${pairs.source}/([A-Za-z0-9._-]+)`, 'gi') : null;
+	const repoName = (name: string): string => {
+		const known = repoNames.get(name.toLowerCase());
+		if (known !== undefined) return known;
+		const n = repoNames.size + 1;
+		const made = n === 1 ? 'api' : `repo${n}`;
+		repoNames.set(name.toLowerCase(), made);
+		return made;
+	};
 	const ids = numbering();
 	const nodeIds = numbering();
 
 	const text = (s: string): string => {
 		let out = s.replace(EMAIL, 'octocat@example.com');
+		if (pairRe) out = out.replace(pairRe, (_m, repo: string) => `acme/${repoName(repo)}`);
 		if (literals) out = out.replace(literals, (m) => names.get(m.toLowerCase()) ?? m);
 		return out.replace(SHA, fakeSha).replace(AVATAR, 'avatars.githubusercontent.com/u/1');
 	};
-	return mapLeaves(value, (v, key) => {
+	return mapLeaves(value, (v, key, parent) => {
 		if (key === 'id' && typeof v === 'number') return ids(v);
 		if (key === 'node_id' && typeof v === 'string') return `${nodeIds(v)}_kwDOexample`;
-		if (key === 'name' && typeof v === 'string') return repoNames.get(v.toLowerCase()) ?? text(v);
+		if (key === 'name' && typeof v === 'string') {
+			// A person's real name (author, committer, pusher, user, sender), not a repository name.
+			if (parent !== undefined && PERSON_PARENTS.has(parent)) return 'Octo Cat';
+			return repoNames.get(v.toLowerCase()) ?? text(v);
+		}
 		return typeof v === 'string' ? text(v) : undefined;
 	});
 }
