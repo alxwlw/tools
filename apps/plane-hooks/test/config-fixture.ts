@@ -42,7 +42,7 @@ export function tenantOf(overrides: Partial<Tenant> = {}): Tenant {
 			],
 			projects: { QA: { Done: 'Ready for retest' } },
 		},
-		dokploy: [{ name: 'api', repo: 'acme/api', environment: 'production' }],
+		dokploy: [{ name: 'api', repo: 'acme/api', branch: 'main', environment: 'production' }],
 		inputs: {
 			grafana: `ph_${'a'.repeat(48)}`,
 			vercel: 'vercel-secret',

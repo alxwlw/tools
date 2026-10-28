@@ -114,7 +114,8 @@ export const DEFAULT_PRIORITY: PriorityTable = {
 // Keys that would write into or shadow Object.prototype when used on a plain object.
 const UNSAFE_KEYS: readonly string[] = ['__proto__', 'constructor', 'prototype'];
 const PRIORITIES: readonly string[] = ['urgent', 'high', 'medium'];
-export type DokployAppRule = { name: string; repo: string; environment: string };
+/** `branch` — the branch whose head stands for the deployed commit: Dokploy's notification carries none. */
+export type DokployAppRule = { name: string; repo: string; branch: string; environment: string };
 export type Tenant = {
 	id: string;
 	workspace: string;
@@ -361,13 +362,14 @@ function parseServiceTenant(
 				const path = `${at}.dokploy.apps[${j}]`;
 				const appObj = obj(app, path);
 				if (!appObj) return;
-				unknownKeys(appObj, ['name', 'repo', 'environment'], path);
+				unknownKeys(appObj, ['name', 'repo', 'branch', 'environment'], path);
 				const name = str(appObj, 'name', path);
 				if (names.has(name)) fail(`${path}.name is a duplicate`);
 				names.add(name);
 				dokploy.push({
 					name,
 					repo: str(appObj, 'repo', path, REPO_NAME, 'owner/name'),
+					branch: str(appObj, 'branch', path),
 					environment: str(appObj, 'environment', path),
 				});
 			});

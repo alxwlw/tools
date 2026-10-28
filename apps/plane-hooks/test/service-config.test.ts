@@ -285,6 +285,16 @@ describe('loadServiceConfig', () => {
 			(f) => (f.tenants[0].incidents.project = 'inc'),
 			'incidents.project must be',
 		],
+		[
+			'dokploy.apps без branch — ошибка с путём',
+			(f) => delete f.tenants[0].dokploy.apps[0].branch,
+			'tenants[0].dokploy.apps[0].branch must be a non-empty string',
+		],
+		[
+			'dokploy.apps: пустой branch — ошибка с путём',
+			(f) => (f.tenants[0].dokploy.apps[0].branch = ' '),
+			'tenants[0].dokploy.apps[0].branch must be',
+		],
 		['dokploy: лишний ключ', (f) => (f.tenants[0].dokploy.x = 1), 'dokploy.x is not a known'],
 		[
 			'dokploy.apps[0]: лишний ключ',
