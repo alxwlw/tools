@@ -34,6 +34,8 @@ export type ReleaseDraft = {
 	runUrl: string;
 	/** Newest first, as report-deploy.sh sends them; commits[0] is the deployed commit when it carries any. */
 	commits: DeployCommit[];
+	/** Title of the PR whose merge commit is `sha`: the release name carries it. */
+	headline?: string;
 };
 
 export type DeployOutcome =

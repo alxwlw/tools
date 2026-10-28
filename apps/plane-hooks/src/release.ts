@@ -6,9 +6,6 @@ import { type PlaneApi, RELEASE_ITEMS_MAX } from './plane.ts';
 export const RELEASE_SOURCE = 'github-deploy';
 const NAME_MAX = 200;
 const HEADLINE_MAX = 200;
-/** GitHub's merge of the release PR: `Merge pull request #889 from example-org/staging`, a blank line, the PR title. */
-const RELEASE_MERGE = /^Merge pull request #\d+ from [^\s/]+\/staging\r?\n\r?\n([^\r\n]+)/;
-
 /** A work item a deploy note found: the key for the changelog, the id for the release link. */
 export type ReleaseItem = { key: string; workItemId: string };
 /** `noop` — the release was already there (a replayed event); its changelog and work items were written again. */
@@ -19,15 +16,11 @@ export function releaseExternalId(draft: ReleaseDraft): string {
 	return `${draft.repository}@${draft.sha}`;
 }
 
-/** `2026-10-09 · 0ee269c`, plus ` — <PR title>` when the deployed commit is the merge of a release PR from staging. */
+/** `2026-10-09 · 0ee269c`, plus ` — <headline>` when the draft carries one (the title of the PR whose merge was deployed). */
 export function releaseName(draft: ReleaseDraft): string {
 	const base = `${draft.at.slice(0, 10)} · ${draft.sha.slice(0, 7)}`;
-	const head = draft.commits[0];
-	const title =
-		head !== undefined && head.sha === draft.sha
-			? RELEASE_MERGE.exec(head.message)?.[1]?.trim()
-			: undefined;
-	return truncate(title ? `${base} — ${title}` : base, NAME_MAX);
+	const headline = draft.headline?.trim();
+	return truncate(headline ? `${base} — ${headline}` : base, NAME_MAX);
 }
 
 /** Commits of the deploy (headline, short sha linked to the commit), then the work items it delivered. */
