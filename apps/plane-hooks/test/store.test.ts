@@ -228,6 +228,45 @@ describe('Store: входящие доставки', () => {
 	});
 });
 
+describe('Store: другое соединение держит запись', () => {
+	/** A second process takes the write lock on `path`, says so, holds it for `ms`, then commits. */
+	async function holdLock(path: string, ms: number) {
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				'-e',
+				`const { Database } = require('bun:sqlite');
+				const db = new Database(${JSON.stringify(path)});
+				db.run('BEGIN IMMEDIATE');
+				console.log('locked');
+				Bun.sleepSync(${ms});
+				db.run('COMMIT');`,
+			],
+			{ stdout: 'pipe', stderr: 'inherit' },
+		);
+		const reader = child.stdout.getReader();
+		const { value } = await reader.read();
+		expect(new TextDecoder().decode(value)).toContain('locked');
+		reader.releaseLock();
+		return child;
+	}
+
+	test('запись ждёт чужую блокировку и проходит; открытие свежей базы блокировку не берёт', async () => {
+		const path = tempFile();
+		new Store(path).close();
+		const child = await holdLock(path, 200);
+		// Opening an up-to-date file writes nothing, so it does not wait for (or fail on) the lock.
+		const store = new Store(path);
+		const started = performance.now();
+		const id = store.inboxAdd('acme', 'github', 'd-locked', '{}', '2026-10-28T10:00:00Z');
+		expect(typeof id).toBe('number');
+		expect(performance.now() - started).toBeGreaterThan(50);
+		expect(await child.exited).toBe(0);
+		expect(store.inboxPending().map((job) => job.id)).toEqual([id as number]);
+		store.close();
+	});
+});
+
 describe('Store: журнал переходов', () => {
 	const row = (key: string, at: string, tenant = 'acme') => ({
 		tenant,

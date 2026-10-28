@@ -4,6 +4,8 @@ import type { DeployCursor } from './delivery/deploy.ts';
 
 /** Bump together with a migration; a file written by a newer build is refused, never half-read. */
 const SCHEMA_VERSION = 2;
+/** How long a write waits for another connection's lock before "database is locked". */
+const BUSY_TIMEOUT_MS = 5_000;
 const DAY_MS = 86_400_000;
 /** Done deliveries stay this long: a GitHub redelivery within the window is recognised as a duplicate. */
 const KEEP_DONE_MS = 14 * DAY_MS;
@@ -28,6 +30,9 @@ export class Store {
 
 	constructor(path: string) {
 		this.#db = new Database(path, { create: true });
+		// Operators run scripts/inbox.ts and journal.ts against the live file: a write waits for the other
+		// connection's lock instead of failing at once with "database is locked" (bun:sqlite waits 0 ms).
+		this.#db.run(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
 		this.#db.run('PRAGMA journal_mode = WAL');
 		this.#migrate();
 	}
@@ -75,7 +80,8 @@ export class Store {
 			)`);
 			this.#db.run('CREATE INDEX IF NOT EXISTS journal_at ON journal (at)');
 		}
-		this.#db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+		// Written only on a change: opening an up-to-date file takes no write lock.
+		if (version !== SCHEMA_VERSION) this.#db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	}
 
 	/**
@@ -112,7 +118,9 @@ export class Store {
 				)
 				.get(tenant, kind, deliveryId, payload, isoOf(at)) as { id: number };
 			return row.id;
-		})();
+			// IMMEDIATE takes the write lock up front, through busy_timeout: a deferred transaction that has read
+			// and then needs to write fails at once with SQLITE_BUSY while another connection holds the lock.
+		}).immediate();
 	}
 
 	/** The payload is dropped: it can carry PR titles and bodies. */
