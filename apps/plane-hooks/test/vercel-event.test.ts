@@ -163,6 +163,11 @@ describe('parseVercelEvent: promote и rollback', () => {
 	test('promote без githubCommitOrg/Repo и sha — repo и sha null', () => {
 		const ev = promoted((b) => (b.payload.deployment.meta = {}));
 		expect(ev).toMatchObject({ kind: 'promoted', repo: null, sha: null });
+		// Half a repository name is no repository.
+		const orgOnly = promoted((b) => delete b.payload.deployment.meta.githubCommitRepo);
+		expect(orgOnly).toMatchObject({ repo: null, sha: SHA });
+		const repoOnly = promoted((b) => delete b.payload.deployment.meta.githubCommitOrg);
+		expect(repoOnly).toMatchObject({ repo: null });
 	});
 
 	test('rollback — свой kind; тела deployment в документации нет, sha и url null', () => {
