@@ -352,6 +352,15 @@ describe('loadServiceConfig', () => {
 		expect(tenant?.delivery?.repos).toEqual([{ repo: 'acme/*', environments: [] }]);
 	});
 
+	test('delivery без repos и projects: пустые правила', () => {
+		const config = load((file) => {
+			delete file.tenants[0].delivery.repos;
+			delete file.tenants[0].delivery.projects;
+		});
+		expect(config.tenants[0]?.delivery?.repos).toEqual([]);
+		expect(config.tenants[0]?.delivery?.projects).toEqual({});
+	});
+
 	test('имя и владелец App — разные поля', () => {
 		const config = load((file) => {
 			file.tenants[0].github[0].owner = 'acme-org';
