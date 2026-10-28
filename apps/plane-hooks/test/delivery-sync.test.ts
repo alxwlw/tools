@@ -9,6 +9,19 @@ import { tenantOf } from './config-fixture.ts';
 import { FakeGitHub } from './fake-github.ts';
 import { FakePlane } from './fake-plane.ts';
 
+const BASE_PULL: Pull = {
+	repo: 'acme/api',
+	number: 1,
+	url: 'https://github.com/acme/api/pull/1',
+	title: 't',
+	body: '',
+	head: 'h',
+	base: 'main',
+	draft: false,
+	state: 'open',
+	merged: false,
+	mergeSha: null,
+};
 const PROJECT_IDS: Record<string, string> = {
 	ENG: 'p-eng',
 	OPS: 'p-ops',
@@ -304,7 +317,10 @@ describe('syncTask: проекты', () => {
 		});
 		expect(w.stateOf(id)).toBe('ops-in-progress');
 		expect(w.warns).toHaveLength(1);
-		expect(w.warns[0]?.reason).toBe('state_missing:OPS:In Review');
+		expect(w.warns[0]).toEqual({
+			reason: 'state_missing:OPS:In Review',
+			entry: { project: 'OPS', state: 'In Review' },
+		});
 	});
 
 	test('null в projects — состояние не ставится, и это не warn', async () => {
@@ -444,23 +460,92 @@ describe('syncTask: комментарии перехода', () => {
 	});
 });
 
+describe('syncTask: края', () => {
+	test('delivery выключен — skipped', async () => {
+		const w = world(tenantOf({ delivery: null }));
+		w.item('ENG-1', 'In Progress');
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toEqual({
+			key: 'ENG-1',
+			action: 'skipped',
+			reason: 'delivery off',
+		});
+	});
+
+	test('самый отстающий не зависит от порядка ссылок', async () => {
+		const w = world();
+		const id = w.item('ENG-1', 'In Review', [
+			['acme/infra', 2],
+			['acme/api', 1],
+		]);
+		w.gh.commit('m1', [], 'api merge').commit('m2', [], 'infra merge');
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' }).mergePull('acme/api', 1, 'm1');
+		w.gh
+			.pull({ repo: 'acme/infra', number: 2, title: 'ENG-1 infra' })
+			.mergePull('acme/infra', 2, 'm2');
+		w.gh.deploy('acme/api', 'staging', 'm1', 'success');
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toMatchObject({ to: 'On staging' });
+		expect(w.stateOf(id)).toBe('eng-on-staging');
+	});
+
+	test('один PR не находит шага в проекте — задача стоит, хоть другой дошёл до Done', async () => {
+		const w = world();
+		const id = w.item('OPS-1', 'In Progress', [
+			['acme/api', 1],
+			['acme/infra', 2],
+		]);
+		w.gh.commit('m2', [], 'infra merge');
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'OPS-1 api' });
+		w.gh
+			.pull({ repo: 'acme/infra', number: 2, title: 'OPS-1 infra' })
+			.mergePull('acme/infra', 2, 'm2');
+		expect(await syncTask(w.deps, 'OPS-1', w.pr())).toMatchObject({
+			action: 'noop',
+			reason: 'unresolved',
+		});
+		expect(w.stateOf(id)).toBe('ops-in-progress');
+	});
+
+	test('состояние задачи, которого нет в проекте, — noop', async () => {
+		const w = world();
+		const item = w.plane.seedWorkItem('p-eng', { sequence: 1, state: 'gone' });
+		w.plane.links.push({
+			id: 'l1',
+			project: 'p-eng',
+			workItemId: item.id,
+			url: 'https://github.com/acme/api/pull/1',
+			title: 't',
+		});
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		expect(await syncTask(w.deps, 'ENG-1', w.pr())).toMatchObject({ reason: 'unknown state' });
+		expect(w.plane.calls).not.toContain('setWorkItemState');
+	});
+
+	test('extra репозитория без правила не считается', async () => {
+		const w = world();
+		w.item('ENG-1', 'In Progress');
+		const pull = { ...BASE_PULL, repo: 'zzz/lib', draft: true, title: 'ENG-1 lib' };
+		expect(await syncTask(w.deps, 'ENG-1', w.pr(pull), [pull])).toMatchObject({
+			reason: 'no pulls',
+		});
+	});
+
+	test('одна и та же ссылка дважды — PR запрашивается один раз', async () => {
+		const w = world();
+		w.item('ENG-1', 'In Progress', [
+			['acme/api', 1],
+			['acme/api', 1],
+		]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 api' });
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.gh.calls.filter((c) => c === 'getPull acme/api#1')).toHaveLength(1);
+	});
+});
+
 describe('позиции', () => {
 	const rules = tenantOf().delivery as NonNullable<Tenant['delivery']>;
 	const api = rules.repos[0] as NonNullable<(typeof rules.repos)[0]>;
 	const wild = rules.repos[1] as NonNullable<(typeof rules.repos)[1]>;
-	const basePull: Pull = {
-		repo: 'acme/api',
-		number: 1,
-		url: 'https://github.com/acme/api/pull/1',
-		title: 't',
-		body: '',
-		head: 'h',
-		base: 'main',
-		draft: false,
-		state: 'open',
-		merged: false,
-		mergeSha: null,
-	};
+	const basePull: Pull = BASE_PULL;
 	const merged: Pull = { ...basePull, state: 'closed', merged: true, mergeSha: 'm1' };
 
 	test('цепочка: review и окружения, без окружений — review и done', () => {
@@ -489,7 +574,9 @@ describe('позиции', () => {
 		const never = async () => {
 			throw new Error('contains must not be asked');
 		};
-		expect(await pullPosition({ ...merged, mergeSha: null }, api, rules, never)).toMatchObject({
+		expect(await pullPosition({ ...merged, mergeSha: null }, api, rules, never)).toEqual({
+			kind: 'at',
+			chain: ['In Review', 'On staging', 'Done'],
 			index: 0,
 		});
 	});
@@ -545,6 +632,7 @@ describe('containsVia', () => {
 		expect(await contains('acme/api', 'production', 'c1')).toBe(true);
 		expect(await contains('acme/api', 'production', 'c2')).toBe(true);
 		expect(await contains('acme/api', 'production', 'c3')).toBe(false);
+		expect(gh.calls).toContain('compare acme/api c1...c2');
 	});
 
 	test('берётся последний успешный деплой, упавшие новее него пропускаются', async () => {
@@ -574,6 +662,13 @@ describe('containsVia', () => {
 		});
 		await expect(contains('acme/api', 'production', 'c1')).rejects.toThrow('network');
 		expect(await contains('acme/api', 'production', 'c1')).toBe(true);
+	});
+
+	test('ответы разных репозиториев не смешиваются', async () => {
+		const { gh, contains } = graph();
+		gh.deploy('acme/api', 'production', 'c2', 'success');
+		expect(await contains('acme/api', 'production', 'c1')).toBe(true);
+		expect(await contains('acme/infra', 'production', 'c1')).toBe(false);
 	});
 
 	test('ответ запоминается по репозиторию, окружению и sha', async () => {

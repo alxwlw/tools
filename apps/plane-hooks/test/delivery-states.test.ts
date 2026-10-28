@@ -25,6 +25,9 @@ describe('compareStates', () => {
 		expect(compareStates(progress, review)).toBeLessThan(0);
 		expect(compareStates(review, progress)).toBeGreaterThan(0);
 		expect(compareStates(review, { ...review, id: 'x' })).toBe(0);
+		expect(compareStates(done, cancelled)).toBeLessThan(0);
+		expect(compareStates(cancelled, progress)).toBeGreaterThan(0);
+		expect(compareStates({ ...cancelled, group: 'weird' }, progress)).toBeGreaterThan(0);
 	});
 });
 
