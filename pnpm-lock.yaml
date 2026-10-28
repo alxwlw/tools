@@ -243,7 +243,7 @@ importers:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.7.1
+        version: 1.8.0
       '@types/bun':
         specifier: catalog:dev
         version: 1.4.3
