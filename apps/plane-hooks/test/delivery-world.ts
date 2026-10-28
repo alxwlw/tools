@@ -16,6 +16,7 @@ export function deliveryWorld(tenant: Tenant = tenantOf()) {
 	const plane = FakePlane.delivery();
 	const gh = new FakeGitHub();
 	const warns: Array<{ reason: string; entry: Record<string, string> }> = [];
+	const moves: Array<Parameters<SyncDeps['moved']>[0]> = [];
 	const github = async (repo: string) => (repo.startsWith('other/') ? null : gh);
 	const deps: SyncDeps = {
 		tenant,
@@ -25,6 +26,7 @@ export function deliveryWorld(tenant: Tenant = tenantOf()) {
 		states: (id) => plane.listStates(id),
 		contains: containsVia(github),
 		warnOnce: (reason, entry) => warns.push({ reason, entry }),
+		moved: (move) => moves.push(move),
 	};
 	/** A work item in `state`; returns its id. */
 	const item = (key: string, state: string) => plane.addWorkItem(key, state);
@@ -32,5 +34,16 @@ export function deliveryWorld(tenant: Tenant = tenantOf()) {
 	const linksOf = (id: string) => plane.links.filter((l) => l.workItemId === id);
 	/** The ids of a work item's comments' external ids, in creation order. */
 	const commentIds = (id: string) => plane.commentsOf(id).map((c) => c.external_id);
-	return { plane, gh, deps, warns, item, stateOf, linksOf, commentIds, projectIds: PROJECT_IDS };
+	return {
+		plane,
+		gh,
+		deps,
+		warns,
+		moves,
+		item,
+		stateOf,
+		linksOf,
+		commentIds,
+		projectIds: PROJECT_IDS,
+	};
 }

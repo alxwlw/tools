@@ -61,7 +61,7 @@ export function githubDeployFact(event: StatusEvent): DeployFact {
 async function githubJob(runtime: TenantRuntime, event: GitHubJob, deps: JobDeps): Promise<void> {
 	if (event.kind === 'pull_request') {
 		const { linked, synced } = await handlePullRequest(eventDeps(runtime), event);
-		logSynced(runtime, synced, `pr:${event.pull.repo}#${event.pull.number}`, deps);
+		logSynced(runtime, synced, deps);
 		deps.log({
 			event: 'github.pull_request',
 			tenant: runtime.tenant.id,
@@ -92,7 +92,7 @@ async function deployJob(
 	const kind = result.action === 'rolled_back' ? 'rolledback' : 'deployed';
 	for (const note of result.notes)
 		deps.log({ event: 'delivery.noted', tenant, key: note.key, kind, created: note.created });
-	logSynced(runtime, result.synced, `deploy:${fact.repo}:${fact.environment}:${fact.sha}`, deps);
+	logSynced(runtime, result.synced, deps);
 	if (result.release !== null) {
 		deps.log({
 			event: 'release',
@@ -165,13 +165,11 @@ async function dokployJob(
 	});
 }
 
-/** One `delivery.synced` line per result; a move also goes to the journal with its cause. */
-function logSynced(
-	runtime: TenantRuntime,
-	results: readonly SyncResult[],
-	cause: string,
-	deps: JobDeps,
-): void {
+/**
+ * One `delivery.synced` line per result of the attempt that finished the job. The journal row of a move is
+ * written by `SyncDeps.moved` when the move lands, so a move made by an earlier, failed attempt is kept too.
+ */
+function logSynced(runtime: TenantRuntime, results: readonly SyncResult[], deps: JobDeps): void {
 	const tenant = runtime.tenant.id;
 	for (const result of results) {
 		deps.log({
@@ -183,16 +181,6 @@ function logSynced(
 			to: result.to,
 			reason: result.reason,
 		});
-		if (result.action === 'moved' && result.from !== undefined && result.to !== undefined) {
-			deps.store.journalAdd({
-				tenant,
-				key: result.key,
-				from: result.from,
-				to: result.to,
-				cause,
-				at: new Date(deps.now()).toISOString(),
-			});
-		}
 	}
 }
 

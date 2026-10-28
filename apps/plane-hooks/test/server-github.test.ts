@@ -97,6 +97,38 @@ describe('GitHub: доставка PR', () => {
 		]);
 	});
 
+	test('повтор задачи после сбоя: переход, сделанный упавшей попыткой, остаётся в журнале', async () => {
+		const w = world();
+		const a = w.plane.addWorkItem('ENG-7', 'In Progress');
+		const b = w.plane.addWorkItem('ENG-8', 'In Progress');
+		const write = w.plane.setWorkItemState.bind(w.plane);
+		let calls = 0;
+		// The second state write (ENG-8 in the first attempt) fails: the queue retries the whole job.
+		w.plane.setWorkItemState = async (project: string, id: string, state: string) => {
+			calls += 1;
+			if (calls === 2) throw new PlaneApiError(503, 'PATCH', '/work-items/');
+			return write(project, id, state);
+		};
+		await w.send(
+			githubRequest(
+				'pull_request',
+				pullPayload('ready_for_review', { title: 'ENG-7 ENG-8 retry' }),
+			),
+		);
+		expect([stateOf(w, a), stateOf(w, b), w.lines('job.retry').length]).toEqual([
+			'eng-in-review',
+			'eng-in-review',
+			1,
+		]);
+		// The retry finds ENG-7 already moved (noop), yet both moves are in the journal, once each.
+		expect(
+			w.store.journalSince('2026-10-01T00:00:00Z').map((row) => [row.key, row.to, row.cause]),
+		).toEqual([
+			['ENG-7', 'In Review', 'pr:acme/api#12'],
+			['ENG-8', 'In Review', 'pr:acme/api#12'],
+		]);
+	});
+
 	test('две доставки одного PR подряд — один комментарий перехода', async () => {
 		const w = world();
 		const id = seed(w);

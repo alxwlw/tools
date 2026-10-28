@@ -195,6 +195,8 @@ function createRuntime(
 				return load();
 			},
 			warnOnce,
+			moved: (move) =>
+				deps.store.journalAdd({ tenant: tenant.id, ...move, at: new Date(now()).toISOString() }),
 			releases: (draft, items) => publishRelease({ plane }, draft, items),
 			cursor: deps.store.cursorFor(tenant.id),
 		},

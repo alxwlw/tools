@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { Tenant } from '../src/config.ts';
 import { chainFor, pullPosition, resolveStep } from '../src/delivery/position.ts';
-import { containsVia, type SyncDeps, syncTask } from '../src/delivery/sync.ts';
+import { causeKey, containsVia, type SyncDeps, syncTask } from '../src/delivery/sync.ts';
 import type { Pull } from '../src/github/client.ts';
 import type { StateSummary } from '../src/plane.ts';
 import { tenantOf } from './config-fixture.ts';
@@ -33,6 +33,7 @@ function world(tenant: Tenant = tenantOf()) {
 	const plane = FakePlane.delivery();
 	const gh = new FakeGitHub();
 	const warns: Array<{ reason: string; entry: Record<string, string> }> = [];
+	const moves: Array<Parameters<SyncDeps['moved']>[0]> = [];
 	const github = async (repo: string) => (repo.startsWith('other/') ? null : gh);
 	const deps: SyncDeps = {
 		tenant,
@@ -42,6 +43,7 @@ function world(tenant: Tenant = tenantOf()) {
 		states: (id) => plane.listStates(id),
 		contains: containsVia(github),
 		warnOnce: (reason, entry) => warns.push({ reason, entry }),
+		moved: (move) => moves.push(move),
 	};
 	/** A work item in `state`, linked to each `[repo, number]`; returns its id. */
 	const item = (key: string, state: string, pulls: Array<[string, number]> = []) => {
@@ -64,7 +66,7 @@ function world(tenant: Tenant = tenantOf()) {
 		pull: cause ?? ({ repo: 'acme/api', number: 1, url: '' } as Pull),
 		deliveryId,
 	});
-	return { plane, gh, deps, warns, item, stateOf, pr };
+	return { plane, gh, deps, warns, moves, item, stateOf, pr };
 }
 
 describe('syncTask: цепочка PR', () => {
@@ -87,6 +89,23 @@ describe('syncTask: цепочка PR', () => {
 		expect(comment?.comment_html).toBe(
 			'<p>Статус → <b>In Review</b>: <a href="https://github.com/acme/api/pull/1">acme/api#1</a></p>',
 		);
+	});
+
+	test('переход — moved с причиной сразу после записи статуса; сбой записи — без moved', async () => {
+		const w = world();
+		w.item('ENG-1', 'In Progress', [['acme/api', 1]]);
+		w.item('ENG-2', 'In Progress', [['acme/api', 1]]);
+		w.gh.pull({ repo: 'acme/api', number: 1, title: 'ENG-1 ENG-2 feature' });
+		await syncTask(w.deps, 'ENG-1', w.pr());
+		expect(w.moves).toEqual([
+			{ key: 'ENG-1', from: 'In Progress', to: 'In Review', cause: 'pr:acme/api#1' },
+		]);
+		w.plane.failNext('setWorkItemState');
+		await expect(syncTask(w.deps, 'ENG-2', w.pr())).rejects.toThrow();
+		expect(w.moves).toHaveLength(1);
+		expect(
+			causeKey({ kind: 'deploy', repo: 'acme/api', environment: 'staging', sha: 'abc1234' }),
+		).toBe('deploy:acme/api:staging:abc1234');
 	});
 
 	test('черновой PR второго репозитория держит задачу', async () => {

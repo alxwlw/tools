@@ -23,6 +23,11 @@ export type SyncDeps = {
 	/** Memoised per event: does the latest successful deployment of repo/environment contain sha? */
 	contains: (repo: string, environment: string, sha: string) => Promise<boolean>;
 	warnOnce: (reason: string, entry: Record<string, string>) => void;
+	/**
+	 * Called right after a state write lands, before anything else can fail: a job the queue retries whole
+	 * finds the work item already moved (noop), so the move is recorded here, where it happened.
+	 */
+	moved: (move: { key: string; from: string; to: string; cause: string }) => void;
 };
 export type SyncResult = {
 	key: string;
@@ -33,6 +38,13 @@ export type SyncResult = {
 };
 
 type Candidate = { pull: Pull; rule: RepoRule };
+
+/** The cause of a move as the journal names it: `pr:<repo>#<number>` or `deploy:<repo>:<environment>:<sha>`. */
+export function causeKey(cause: SyncCause): string {
+	return cause.kind === 'pr'
+		? `pr:${cause.pull.repo}#${cause.pull.number}`
+		: `deploy:${cause.repo}:${cause.environment}:${cause.sha}`;
+}
 
 /** The PRs the work item belongs to: its links plus `extra`, minus those the hub cannot see or that name another task. */
 async function pullsOf(
@@ -147,6 +159,7 @@ export async function syncTask(
 		external_source: SOURCE,
 	});
 	await deps.plane.setWorkItemState(item.project, item.id, target.id);
+	deps.moved({ key, from: current.name, to: target.name, cause: causeKey(cause) });
 	return { key, action: 'moved', from: current.name, to: target.name };
 }
 
