@@ -37,34 +37,42 @@ touched by the status rules.
 
 ## Install checklist
 
-Do the steps in this order: the Plane installation id only exists after the hub is running, and the GitHub App
-only exists after the tenant is known to the hub. Below, `acme` is the tenant id, `example-ws` the Plane workspace
-slug.
+Do the steps in this order: the Plane App must exist before the hub can send anyone to its consent screen
+(`/plane/setup` redirects with the real `clientId`; a placeholder ends in «Something went wrong» in Plane), the
+Plane installation id only exists after that consent, and the GitHub App only exists after the tenant is known to
+the hub. Only `appInstallationId` may be a placeholder at the start (the hub does not use it for `/plane/setup`,
+and it does not check its shape). Below, `acme` is the tenant id, `example-ws` the Plane workspace slug.
 
-1. **Write a first `tenants.json`** with placeholders (the [minimal file](#tenantsjson) below). `clientId` and
-   `appInstallationId` only have to be non-empty strings now, for example `"placeholder"`; the hub does not check
-   their shape. Leave out `github`, `incidents`, `delivery`, `dokploy` and `silenceHours`.
-2. **Start the hub** ([`docker run`](#running-the-hub) below) with `PLANE_HOOKS_ACME_PLANE_SECRET=placeholder`.
-   You should see the `listening` line with `"id":"acme"`, and `curl https://hooks.example.com/healthz` answers
-   `ok`. The watchdog may log `plane.auth_failed` until the real values are in: ignore it for now.
-3. **Register the Plane App** ([Plane App](#plane-app) below) with the hub's URLs. Save the **Client ID** and the
-   **Client Secret**.
+1. **Register the Plane App** ([Plane App](#plane-app) below) with the hub's URLs. Copy the **Client ID** and the
+   **Client Secret** at once: the Secret is shown only in the "App created" dialog.
+2. **Write a first `tenants.json`** (the [minimal file](#tenantsjson) below) with the real `clientId` from step 1
+   and `"appInstallationId": "placeholder"`. Leave out `github`, `incidents`, `delivery`, `dokploy` and
+   `silenceHours`.
+3. **Start the hub** ([`docker run`](#running-the-hub) below) with the real client secret in
+   `PLANE_HOOKS_ACME_PLANE_SECRET`. You should see the `listening` line with `"id":"acme"`, and
+   `curl https://hooks.example.com/healthz` answers `ok`.
 4. **Open `https://hooks.example.com/plane/setup?tenant=acme`** in a browser logged in to Plane as a workspace
    admin. It redirects to the Plane consent screen; approve it. You land on
    `https://hooks.example.com/plane/oauth/callback?…`, a plain-text page that prints
-   `app_installation_id=<uuid>`.
-5. **Put the real values in** `tenants.json` (`plane.clientId`, `plane.appInstallationId`) and the client secret
-   in `PLANE_HOOKS_ACME_PLANE_SECRET`; **restart** the container. The `listening` line appears again, and the
-   watchdog stays quiet (a `plane.auth_failed` that stays means a wrong client id, secret or installation id).
-6. **Create the GitHub App**: open
+   `app_installation_id=<uuid>` (the hub also logs it as `plane.installed`).
+5. **Put the id in** `tenants.json` (`plane.appInstallationId`) and **restart** the container. Then check that
+   the hub is healthy: `/healthz` answers `ok` and the `listening` line appears again. Do not wait for the
+   [watchdog](#watchdog) to prove the bot works: its first check runs 15 minutes after the start, so a quiet log
+   right after a restart proves nothing (a `plane.auth_failed` after 15 minutes means a wrong client id, secret or
+   installation id). The quick proof is step 8, or `scripts/probe-plane.ts` ([Development](#development)).
+6. **Create the GitHub App**: in a browser logged in to GitHub as an owner of `acme`, open
    `https://hooks.example.com/github/setup?tenant=acme&owner=acme&kind=org` and press the button (see
-   [GitHub App](#github-app)). The callback page shows, once, the `github` entry for `tenants.json` and two env
-   values. Add the entry, set `PLANE_HOOKS_GH_ACME_PRIVATE_KEY` and `PLANE_HOOKS_GH_ACME_WEBHOOK_SECRET`,
+   [GitHub App](#github-app); GitHub may ask to confirm sudo or 2FA). The callback page shows, once, the `github`
+   entry for `tenants.json` and two env values: copy them right away. Add the entry, set `PLANE_HOOKS_GH_ACME_PRIVATE_KEY` and `PLANE_HOOKS_GH_ACME_WEBHOOK_SECRET`,
    **restart**, then install the App on the repositories with the link on that page. The `listening` line now
    shows `"apps":["acme"]`.
 7. **Turn on the inputs you use** (each is off until its secret is set; restart after setting it): add `delivery`
    and `incidents` to `tenants.json`, then [Vercel](#vercel), [Grafana](#grafana), [Dokploy](#dokploy). The
-   `listening` line lists the inputs that are on.
+   `listening` line lists the inputs that are on (`github`, `grafana`, `vercel`, `dokploy`); `delivery` and
+   `incidents` are not in it, so there is no marker that those rules loaded. State names in `delivery` must match the
+   project's states by name (case-insensitive, otherwise exact: `In Review`, `Done`); a name the project lacks shows
+   only later, as one `warn` line (`event: "warning"`, `reason: "state_missing:<project>:<name>"`) on the first PR
+   that needs it.
 8. **Check.** Open a draft PR on `acme/api` whose title has a work item key such as `ENG-1`, and mark it ready for
    review: the work item moves to the review state and gets a comment naming the PR. From a sender, a signed test
    delivery can be posted with `scripts/replay.ts` (see [Development](#development)).
@@ -112,6 +120,9 @@ docker run -d --name plane-hooks --restart unless-stopped \
   ghcr.io/alxwlw/plane-hooks:main
 ```
 
+Adapt the command to your host: another host port is `-p 8091:8080` (the container still listens on 8080), and
+a Plane host that the container cannot resolve needs `--add-host plane.example.com:<ip>`. `tenants.json` is read
+only at start: any change to it, like a change of env, needs `docker rm -f plane-hooks` and the command again.
 Put a TLS reverse proxy in front of port 8080 for `https://hooks.example.com`. Env that is added later (GitHub App
 keys, input secrets) goes to the same command: `docker rm -f plane-hooks`, then run it again; the volume keeps the
 state. The same as a compose service:
@@ -140,23 +151,47 @@ start with one message that names every JSON path and variable at fault (never a
 
 ### Plane App
 
-Register one app per Plane instance and install it in each workspace. The page is in **Workspace settings →
-Integrations** (`https://plane.example.com/example-ws/settings/integrations/`), the **Build your own** button
+Register one app per Plane instance and install it in each workspace. In Plane open **Workspace settings** (the
+workspace menu, top left) and click **Integrations** in the settings sidebar, then **Apps**, then the **Build your
+own** link
 ([Plane docs: create an OAuth application](https://developers.plane.so/dev-tools/build-plane-app/create-oauth-application)).
-It exists in Plane Cloud and the Commercial Edition only (see [Requirements](#requirements)); a workspace admin
-sees it. The form asks for:
+Click through the sidebar: the direct URL `https://plane.example.com/example-ws/settings/integrations/` answered
+404 when typed into the address bar on Plane 2.6.5. The page exists in Plane Cloud and the Commercial Edition only
+(see [Requirements](#requirements)); a workspace admin sees it. The form asks for these required fields:
 
-- App name: anything, for example `plane-hooks`
-- Setup URL `https://hooks.example.com/plane/setup?tenant=<id>`
-- Redirect URI `https://hooks.example.com/plane/oauth/callback`
-- Webhook URL `https://hooks.example.com/plane/webhook`; App mentions off. The hub reads no Plane webhook: if
-  your Plane version asks for a webhook secret, any value does (`openssl rand -hex 32`).
-- Scopes, in the **Scopes & Permissions** section: `projects:read`, `projects.work_items:read`, `projects.work_items:write`,
-  `projects.work_items.comments:read`, `projects.work_items.comments:write`, `projects.work_items.links:read`,
-  `projects.work_items.links:write`, `projects.states:read`, `projects.labels:read`, `projects.labels:write`
+| Field                             | Value                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------------------------------- |
+| App name                          | anything, for example `plane-hooks-acme`                                                      |
+| App slug                          | lowercase, unique in the instance, for example `plane-hooks-acme`                             |
+| App maker (company)               | your company or team, for example `acme`                                                      |
+| Short description                 | one line, for example `Moves work items by pull requests and deploys`                         |
+| Long description                  | a rich-text paragraph, for example the first paragraph of this README                         |
+| Connection type                   | workspace-level: leave **User-Level Connection** off (the hub acts as a bot, not as a person) |
+| Setup URL                         | `https://hooks.example.com/plane/setup?tenant=<id>`                                           |
+| Redirect URI                      | `https://hooks.example.com/plane/oauth/callback`                                              |
+| Webhook URL                       | `https://hooks.example.com/plane/webhook`                                                     |
+| Webhook secret                    | the hub reads no Plane webhook, so any value does (`openssl rand -hex 32`)                    |
+| Enable App Mentions               | off                                                                                           |
+| Scopes (**Scopes & Permissions**) | the grid below                                                                                |
 
-Opening the setup URL (as a workspace admin) ends on the callback page, which prints `app_installation_id=<uuid>`:
-put it in `tenants.json`, and the app's client secret in `PLANE_HOOKS_<ID>_PLANE_SECRET`. The bot sees the whole
+The scopes are a grid, not machine names: open the collapsed **Projects** section and tick, per row, the Read
+and Write columns. Each name the hub requests (`PLANE_HOOKS_SCOPES` in `src/plane.ts`) is one cell:
+
+| Row in the grid    | Read | Write | Scope names                                             |
+| ------------------ | ---- | ----- | ------------------------------------------------------- |
+| Projects           | yes  | no    | `projects:read`                                         |
+| Project States     | yes  | no    | `projects.states:read`                                  |
+| Project Labels     | yes  | yes   | `projects.labels:read`, `projects.labels:write`         |
+| Work Items         | yes  | yes   | `projects.work_items:read`, `projects.work_items:write` |
+| Work Item Comments | yes  | yes   | `projects.work_items.comments:read`, `…comments:write`  |
+| Work Item Links    | yes  | yes   | `projects.work_items.links:read`, `…links:write`        |
+
+No releases scope is requested (the hub asks for none; see [Releases](#behaviour) for what Free plans answer).
+
+Save the **Client ID** and the **Client Secret** from the "App created" dialog at once: the Secret is shown only
+there. Put the Client ID in `tenants.json` (`plane.clientId`) and the Secret in `PLANE_HOOKS_<ID>_PLANE_SECRET`
+before you open the setup URL (checklist steps 2 to 4). Opening the setup URL (as a workspace admin) ends on the
+callback page, which prints `app_installation_id=<uuid>`: put it in `tenants.json`. The bot sees the whole
 workspace.
 
 `PLANE_HOOKS_PLANE_URL` is used two ways: the hub calls the Plane API at it, and `/plane/setup` redirects the
@@ -174,6 +209,21 @@ organisation or user account. Open `https://hooks.example.com/github/setup?tenan
 once, the entry for `tenants.json` and the two env values (`PLANE_HOOKS_GH_<APP>_PRIVATE_KEY`,
 `PLANE_HOOKS_GH_<APP>_WEBHOOK_SECRET`). Restart the service, then install the App on the repositories with the
 link on that page. The hub never writes Deployments to public repositories.
+
+Before you press the button:
+
+- Be logged in to GitHub, in the same browser, as an owner of the account. GitHub may ask to confirm **sudo** or
+  2FA (for example a number match in GitHub Mobile) before it creates the App.
+- The App is always named `plane-hooks-<name>`, where `<name>` is the `owner` in lower case with every character
+  outside `a-z0-9` removed (`acme-corp` gives `plane-hooks-acmecorp`; at most 16 characters, and a leading `g`
+  when it would start with a digit). There is no parameter to change it. GitHub App names are unique across
+  GitHub: when the name is taken, edit the name field on GitHub's manifest page before you create the App. The
+  name on GitHub is only a label: the `name` in the generated `tenants.json` entry (`acme`) and the env variable
+  names (`PLANE_HOOKS_GH_ACME_*`) come from the `owner`, not from the App name you chose.
+- The callback page is shown **once**: GitHub does not give the key again. Copy the entry and both env values
+  right away (the private key is one long line). If the page is lost, the way out is to delete the App in GitHub
+  (**Settings → Developer settings → GitHub Apps**) and open `/github/setup` again, which creates another App; or
+  generate a new private key and set a new webhook secret in the existing App's settings.
 
 ### Vercel
 
@@ -225,9 +275,9 @@ The file is read from `PLANE_HOOKS_CONFIG` (default `/config/tenants.json`; moun
 [Running the hub](#running-the-hub)). The tenant id and an App `name` match `^[a-z][a-z0-9]{0,15}$`; the file and
 env errors name JSON paths and variables, never values, all in one message at startup.
 
-The **minimal** file, enough to start the hub and to run the Plane App setup (`id`, `workspace` and `plane` are
-the only required keys; `clientId` and `appInstallationId` are non-empty strings, nothing checks their shape, so
-`"placeholder"` does until the real values exist):
+The **minimal** file, enough to start the hub (`id`, `workspace` and `plane` are the only required keys;
+`clientId` and `appInstallationId` are non-empty strings and nothing checks their shape). The `clientId` must be
+the real one before you run `/plane/setup`; `appInstallationId` may stay `"placeholder"` until that run prints it:
 
 ```json
 {
@@ -235,7 +285,7 @@ the only required keys; `clientId` and `appInstallationId` are non-empty strings
 		{
 			"id": "acme",
 			"workspace": "example-ws",
-			"plane": { "clientId": "placeholder", "appInstallationId": "placeholder" }
+			"plane": { "clientId": "example-client-id", "appInstallationId": "placeholder" }
 		}
 	]
 }
@@ -243,7 +293,7 @@ the only required keys; `clientId` and `appInstallationId` are non-empty strings
 
 Optional keys: `github` (without it no GitHub App is served), `delivery` (no status rules, no deploys),
 `incidents` (no incidents; required when the Grafana token is set), `dokploy` and `silenceHours`. The [full example with every key](https://github.com/alxwlw/tools/blob/main/apps/plane-hooks/tenants.example.json)
-is in the repository; this one is a fuller tenant:
+is in the repository. The file is read only at start: every change needs a restart. This one is a fuller tenant:
 
 ```json
 {
@@ -329,7 +379,8 @@ is in the repository; this one is a fuller tenant:
 | `PLANE_HOOKS_GH_<APP>_WEBHOOK_SECRET` | yes      | Per App: its webhook secret                                            |
 
 `<ID>` is the tenant id and `<APP>` the App `name` in upper case. An optional secret set but blank is a startup
-error: unset it to turn the input off. The `listening` line at startup lists each tenant with its inputs and Apps:
+error: unset it to turn the input off. The `listening` line at startup lists each tenant with its inputs and Apps. It does not show `delivery` or `incidents`: their rules are loaded
+silently, and a wrong state name appears only as a later `warning` line:
 `{"event":"listening","port":8080,"tenants":[{"id":"acme","inputs":["github","grafana","vercel","dokploy"],"apps":["acme"]}]}`.
 
 ## Behaviour
@@ -347,7 +398,7 @@ error: unset it to turn the input off. The `listening` line at startup lists eac
   environment where `vercel[bot]` recorded that sha (`Production` or `Production – <project>`).
 - **Releases.** A deploy of a `release: true` environment creates one Plane release per `repository@sha` (named
   `<date> · <sha7>`, plus the title of the PR whose merge commit was deployed) with the commits and work items in
-  its changelog. A Free-plan workspace answers 402: the release is skipped with a `warn` line, the deploy is done.
+  its changelog. On a plan without releases (Free) Plane answers 402 or 403 (403 on Commercial 2.6.5): any error of the release call is caught, the hub logs one `warn` line (`event: "release"`, with the error) and the deploy is still delivered.
 - **Previews.** One comment per work item and Vercel project; a new link rewrites it, the same link changes
   nothing. The work items are those of the branch's open PRs, else of the branch name.
 - **Limitation.** Environments are matched by commit ancestry (`compare`): promote branches between environments
@@ -390,7 +441,8 @@ docker exec <container> bun scripts/journal.ts --since 7d [--tenant acme]
 
 ## Watchdog
 
-Every 15 minutes, log lines with `level: "error"` only when a state changes (and a recovery line after):
+Every 15 minutes (the first check 15 minutes after the start, so a quiet log right after a restart proves nothing;
+use `/healthz` and the `listening` line to see that the hub is up), log lines with `level: "error"` only when a state changes (and a recovery line after):
 
 - `plane.auth_failed` / `plane.auth_ok` — the bot cannot list the workspace's projects (401/403, or Plane refused
   the token request). Plane being down is `watchdog.failed` and changes nothing.
