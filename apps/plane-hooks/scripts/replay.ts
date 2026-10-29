@@ -10,7 +10,7 @@
  *       <app> may be left out when the file names one App only
  * Inside the container the env is already there:
  *   docker exec -i <container> bun scripts/replay.ts acme grafana < grafana-firing.json
- * PLANE_HOOKS_URL overrides the target (default http://localhost:8080).
+ * PLANE_HOOKS_URL overrides the target (default http://localhost:$PORT, 8080 without PORT).
  * Exit 0 on a 2xx answer, 1 otherwise, 2 on bad usage.
  */
 import { createHmac, randomUUID } from 'node:crypto';
@@ -114,7 +114,9 @@ if (import.meta.main) {
 		console.error(replay.error);
 		process.exit(2);
 	}
-	const base = (process.env.PLANE_HOOKS_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+	const base = (
+		process.env.PLANE_HOOKS_URL ?? `http://localhost:${process.env.PORT?.trim() || 8080}`
+	).replace(/\/+$/, '');
 	const res = await fetch(`${base}${replay.path}`, {
 		method: 'POST',
 		headers: replay.headers,

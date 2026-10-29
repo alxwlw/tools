@@ -24,7 +24,10 @@ export type JournalRow = {
 	at: string;
 };
 
-/** Durable state of the hub (design §7.3): the deploy cursor, the inbox of deliveries and the journal of transitions. */
+/** Where the SQLite file lives unless `PLANE_HOOKS_DB` says otherwise. */
+export const DEFAULT_DB = '/data/plane-hooks.sqlite';
+
+/** Durable state of the hub: the deploy cursor, the inbox of deliveries and the journal of transitions. */
 export class Store {
 	readonly #db: Database;
 

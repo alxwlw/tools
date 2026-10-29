@@ -7,7 +7,7 @@
  */
 import { parseArgs } from 'node:util';
 
-import { Store } from '../src/store.ts';
+import { DEFAULT_DB, Store } from '../src/store.ts';
 
 const DAY_MS = 86_400_000;
 export const USAGE = 'usage: bun scripts/journal.ts --since <ISO|Nd> [--tenant <id>]';
@@ -50,7 +50,7 @@ export function journal(
 }
 
 if (import.meta.main) {
-	const store = new Store(process.env.PLANE_HOOKS_DB?.trim() || '/data/plane-hooks.sqlite');
+	const store = new Store(process.env.PLANE_HOOKS_DB?.trim() || DEFAULT_DB);
 	const code = journal(process.argv.slice(2), store, Date.now(), (line) => console.log(line));
 	store.close();
 	process.exit(code);

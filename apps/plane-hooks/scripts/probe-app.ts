@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // One-off probe of the live systems plane-hooks depends on (Plane App, GitHub App). It needs real
-// credentials, so the owner runs it. Every step prints one JSON line {step, status, body}; with --out
+// credentials, so it is run by hand. Every step prints one JSON line {step, status, body}; with --out
 // the same line is also written to <out>/<step>.json. Secrets come from the environment only; a token
 // in a response is cut to its first four characters, and no header is ever printed.
 import { createSign } from 'node:crypto';
@@ -8,19 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
-/** Scopes of the Plane App (plan Global Constraints), without the releases scope that the probe looks for. */
-export const BASE_SCOPES = [
-	'projects:read',
-	'projects.work_items:read',
-	'projects.work_items:write',
-	'projects.work_items.comments:read',
-	'projects.work_items.comments:write',
-	'projects.work_items.links:read',
-	'projects.work_items.links:write',
-	'projects.states:read',
-	'projects.labels:read',
-	'projects.labels:write',
-];
+import { PLANE_HOOKS_SCOPES } from '../src/plane.ts';
 
 export const USAGE = `usage: bun scripts/probe-app.ts <command> [options]
 
@@ -226,7 +214,7 @@ async function planeProject(s: PlaneSession, env: Env): Promise<string | null> {
 }
 
 async function planeToken(p: Probe, tenant: string, extra: string[], env: Env): Promise<void> {
-	const s = await planeSession(p, tenant, [...BASE_SCOPES, ...extra], env);
+	const s = await planeSession(p, tenant, [...PLANE_HOOKS_SCOPES, ...extra], env);
 	if (s === null) return;
 	const project = await planeProject(s, env);
 	if (project === null)
@@ -253,7 +241,7 @@ async function planeRelease(
 	candidates: string[],
 	env: Env,
 ): Promise<void> {
-	const s = await planeSession(p, tenant, [...BASE_SCOPES, ...candidates], env);
+	const s = await planeSession(p, tenant, [...PLANE_HOOKS_SCOPES, ...candidates], env);
 	if (s === null) return;
 	const project = await planeProject(s, env);
 	if (project === null)

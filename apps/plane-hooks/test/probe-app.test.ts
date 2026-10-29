@@ -56,8 +56,12 @@ test('plane-release: упавший DELETE релиза не отменяет DE
 		planeAnswer(c, (d) => (d.url.includes('/releases/') ? new Error('boom') : json({}, 204))),
 	);
 	const out = capture();
-	const code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
-	out.restore();
+	let code: number;
+	try {
+		code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
+	} finally {
+		out.restore();
+	}
 	const deletes = calls.filter((c) => c.method === 'DELETE').map((c) => c.url);
 	expect(deletes).toEqual([
 		'https://plane.example.com/api/v1/workspaces/example-ws/releases/REL1/',
@@ -71,8 +75,12 @@ test('plane-release: упавший DELETE релиза не отменяет DE
 test('plane-release: DELETE с ответом 500 называет оба объекта', async () => {
 	stubFetch((c) => planeAnswer(c, () => json({ error: 'x' }, 500)));
 	const out = capture();
-	const code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
-	out.restore();
+	let code: number;
+	try {
+		code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
+	} finally {
+		out.restore();
+	}
 	expect(out.lines).toContain('LEFT: release REL1');
 	expect(out.lines).toContain('LEFT: work-item ITEM1');
 	expect(code).toBe(1);
@@ -86,8 +94,12 @@ test('plane-release: id из тела ошибки создания не поп�
 		return planeAnswer(c, () => json({}, 204));
 	});
 	const out = capture();
-	const code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
-	out.restore();
+	let code: number;
+	try {
+		code = await run(['plane-release', '--tenant', 'acme', '--scope', 'cand'], planeEnv);
+	} finally {
+		out.restore();
+	}
 	expect(calls.filter((c) => c.method === 'DELETE')).toEqual([]);
 	expect(code).toBe(1);
 });
@@ -103,11 +115,15 @@ test('gh-deploy: упавший DELETE называет Deployment, код 1', a
 		return json({}, 201);
 	});
 	const out = capture();
-	const code = await run(['gh-deploy', '--app', 'acme', 'acme/api', 'abc123', '--env', 'probe'], {
-		PLANE_HOOKS_GH_ACME_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
-		PROBE_GH_ACME_APP_ID: '1',
-	});
-	out.restore();
+	let code: number;
+	try {
+		code = await run(['gh-deploy', '--app', 'acme', 'acme/api', 'abc123', '--env', 'probe'], {
+			PLANE_HOOKS_GH_ACME_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
+			PROBE_GH_ACME_APP_ID: '1',
+		});
+	} finally {
+		out.restore();
+	}
 	expect(calls.filter((c) => c.method === 'DELETE').length).toBe(1);
 	expect(out.lines).toContain('LEFT: deployment 77');
 	expect(code).toBe(1);
@@ -123,11 +139,15 @@ test('gh-deploy: id из тела отказа создания не попад�
 		return json({}, 204);
 	});
 	const out = capture();
-	const code = await run(['gh-deploy', '--app', 'acme', 'acme/api', 'abc123', '--env', 'probe'], {
-		PLANE_HOOKS_GH_ACME_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
-		PROBE_GH_ACME_APP_ID: '1',
-	});
-	out.restore();
+	let code: number;
+	try {
+		code = await run(['gh-deploy', '--app', 'acme', 'acme/api', 'abc123', '--env', 'probe'], {
+			PLANE_HOOKS_GH_ACME_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
+			PROBE_GH_ACME_APP_ID: '1',
+		});
+	} finally {
+		out.restore();
+	}
 	expect(calls.filter((c) => c.method === 'DELETE')).toEqual([]);
 	expect(code).toBe(1);
 });

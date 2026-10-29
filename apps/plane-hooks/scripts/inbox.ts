@@ -6,7 +6,7 @@
  * Inside the container: docker exec <container> bun scripts/inbox.ts failed
  * Exit 0; 1 when `retry` finds no failed delivery with that id; 2 on bad usage.
  */
-import { Store } from '../src/store.ts';
+import { DEFAULT_DB, Store } from '../src/store.ts';
 
 export const USAGE = 'usage: bun scripts/inbox.ts failed | retry <id>';
 
@@ -35,7 +35,7 @@ export function inbox(
 }
 
 if (import.meta.main) {
-	const store = new Store(process.env.PLANE_HOOKS_DB?.trim() || '/data/plane-hooks.sqlite');
+	const store = new Store(process.env.PLANE_HOOKS_DB?.trim() || DEFAULT_DB);
 	const code = inbox(process.argv.slice(2), store, (line) => console.log(line));
 	store.close();
 	process.exit(code);

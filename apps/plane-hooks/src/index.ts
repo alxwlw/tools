@@ -8,14 +8,13 @@ import { INPUT_NAMES, loadServiceConfig, type ServiceConfig } from './config.ts'
 import { describeError, jsonLog, type Log } from './log.ts';
 import { createRuntimes, type RuntimeDeps } from './runtime.ts';
 import { createHandler, MAX_BODY_BYTES, text } from './server.ts';
-import { Store } from './store.ts';
+import { DEFAULT_DB, Store } from './store.ts';
 import { checkHealth, watchdogState } from './watchdog.ts';
 
 const MINUTE_MS = 60_000;
 const HEALTH_CHECK_MS = 15 * MINUTE_MS;
 const PRUNE_MS = 24 * 60 * MINUTE_MS;
 const DRAIN_MS = 10_000;
-const DEFAULT_DB = '/data/plane-hooks.sqlite';
 /**
  * Grafana batches are handled while the sender waits, and a batch may wait minutes on the Plane rate limit.
  * 240 (max 255) keeps such a request from being cut; GitHub deliveries are answered at once anyway.
