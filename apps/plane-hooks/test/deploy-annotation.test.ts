@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-	githubRequest,
-	statusPayload,
-	tenantOf,
-	vercelRequest,
-	world,
-} from './server-harness.ts';
+import { githubRequest, statusPayload, tenantOf, vercelRequest, world } from './server-harness.ts';
 
 /** One production deploy of acme/api/a1 seen twice: by GitHub's `deployment_status` and by Vercel's webhook. */
 async function deployTwice(options: { vercelInput: boolean; creator: string }) {
@@ -15,7 +9,9 @@ async function deployTwice(options: { vercelInput: boolean; creator: string }) {
 		...base,
 		delivery: {
 			...base.delivery!,
-			repos: [{ repo: 'acme/api', environments: [{ name: 'Production', state: 'Done', release: false }] }],
+			repos: [
+				{ repo: 'acme/api', environments: [{ name: 'Production', state: 'Done', release: false }] },
+			],
 		},
 		inputs: { ...base.inputs, vercel: options.vercelInput ? 'vercel-secret' : null },
 	};
@@ -31,7 +27,13 @@ async function deployTwice(options: { vercelInput: boolean; creator: string }) {
 			'deployment_status',
 			statusPayload(
 				'success',
-				{ id, sha: 'a1', environment: 'Production', creator: { login: options.creator }, created_at: '2026-10-28T09:00:00Z' },
+				{
+					id,
+					sha: 'a1',
+					environment: 'Production',
+					creator: { login: options.creator },
+					created_at: '2026-10-28T09:00:00Z',
+				},
 				{ created_at: '2026-10-28T10:00:00Z' },
 			),
 		),
@@ -48,7 +50,12 @@ async function deployTwice(options: { vercelInput: boolean; creator: string }) {
 						id: 'dpl',
 						url: 'x.vercel.app',
 						name: 'api',
-						meta: { githubCommitRef: 'main', githubCommitSha: 'a1', githubCommitOrg: 'acme', githubCommitRepo: 'api' },
+						meta: {
+							githubCommitRef: 'main',
+							githubCommitSha: 'a1',
+							githubCommitOrg: 'acme',
+							githubCommitRepo: 'api',
+						},
 					},
 					target: 'production',
 				},
@@ -66,7 +73,9 @@ describe('the annotation of a deploy', () => {
 		expect(marks[0]?.event).not.toBe('deploy');
 		// The GitHub deployment still moves the work item and writes its own line, without a mark.
 		expect(moved).toBe(true);
-		expect(w.lines('deploy').map((line) => [line.source, line.annotation])).toEqual([['github', undefined]]);
+		expect(w.lines('deploy').map((line) => [line.source, line.annotation])).toEqual([
+			['github', undefined],
+		]);
 	});
 
 	test('the GitHub path keeps the mark of a Vercel deploy when the Vercel input is off', async () => {
@@ -78,6 +87,8 @@ describe('the annotation of a deploy', () => {
 	test('a GitHub deploy by anyone else keeps its mark when the Vercel input is on', async () => {
 		const { moved, marks } = await deployTwice({ vercelInput: true, creator: 'octocat' });
 		expect(moved).toBe(true);
-		expect(marks.filter((line) => line.event === 'deploy').map((line) => line.source)).toEqual(['github']);
+		expect(marks.filter((line) => line.event === 'deploy').map((line) => line.source)).toEqual([
+			'github',
+		]);
 	});
 });
