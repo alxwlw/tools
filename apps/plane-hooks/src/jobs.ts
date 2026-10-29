@@ -85,7 +85,9 @@ async function githubJob(runtime: TenantRuntime, event: GitHubJob, deps: JobDeps
 	}
 	// «Погас» never holds the deploy back; a transient failure of it becomes its own job.
 	if (signal !== null) await resolveBestEffort(runtime, signal, 'deployment.success', deps.log);
-	await deployJob(runtime, githubDeployFact(event), 'github', deps);
+	// A Vercel deploy is marked by the Vercel input when the tenant has one; its GitHub twin only moves work items.
+	const marked = !(event.deployment.creator === 'vercel[bot]' && runtime.tenant.inputs.vercel !== null);
+	await deployJob(runtime, githubDeployFact(event), 'github', deps, marked);
 }
 
 async function deployJob(
@@ -93,6 +95,7 @@ async function deployJob(
 	fact: DeployFact,
 	source: 'github' | 'vercel',
 	deps: JobDeps,
+	marked = true,
 ): Promise<void> {
 	const result = await handleDeploy(eventDeps(runtime), fact);
 	const tenant = runtime.tenant.id;
@@ -130,7 +133,7 @@ async function deployJob(
 		action: result.action,
 		env: fact.environment,
 		sha: fact.sha,
-		...(result.action === 'ignored' ? {} : { annotation: 'deploy', title: result.title }),
+		...(result.action === 'ignored' || !marked ? {} : { annotation: 'deploy', title: result.title }),
 	});
 }
 
