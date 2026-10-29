@@ -151,20 +151,20 @@ start with one message that names every JSON path and variable at fault (never a
 
 ### Plane App
 
-Register one app per Plane instance and install it in each workspace. In Plane open **Workspace settings** (the
-workspace menu, top left) and click **Integrations** in the settings sidebar, then **Apps**, then the **Build your
-own** link
+Register one app per Plane instance and install it in each workspace. In Plane open **Workspace settings** and click **Integrations** in the settings sidebar, then **Apps**, then the
+**Build your own** link
 ([Plane docs: create an OAuth application](https://developers.plane.so/dev-tools/build-plane-app/create-oauth-application)).
 Click through the sidebar: the direct URL `https://plane.example.com/example-ws/settings/integrations/` answered
 404 when typed into the address bar on Plane 2.6.5. The page exists in Plane Cloud and the Commercial Edition only
-(see [Requirements](#requirements)); a workspace admin sees it. The form asks for these required fields:
+(see [Requirements](#requirements)); a workspace admin sees it (per Plane docs; not verified on a live instance:
+only an admin was logged in on the test run). The form asks for these required fields:
 
 | Field                             | Value                                                                                         |
 | --------------------------------- | --------------------------------------------------------------------------------------------- |
 | App name                          | anything, for example `plane-hooks-acme`                                                      |
-| App slug                          | lowercase, unique in the instance, for example `plane-hooks-acme`                             |
+| App slug                          | for example `plane-hooks-acme`                                                                |
 | App maker (company)               | your company or team, for example `acme`                                                      |
-| Short description                 | one line, for example `Moves work items by pull requests and deploys`                         |
+| Short description                 | for example `Moves work items by pull requests and deploys`                                   |
 | Long description                  | a rich-text paragraph, for example the first paragraph of this README                         |
 | Connection type                   | workspace-level: leave **User-Level Connection** off (the hub acts as a bot, not as a person) |
 | Setup URL                         | `https://hooks.example.com/plane/setup?tenant=<id>`                                           |
