@@ -13,7 +13,7 @@ What it does:
   environments the tenant configured, as far as the PR's merge commit has been deployed. The work item stands
   where its **least advanced** PR stands, and it only ever moves **forward**.
 - **Deploys.** Every successful GitHub deployment of a configured environment writes «Выкачено» (deployed) on the
-  work items of the PRs it carried, moves them, and on a release environment creates a Plane release. A deploy
+  work items of the PRs it carried, moves them, and on a release environment would create a Plane release (see [Releases](#behaviour)). A deploy
   of an older commit is a rollback: «Откачено» (rolled back), the status stays.
 - **Previews.** A Vercel preview gets one comment per work item and Vercel project, updated with each new link.
 - **Incidents.** A Grafana alert, a failed GitHub or Vercel deploy and a failed Dokploy build or backup open a work
@@ -186,7 +186,7 @@ and Write columns. Each name the hub requests (`PLANE_HOOKS_SCOPES` in `src/plan
 | Work Item Comments | yes  | yes   | `projects.work_items.comments:read`, `…comments:write`  |
 | Work Item Links    | yes  | yes   | `projects.work_items.links:read`, `…links:write`        |
 
-No releases scope is requested (the hub asks for none; see [Releases](#behaviour) for what Free plans answer).
+No releases scope is requested: Plane exposes none to Apps (see [Releases](#behaviour) for what that costs).
 
 Save the **Client ID** and the **Client Secret** from the "App created" dialog at once: the Secret is shown only
 there. Put the Client ID in `tenants.json` (`plane.clientId`) and the Secret in `PLANE_HOOKS_<ID>_PLANE_SECRET`
@@ -335,7 +335,7 @@ is in the repository. The file is read only at start: every change needs a resta
 - **`delivery.repos`** — `owner/name` or `owner/*`; the first match wins. A repository without a rule gets PR
   links but no status changes. Its **chain of positions** is `states.review`, then each environment's `state` in
   order; with no environments it is `review` → `done` (the merge is the end of the road). Environments not listed
-  change nothing. `release: true` makes a Plane release of every deploy there.
+  change nothing. `release: true` asks for a Plane release of every deploy there; Plane does not let an App create one (see [Releases](#behaviour)).
 - **Position of a work item.** For each PR it belongs to: draft (no move at all), review, the furthest environment
   whose last successful deploy contains the PR's merge commit, or the end of the road. The work item goes to the
   position of its least advanced PR, and only forward: by state group (backlog, unstarted, started, completed),
@@ -401,7 +401,10 @@ silently, and a wrong state name appears only as a later `warning` line:
   environment where `vercel[bot]` recorded that sha (`Production` or `Production – <project>`).
 - **Releases.** A deploy of a `release: true` environment creates one Plane release per `repository@sha` (named
   `<date> · <sha7>`, plus the title of the PR whose merge commit was deployed) with the commits and work items in
-  its changelog. On a plan without releases (Free) Plane answers 402 or 403 (403 on Commercial 2.6.5): any error of the release call is caught, the hub logs one `warn` line (`event: "release"`, with the error) and the deploy is still delivered.
+  its changelog. Plane exposes no releases scope to Apps, and an App's bot token is refused (403, seen on a Commercial
+  instance with all ten scopes granted). So today `release: true` creates nothing: the release call fails, the hub logs one
+  `warn` line (`event: "release"`, with the error) on every deploy of that environment, and the deploy is still
+  delivered. The setting is kept so that releases start working once Plane lets an App write them.
 - **Previews.** One comment per work item and Vercel project; a new link rewrites it, the same link changes
   nothing. The work items are those of the branch's open PRs, else of the branch name.
 - **Limitation.** Environments are matched by commit ancestry (`compare`): promote branches between environments
@@ -510,5 +513,6 @@ Scripts that talk to live systems need real credentials, so they are run by hand
 - **`scripts/replay.ts`** posts stdin to a running hub signed the way the real sender signs it:
   `bun scripts/replay.ts acme grafana|vercel|dokploy < body.json`, or `bun scripts/replay.ts github <event> [<app>]`
   (the App id comes from `tenants.json`, the delivery id is fresh). Inside the container the env is already there:
-  `docker exec -i <container> bun scripts/replay.ts acme grafana < grafana-firing.json`.
+  `docker exec -i <container> bun scripts/replay.ts acme grafana < grafana-firing.json`. The target is
+  `http://localhost:$PORT` (`8080` without `PORT`) unless `PLANE_HOOKS_URL` names another hub.
 - `scripts/capture.ts` and `scripts/sanitize-fixture.ts` record live deliveries and turn them into fixtures.
