@@ -15,7 +15,7 @@ const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRI
 const WEBHOOK_SECRET = 'whsec_created_by_github';
 
 describe('манифест', () => {
-	test('манифест равен манифесту Global Constraints', () => {
+	test('манифест GitHub App — имя, URL, права и события', () => {
 		expect(githubManifest(PUBLIC_URL, 'plane-hooks-acme')).toEqual({
 			name: 'plane-hooks-acme',
 			url: 'https://hooks.example.com',

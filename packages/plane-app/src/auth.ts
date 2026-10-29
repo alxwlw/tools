@@ -24,7 +24,7 @@ type Cached = { token: string; until: number };
 
 /**
  * Bot token of a workspace-level Plane App installation (client_credentials). Plane v3.3.0 refuses a
- * token request without `scope` (invalid_scope, design §10), so the registration's scopes go in each one.
+ * token request without `scope` (invalid_scope), so the registration's scopes go in each one.
  */
 export function botTokenAuth(opts: {
 	planeUrl: string;

@@ -157,7 +157,7 @@ function timestampOf(body: Record<string, unknown>): string {
 /**
  * Records a successful deploy as a GitHub Deployment plus a success status. Dokploy's notification names no
  * commit, so the sha is the head of the app's branch at notification time, read through the tenant's App;
- * the description says so. Public repositories are never written to (design §2): a visibility that is not
+ * the description says so. Public repositories are never written to (a deploy record there would publish it): a visibility that is not
  * private/internal, or unknown, stops before any write.
  * `github` — as SyncDeps.github: the tenant's App client for the repo, null — no App covers it.
  */

@@ -330,7 +330,7 @@ export function sanitizeVercel(value: unknown): unknown {
 
 /**
  * Dokploy notification body: project, application and domain names, commit and repository fields,
- * error text. Extended against real deliveries (plan Task 1, Step 8).
+ * error text. Extended as real deliveries show new fields.
  */
 export function sanitizeDokploy(value: unknown): unknown {
 	const apps = numbering();

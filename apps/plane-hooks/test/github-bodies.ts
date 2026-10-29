@@ -1,5 +1,5 @@
 // GitHub REST (API version 2022-11-28) response bodies as the docs show them, trimmed to realistic fields.
-// Hand-built until Task 1's captured fixtures exist; swap them in here, nowhere else.
+// Hand-built to the docs; the captured deliveries live in test/fixtures.
 
 type Json = Record<string, unknown>;
 

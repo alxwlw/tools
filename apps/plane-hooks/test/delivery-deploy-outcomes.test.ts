@@ -137,7 +137,7 @@ describe('handleDeploy: ignored, релиз, сбои', () => {
 		expect(w.cursor.get(REPO, 'production')).toBe('m1');
 	});
 
-	test('релиз упал (403, у бота нет скоупа релизов — проба Task 1) — Выкачено сделано, releaseError заполнен', async () => {
+	test('релиз упал (403, у бота нет скоупа релизов) — Выкачено сделано, releaseError заполнен', async () => {
 		const { w, id, fact: deploy } = releaseHistory();
 		w.failReleaseWith(new PlaneApiError(403, 'POST', '/releases/'));
 

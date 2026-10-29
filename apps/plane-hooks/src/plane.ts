@@ -52,7 +52,7 @@ export type StateSummary = {
 export type ProjectSummary = { id: string; identifier: string };
 export type LinkSummary = { id: string; url: string };
 
-/** Scopes of the "plane-hooks" Plane App registration; the release scope is appended once the probe names it. */
+/** Scopes of the "plane-hooks" Plane App registration. Plane exposes no releases scope to Apps, so none is requested. */
 export const PLANE_HOOKS_SCOPES: readonly string[] = [
 	'projects:read',
 	'projects.work_items:read',

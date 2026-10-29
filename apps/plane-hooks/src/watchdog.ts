@@ -36,7 +36,7 @@ export function watchdogState(): WatchdogState {
 const errorName = (error: unknown): string => (error instanceof Error ? error.name : 'unknown');
 
 /**
- * Design §5 «Тихая смерть», run every 15 minutes: per tenant the silence of each input in `silenceHours` and the
+ * Run every 15 minutes: per tenant the silence of each input in `silenceHours` and the
  * bot's access to Plane; per GitHub App whether it still exists and whether GitHub failed to deliver to us.
  * Error lines only on a change of state, an `…_ok` / `input.alive` line on recovery. Any failure of `GET /app`,
  * transport errors included, is `github.app_unreachable` (`health()` answers appOk false). A Plane check that fails

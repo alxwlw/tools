@@ -1,5 +1,5 @@
 // GitHub webhook deliveries (headers + body) as the webhook docs show them, built in one place.
-// Hand-built until Task 1's captured fixtures exist; swap them in here, nowhere else.
+// Hand-built to the docs; the captured deliveries live in test/fixtures.
 import { createHmac } from 'node:crypto';
 
 import { deploymentBody, deploymentStatusBody, pullBody } from './github-bodies.ts';

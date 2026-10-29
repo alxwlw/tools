@@ -13,7 +13,7 @@
  * Exit 0 only when every row matches; 1 on any mismatch; 2 on missing env.
  *
  * Env: PLANE_HOOKS_PLANE_URL, PLANE_HOOKS_WORKSPACE, PLANE_HOOKS_PROJECT_ID and the app's
- * PLANE_HOOKS_PROBE_CLIENT_ID / _CLIENT_SECRET / _INSTALLATION_ID. It needs a real installation, so the owner runs it.
+ * PLANE_HOOKS_PROBE_CLIENT_ID / _CLIENT_SECRET / _INSTALLATION_ID. It needs a real installation, so it is run by hand.
  */
 
 import { botTokenAuth } from '@alxwlw/plane-app';

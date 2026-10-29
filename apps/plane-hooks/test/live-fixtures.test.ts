@@ -1,4 +1,4 @@
-// Part B of the Task 1 probe: live deliveries (sanitized) through the hub's real entry points.
+// Live deliveries (sanitized) through the hub's real entry points.
 import { describe, expect, test } from 'bun:test';
 
 import { parseDokployWebhook } from '../src/dokploy.ts';

@@ -586,7 +586,7 @@ describe('PlaneClient: бот-токен Plane App', () => {
 		expect(calls).toHaveLength(2);
 	});
 
-	test('скоупы Plane App — ровно десять из Global Constraints', () => {
+	test('скоупы Plane App — ровно десять', () => {
 		expect(PLANE_HOOKS_SCOPES).toEqual([
 			'projects:read',
 			'projects.work_items:read',

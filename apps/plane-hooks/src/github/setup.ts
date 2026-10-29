@@ -22,7 +22,7 @@ function appNameOf(owner: string): string {
 	return (/^[a-z]/.test(cleaned) ? cleaned : `g${cleaned}`).slice(0, NAME_MAX);
 }
 
-/** The manifest of Global Constraints with `name` and the URLs of `publicUrl`. */
+/** The GitHub App manifest, with `name` and the URLs of `publicUrl`. */
 export function githubManifest(publicUrl: string, name: string): Record<string, unknown> {
 	return {
 		name,

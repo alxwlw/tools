@@ -1,4 +1,4 @@
-// The hub's GitHub parsers against what GitHub really sent (Task 1 probe, sanitized by scripts/sanitize-fixture.ts).
+// The hub's GitHub parsers against what GitHub really sent (captured live, sanitized by scripts/sanitize-fixture.ts).
 import { describe, expect, test } from 'bun:test';
 
 import { createGitHubClient } from '../src/github/client.ts';

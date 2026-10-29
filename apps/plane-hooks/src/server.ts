@@ -146,7 +146,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
 			case 'promoted':
 			case 'rolled_back': {
 				// The documented rollback body has no commit, only the target deployment id; resolving it takes a
-				// Vercel API key, which the hub does not hold (design §3.7). Nothing changes in Plane.
+				// Vercel API key, which the hub does not hold. Nothing changes in Plane.
 				if (event.kind === 'rolled_back' && event.sha === null) {
 					log({
 						event: 'vercel.rollback.unresolved',
