@@ -55,3 +55,17 @@ description = "fake access tokens in plane-discord probe tests"
 condition = "AND"
 paths = ['''apps/plane-discord/test/probe-plane-app\.test\.ts''']
 regexes = ['''^(abcdef123456|tok123456789)$''']
+
+# Fake OAuth access token of the fake Plane in the plane-hooks probe test.
+[[allowlists]]
+description = "fake access token in plane-hooks probe test"
+condition = "AND"
+paths = ['''apps/plane-hooks/test/probe-app\.test\.ts''']
+regexes = ['''^tok-1234567890$''']
+
+# base64 of "not-a-key": a malformed GitHub App key in the plane-hooks config tests.
+[[allowlists]]
+description = "fake GitHub App key in plane-hooks config tests"
+condition = "AND"
+paths = ['''apps/plane-hooks/test/service-config\.test\.ts''']
+regexes = ['''^bm90LWEta2V5$''']
