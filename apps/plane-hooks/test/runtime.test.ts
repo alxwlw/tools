@@ -22,6 +22,7 @@ const app = (name: string, appId: number, owner: string): Tenant['github'][numbe
 function setup(tenants: Tenant[], installed: Record<string, string[]> = {}) {
 	const logs: LogEntry[] = [];
 	const lookups: string[] = [];
+	const clientCalls: string[] = [];
 	const hubs = new Map<string, FakeGitHub>();
 	let clock = Date.parse('2026-10-28T12:00:00Z');
 	const plane = FakePlane.delivery();
@@ -30,7 +31,10 @@ function setup(tenants: Tenant[], installed: Record<string, string[]> = {}) {
 		hubs.set(config.name, hub);
 		return {
 			config,
-			client: () => hub,
+			client: (installation) => {
+				clientCalls.push(`${config.name} ${installation}`);
+				return hub;
+			},
 			installationFor: async (repo) => {
 				lookups.push(`${config.name} ${repo}`);
 				return (installed[config.name] ?? []).includes(repo) ? config.appId * 10 : null;
@@ -51,6 +55,7 @@ function setup(tenants: Tenant[], installed: Record<string, string[]> = {}) {
 		plane,
 		logs,
 		lookups,
+		clientCalls,
 		hub: (name: string) => hubs.get(name),
 		advance: (ms: number) => {
 			clock += ms;
@@ -85,6 +90,17 @@ describe('runtime: GitHub по владельцу репозитория', () =>
 		w.advance(1);
 		await sync?.github('acme/api');
 		expect(w.lookups).toEqual(['acme acme/api', 'acme acme/api']);
+	});
+
+	test('клиент App один на установку: другой репозиторий и повторный запрос его не пересоздают', async () => {
+		const w = setup([twoApps()], { acme: ['acme/api', 'acme/web'], beta: ['beta-org/web'] });
+		const sync = w.runtimes.tenants.get('acme')?.sync;
+		await sync?.github('acme/api');
+		await sync?.github('acme/web');
+		w.advance(CACHE_TTL_MS);
+		await sync?.github('acme/api');
+		await sync?.github('beta-org/web');
+		expect(w.clientCalls).toEqual(['acme 10000010', 'beta 10000020']);
 	});
 
 	test('apps — по id App, с runtime его тенанта', () => {

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { startService } from '../src/index.ts';
 import { Store } from '../src/store.ts';
 import { TEST_KEY_PEM } from './config-fixture.ts';
+import { FakePlane } from './fake-plane.ts';
 
 const EXAMPLE = readFileSync(join(import.meta.dir, '..', 'tenants.example.json'), 'utf8');
 const dirs: string[] = [];
@@ -36,6 +37,7 @@ describe('startService', () => {
 		const store = new Store(seeded);
 		const old = store.inboxAdd('acme', 'github', 'd-old', 'p', '2026-10-01T00:00:00Z') as number;
 		store.inboxDone(old);
+		store.inboxAdd('acme', 'github', 'd-pending', 'p', '2026-10-01T00:00:00Z');
 		store.close();
 
 		const lines: string[] = [];
@@ -78,6 +80,81 @@ describe('startService', () => {
 		}
 		const after = new Store(seeded);
 		expect(after.inboxAdd('acme', 'github', 'd-old', 'p', '2026-10-29T00:00:00Z')).not.toBeNull();
+		// The pending row survived the prune and went to the queue, which could not parse its payload.
+		expect(after.inboxFailedList().map((job) => [job.kind, job.at])).toEqual([
+			['github', '2026-10-01T00:00:00.000Z'],
+		]);
+		after.close();
+	});
+
+	test('остановка ждёт задачу в работе, а не закрывает базу под ней', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'plane-hooks-index-'));
+		dirs.push(dir);
+		const file = join(dir, 'hooks.sqlite');
+		const seeded = new Store(file);
+		const pull = {
+			repo: 'acme/api',
+			number: 1,
+			url: 'https://github.com/acme/api/pull/1',
+			title: 'no key here',
+			body: '',
+			head: 'h',
+			base: 'main',
+			draft: false,
+			state: 'open',
+			merged: false,
+			mergeSha: null,
+		};
+		seeded.inboxAdd(
+			'acme',
+			'github',
+			'd-live',
+			JSON.stringify({ kind: 'pull_request', action: 'opened', pull }),
+			'2026-10-29T00:00:00Z',
+		);
+		seeded.close();
+
+		// The pending job starts at once and waits for Plane's project list until `release` is called.
+		const plane = FakePlane.delivery();
+		const listProjects = plane.listProjects.bind(plane);
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let reached = () => {};
+		const started = new Promise<void>((resolve) => {
+			reached = resolve;
+		});
+		plane.listProjects = async () => {
+			reached();
+			await gate;
+			return listProjects();
+		};
+		const service = startService(envOf(file), {
+			readFile: () => EXAMPLE,
+			write: () => {},
+			listenPort: 0,
+			now: () => Date.parse('2026-10-29T00:00:00Z'),
+			every: () => () => {},
+			runtime: { plane: () => plane, sleep: async () => {} },
+		});
+		await started;
+		let stopped = false;
+		const stopping = service.stop().then(() => {
+			stopped = true;
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(stopped).toBe(false);
+		release();
+		await stopping;
+		expect(stopped).toBe(true);
+
+		const after = new Store(file);
+		expect(after.inboxPending()).toEqual([]);
+		expect(after.inboxFailedList()).toEqual([]);
+		// The job ended as done, so a repeat of its delivery is a duplicate.
+		expect(after.inboxAdd('acme', 'github', 'd-live', 'p', '2026-10-29T00:00:00Z')).toBeNull();
 		after.close();
 	});
 
