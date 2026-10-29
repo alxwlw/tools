@@ -1,17 +1,23 @@
 # tools
 
-Small standalone tools, one per directory under `apps/`. A pnpm + moon monorepo on the
+Small standalone tools, one per directory under `apps/`, and shared code under `packages/`. A pnpm + moon monorepo on the
 [`@alxwlw/stack`](https://github.com/alxwlw/stack) toolchain canon.
 
 ## Tools
 
-- [`apps/plane-hooks`](apps/plane-hooks/README.md) — a Bun webhook receiver that turns Grafana, Vercel and CI
-  events into Plane work items and comments.
+- [`apps/plane-hooks`](apps/plane-hooks/README.md) — a multi-tenant Plane App that moves work items along by
+  the facts of their pull requests and deploys (GitHub, Vercel, Dokploy) and opens incidents from Grafana
+  alerts and failed deploys, builds and backups.
 - [`apps/plane-discord`](apps/plane-discord/README.md) — a Bun service that bridges Plane and Discord: Plane
   events into channels and DMs, two message commands (a Discord message into a work item, or into a comment
   on one) and `/plane KEY`, a public card of a work item.
 - [`apps/plane-miro`](apps/plane-miro/README.md) — a Bun service that links Plane and Miro: stickers become
   work items, a work item's status shows on its cards on the board, and a Miro link in a comment puts a card there.
+
+## Packages
+
+- [`packages/plane-app`](packages/plane-app) — shared Plane App code: bot-token auth (`botTokenAuth`) and the
+  install redirect and callback (`planeSetupRedirect`, `planeOauthCallback`).
 
 ## Development
 

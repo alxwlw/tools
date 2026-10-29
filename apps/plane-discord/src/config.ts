@@ -33,7 +33,7 @@ export type Config = {
 
 const EVENT_KINDS: readonly EventKind[] = ['created', 'closed', 'mention'];
 const SNOWFLAKE = /^\d{17,20}$/;
-// Same shape as PROJECT_UUID in plane-hooks.
+// A Plane id: a UUID, any case.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PUBLIC_KEY = /^[0-9a-f]{64}$/i;
 const TENANT_ID = /^[a-z][a-z0-9]{0,15}$/;

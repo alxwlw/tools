@@ -1,7 +1,7 @@
 import { type PlaneApi, PlaneApiError, type Priority, type WorkItemRef } from './plane.ts';
 import { ttl } from './ttl.ts';
 
-export type Source = 'grafana' | 'vercel' | 'github';
+export type Source = 'grafana' | 'vercel' | 'github' | 'dokploy';
 export type IncidentLabel = 'alert' | 'deploy-failed';
 
 /**
@@ -185,4 +185,18 @@ export function createIncidentReporter(deps: {
 			);
 		},
 	};
+}
+
+/** The tenant's incident project is not in its workspace: a config error that no retry clears. */
+export class IncidentProjectMissing extends Error {
+	constructor(readonly identifier: string) {
+		super(`incident project ${identifier} not found`);
+	}
+}
+
+/** Plane project id of an incident project identifier; a missing project throws IncidentProjectMissing. */
+export async function resolveIncidentProject(plane: PlaneApi, identifier: string): Promise<string> {
+	const project = (await plane.listProjects()).find((item) => item.identifier === identifier);
+	if (!project) throw new IncidentProjectMissing(identifier);
+	return project.id;
 }

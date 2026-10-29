@@ -1,0 +1,11 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'typescript'
+layer: 'library'
+
+# Канон смотрит в src/ и tests/; здесь каталог тестов — test/.
+fileGroups:
+  tests:
+    - 'test/**/*'
+  sources:
+    - 'src/**/*'

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { DEFAULT_PRIORITY } from '../src/config.ts';
 import { alertPriority, parseGrafanaWebhook } from '../src/grafana.ts';
 import type { IncidentSignal } from '../src/incident.ts';
 import { BadPayload } from '../src/payload.ts';
@@ -144,13 +145,67 @@ describe('alertPriority: severity × env', () => {
 		['info', 'prod', 'urgent'],
 		['info', 'staging', 'high'],
 	] as const)('severity %p, env %p → %p', (severity, env, expected) => {
-		expect(alertPriority(severity, env)).toBe(expected);
+		expect(
+			alertPriority({ ...(severity === undefined ? {} : { severity }), env }, DEFAULT_PRIORITY),
+		).toBe(expected);
 	});
 
 	test('severity в другом регистре и с пробелами', () => {
-		expect(alertPriority(' Warning ', 'prod')).toBe('high');
-		expect(alertPriority('CRITICAL', 'staging')).toBe('high');
-		expect(alertPriority('WARNING', 'staging')).toBe('medium');
+		expect(alertPriority({ severity: ' Warning ', env: 'prod' }, DEFAULT_PRIORITY)).toBe('high');
+		expect(alertPriority({ severity: 'CRITICAL', env: 'staging' }, DEFAULT_PRIORITY)).toBe('high');
+		expect(alertPriority({ severity: 'WARNING', env: 'staging' }, DEFAULT_PRIORITY)).toBe('medium');
+	});
+
+	test('таблица тенанта: warning в prod — medium', () => {
+		const table = {
+			...DEFAULT_PRIORITY,
+			warning: { ...DEFAULT_PRIORITY.warning, prod: 'medium' },
+		} as const;
+		expect(alertPriority({ severity: 'warning', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'warning', env: 'dev' }, table)).toBe('high');
+		const [signal] = parseGrafanaWebhook(
+			{
+				alerts: [
+					{
+						status: 'firing',
+						fingerprint: 'f',
+						startsAt: T,
+						labels: { severity: 'warning', env: 'prod' },
+					},
+				],
+			},
+			table,
+		) as Firing[];
+		expect(signal?.priority).toBe('medium');
+	});
+
+	test('пустой env — prod: ячейка prod, а не *', () => {
+		const table = { '*': { '*': 'urgent', prod: 'medium' } } as const;
+		expect(alertPriority({ severity: 'critical', env: '' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'critical' }, table)).toBe('medium');
+	});
+
+	test('метки с именами из Object.prototype не дают функцию вместо приоритета', () => {
+		for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+			expect(alertPriority({ severity: 'critical', env: name }, DEFAULT_PRIORITY)).toBe('urgent');
+			expect(alertPriority({ severity: name, env: 'prod' }, DEFAULT_PRIORITY)).toBe('urgent');
+			expect(alertPriority({ severity: name, env: 'staging' }, DEFAULT_PRIORITY)).toBe('high');
+			expect(alertPriority({ severity: 'warning', env: name }, DEFAULT_PRIORITY)).toBe('high');
+		}
+	});
+
+	test('порядок поиска: ячейка строки, * строки, ячейка строки *, * строки *, urgent', () => {
+		const table = {
+			warning: { dev: 'high', '*': 'medium' },
+			info: { staging: 'high' },
+			'*': { prod: 'medium', '*': 'high' },
+		} as const;
+		expect(alertPriority({ severity: 'warning', env: 'dev' }, table)).toBe('high');
+		expect(alertPriority({ severity: 'warning', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'dev' }, table)).toBe('high');
+		expect(alertPriority({ severity: 'other', env: 'prod' }, table)).toBe('medium');
+		expect(alertPriority({ severity: 'info', env: 'dev' }, {})).toBe('urgent');
 	});
 
 	test('пачка со смешанными severity и статусами', () => {

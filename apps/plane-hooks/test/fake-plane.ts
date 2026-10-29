@@ -1,11 +1,13 @@
 import {
 	type CommentSummary,
 	type LabelSummary,
+	type LinkSummary,
 	type NewComment,
 	type NewRelease,
 	type NewWorkItem,
 	type PlaneApi,
 	PlaneApiError,
+	type ProjectSummary,
 	type StateSummary,
 	type Upsert,
 	type WorkItemRef,
@@ -48,15 +50,54 @@ export type FakeComment = NewComment & {
 	workItemId: string;
 	created_at: string;
 };
+export type FakeLink = {
+	id: string;
+	project: string;
+	workItemId: string;
+	url: string;
+	title: string;
+};
 
 export type FakeRelease = NewRelease & { id: string; changelog: string; workItemIds: string[] };
 
 export const STATES: StateSummary[] = [
-	{ id: 'st-backlog', group: 'backlog', default: true },
-	{ id: 'st-started', group: 'started', default: false },
-	{ id: 'st-done', group: 'completed', default: false },
-	{ id: 'st-cancelled', group: 'cancelled', default: false },
+	{ id: 'st-backlog', name: 'Backlog', group: 'backlog', sequence: 15000, default: true },
+	{ id: 'st-started', name: 'In Progress', group: 'started', sequence: 35000, default: false },
+	{ id: 'st-done', name: 'Done', group: 'completed', sequence: 45000, default: false },
+	{ id: 'st-cancelled', name: 'Cancelled', group: 'cancelled', sequence: 55000, default: false },
 ];
+
+/** [name, group, sequence] */
+type StateRow = [string, string, number];
+const MR_STATES: StateRow[] = [
+	['Backlog', 'backlog', 15000],
+	['Todo', 'unstarted', 25000],
+	['In Progress', 'started', 35000],
+	['In Review', 'started', 37000],
+	['On staging', 'started', 40000],
+	['Done', 'completed', 45000],
+	['Cancelled', 'cancelled', 55000],
+];
+const without = (names: string[]) => MR_STATES.filter(([name]) => !names.includes(name));
+
+/** State sets of the delivery projects, keyed by identifier. */
+const DELIVERY_STATES: Record<string, StateRow[]> = {
+	ENG: MR_STATES,
+	OPS: without(['In Review', 'On staging']),
+	QA: [...MR_STATES, ['Needs info', 'started', 38000], ['Ready for retest', 'started', 41000]],
+	INC: MR_STATES,
+};
+
+function statesOf(identifier: string, rows: StateRow[]): StateSummary[] {
+	const prefix = identifier.toLowerCase();
+	return rows.map(([name, group, sequence]) => ({
+		id: `${prefix}-${name.toLowerCase().replaceAll(' ', '-')}`,
+		name,
+		group,
+		sequence,
+		default: name === 'Backlog',
+	}));
+}
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -69,7 +110,10 @@ export class FakePlane implements PlaneApi {
 	readonly forbiddenProjects = new Set<string>();
 	/** Archived work item ids: only `getWorkItem` stops seeing them (404). */
 	readonly archived = new Set<string>();
+	/** Link rows; `createLink` answers 'exists' for a URL a work item already has. */
+	readonly links: FakeLink[] = [];
 	readonly #projects: Map<string, string>;
+	readonly #states = new Map<string, StateSummary[]>();
 	readonly #failures = new Map<keyof PlaneApi, Error>();
 	#sequence = 0;
 	#clock = Date.parse('2026-10-06T00:00:00Z');
@@ -79,6 +123,29 @@ export class FakePlane implements PlaneApi {
 		this.#projects = new Map(Object.entries(projects));
 	}
 
+	/** ENG, OPS, QA and INC with the delivery state sets (ids look like `eng-in-review`). */
+	static delivery(): FakePlane {
+		const plane = new FakePlane({ ENG: 'p-eng', OPS: 'p-ops', QA: 'p-qa', INC: 'p-inc' });
+		for (const [identifier, rows] of Object.entries(DELIVERY_STATES)) {
+			plane.#states.set(plane.#projects.get(identifier) as string, statesOf(identifier, rows));
+		}
+		return plane;
+	}
+
+	/** A work item by key (`ENG-12`) in the state called `state`; returns its id. */
+	addWorkItem(key: string, state: string): string {
+		const match = /^([A-Z0-9]+)-(\d+)$/.exec(key);
+		const project = match ? this.#projects.get(match[1] as string) : undefined;
+		if (!match || project === undefined) throw new Error(`no project for key ${key}`);
+		const found = this.#statesOf(project).find((s) => s.name === state);
+		if (!found) throw new Error(`no state "${state}" in ${match[1]}`);
+		const sequence = Number(match[2]);
+		if (this.workItems.some((w) => w.project === project && w.sequence === sequence))
+			throw new Error(`${key} exists`);
+		const item = this.seedWorkItem(project, { state: found.id, sequence });
+		return item.id;
+	}
+
 	/** The next call of `method` rejects with `error`. */
 	failNext(method: keyof PlaneApi, error: Error = new PlaneApiError(500, 'FAKE', method)): void {
 		this.#failures.set(method, error);
@@ -86,11 +153,18 @@ export class FakePlane implements PlaneApi {
 
 	seedWorkItem(project: string, fields: Partial<FakeWorkItem> = {}): FakeWorkItem {
 		const sequence = ++this.#sequence;
+		// The key number skips numbers a project already uses (an explicit `addWorkItem('ENG-3', …)`).
+		let keyNumber = fields.sequence ?? sequence;
+		while (
+			fields.sequence === undefined &&
+			this.workItems.some((w) => w.project === project && w.sequence === keyNumber)
+		)
+			keyNumber++;
 		const item: FakeWorkItem = {
 			id: `w${sequence}`,
 			project,
-			sequence,
-			state: 'st-backlog',
+			sequence: keyNumber,
+			state: this.#defaultState(project),
 			name: `seeded ${sequence}`,
 			description_html: '',
 			priority: 'none',
@@ -133,7 +207,7 @@ export class FakePlane implements PlaneApi {
 		);
 		await tick();
 		if (existing) return { id: existing.id, created: false };
-		const created = this.seedWorkItem(projectId, { ...item, state: 'st-backlog' });
+		const created = this.seedWorkItem(projectId, { ...item, state: this.#defaultState(projectId) });
 		return { id: created.id, created: true };
 	}
 
@@ -155,13 +229,13 @@ export class FakePlane implements PlaneApi {
 		const item = this.#item(projectId, workItemId);
 		if (this.archived.has(item.id))
 			throw new PlaneApiError(404, 'GET', `/work-items/${workItemId}/`);
-		return { id: item.id, project: item.project, state: item.state };
+		return { id: item.id, project: item.project, state: item.state, sequenceId: item.sequence };
 	}
 
 	async archiveWorkItem(projectId: string, workItemId: string): Promise<void> {
 		this.#enter('archiveWorkItem', projectId);
 		const item = this.#item(projectId, workItemId);
-		const group = STATES.find((s) => s.id === item.state)?.group;
+		const group = this.#statesOf(projectId).find((s) => s.id === item.state)?.group;
 		if (group !== 'completed' && group !== 'cancelled')
 			throw new PlaneApiError(400, 'POST', `/work-items/${workItemId}/archive/`);
 		this.archived.add(item.id);
@@ -216,9 +290,49 @@ export class FakePlane implements PlaneApi {
 			.map((c) => ({
 				id: c.id,
 				external_id: c.external_id === '' ? null : c.external_id,
+				external_source: c.external_source === '' ? null : c.external_source,
+				comment_html: c.comment_html,
 				created_at: c.created_at,
 			}))
 			.reverse();
+	}
+
+	async updateComment(
+		projectId: string,
+		workItemId: string,
+		commentId: string,
+		html: string,
+	): Promise<void> {
+		this.#enter('updateComment', projectId);
+		this.#item(projectId, workItemId);
+		const comment = this.comments.find((c) => c.id === commentId && c.workItemId === workItemId);
+		if (!comment) throw new PlaneApiError(404, 'PATCH', `/comments/${commentId}/`);
+		comment.comment_html = html;
+	}
+
+	async listLinks(projectId: string, workItemId: string): Promise<LinkSummary[]> {
+		this.#enter('listLinks', projectId);
+		this.#item(projectId, workItemId);
+		return this.links
+			.filter((l) => l.workItemId === workItemId)
+			.map((l) => ({ id: l.id, url: l.url }));
+	}
+
+	async createLink(
+		projectId: string,
+		workItemId: string,
+		link: { url: string; title: string },
+	): Promise<'created' | 'exists'> {
+		this.#enter('createLink', projectId);
+		this.#item(projectId, workItemId);
+		if (this.links.some((l) => l.workItemId === workItemId && l.url === link.url)) return 'exists';
+		this.links.push({ id: `k${++this.#sequence}`, project: projectId, workItemId, ...link });
+		return 'created';
+	}
+
+	async listProjects(): Promise<ProjectSummary[]> {
+		this.#enter('listProjects');
+		return [...this.#projects].map(([identifier, id]) => ({ id, identifier }));
 	}
 
 	async getWorkItemByKey(key: string): Promise<WorkItemRef | null> {
@@ -231,17 +345,14 @@ export class FakePlane implements PlaneApi {
 		const item = this.workItems.find(
 			(w) => w.project === project && w.sequence === Number(match[2]),
 		);
-		return item ? { id: item.id, project: item.project, state: item.state } : null;
-	}
-
-	async listProjectIdentifiers(): Promise<string[]> {
-		this.#enter('listProjectIdentifiers');
-		return [...this.#projects.keys()];
+		return item
+			? { id: item.id, project: item.project, state: item.state, sequenceId: item.sequence }
+			: null;
 	}
 
 	async listStates(projectId: string): Promise<StateSummary[]> {
 		this.#enter('listStates', projectId);
-		return STATES.map((s) => ({ ...s }));
+		return this.#statesOf(projectId).map((s) => ({ ...s }));
 	}
 
 	async listLabels(projectId: string): Promise<LabelSummary[]> {
@@ -290,6 +401,14 @@ export class FakePlane implements PlaneApi {
 		const release = this.#release(releaseId);
 		for (const id of workItemIds)
 			if (!release.workItemIds.includes(id)) release.workItemIds.push(id);
+	}
+
+	#statesOf(projectId: string): StateSummary[] {
+		return this.#states.get(projectId) ?? STATES;
+	}
+
+	#defaultState(projectId: string): string {
+		return (this.#statesOf(projectId).find((s) => s.default) as StateSummary).id;
 	}
 
 	#enter(method: keyof PlaneApi, projectId?: string): void {

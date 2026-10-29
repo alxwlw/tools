@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { ReleaseDraft } from '../src/deploy-note.ts';
-import { changelogHtml, publishRelease, releaseName, type ReleaseItem } from '../src/release.ts';
+import {
+	changelogHtml,
+	publishRelease,
+	type ReleaseDraft,
+	releaseName,
+	type ReleaseItem,
+} from '../src/release.ts';
 import { RELEASE_ITEMS_MAX } from '../src/plane.ts';
 import { FakePlane } from './fake-plane.ts';
 
@@ -37,45 +42,20 @@ beforeEach(() => {
 });
 
 describe('releaseName', () => {
-	test('merge релизного PR из staging — дата UTC, короткий sha и заголовок PR', () => {
-		expect(releaseName(draft())).toBe(`2026-10-06 · 89abcde — ${TITLE}`);
+	test('имя — дата UTC, sha7 и заголовок PR; без заголовка — дата и sha7', () => {
+		expect(releaseName(draft({ headline: TITLE }))).toBe(`2026-10-06 · 89abcde — ${TITLE}`);
+		expect(releaseName(draft())).toBe('2026-10-06 · 89abcde');
+		expect(releaseName(draft({ headline: '  ' }))).toBe('2026-10-06 · 89abcde');
 	});
 
-	test('обычный коммит, merge не из staging, голова не равна sha — без заголовка', () => {
-		const plain = '2026-10-06 · 89abcde';
-		expect(releaseName(draft({ commits: [{ sha: SHA, message: 'fix: hotfix on main' }] }))).toBe(
-			plain,
-		);
-		expect(
-			releaseName(
-				draft({
-					commits: [
-						{ sha: SHA, message: 'Merge pull request #831 from example-org/feat-cld/x\n\nfeat: x' },
-					],
-				}),
-			),
-		).toBe(plain);
-		expect(
-			releaseName(
-				draft({
-					commits: [
-						{ sha: ONE, message: `Merge pull request #830 from example-org/staging\n\n${TITLE}` },
-					],
-				}),
-			),
-		).toBe(plain);
-		expect(releaseName(draft({ commits: [] }))).toBe(plain);
+	test('сообщение merge-коммита из staging больше не источник заголовка', () => {
+		const message = `Merge pull request #830 from example-org/staging\n\n${TITLE}\n`;
+		expect(releaseName(draft({ commits: [{ sha: SHA, message }] }))).toBe('2026-10-06 · 89abcde');
 	});
 
 	test('длинный заголовок обрезается до 200 символов с многоточием', () => {
 		const long = 'я'.repeat(300);
-		const name = releaseName(
-			draft({
-				commits: [
-					{ sha: SHA, message: `Merge pull request #1 from example-org/staging\n\n${long}` },
-				],
-			}),
-		);
+		const name = releaseName(draft({ headline: long }));
 		expect(Array.from(name)).toHaveLength(200);
 		expect(name.endsWith('…')).toBe(true);
 	});
@@ -109,7 +89,7 @@ describe('changelogHtml', () => {
 
 describe('publishRelease', () => {
 	test('создаёт релиз: имя, статус, дата, external_id, changelog, задачи', async () => {
-		const result = await publishRelease({ plane }, draft(), ITEMS);
+		const result = await publishRelease({ plane }, draft({ headline: TITLE }), ITEMS);
 		expect(plane.releases).toHaveLength(1);
 		const [release] = plane.releases;
 		expect(result).toEqual({ action: 'created', releaseId: release?.id as string });

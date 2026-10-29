@@ -29,7 +29,7 @@ export type Config = {
 /** Design §10 «Итоги пробы»: a Miro comment dies with its sticker, so the source item stays by default. */
 export const KEEP_SOURCE_DEFAULT = true;
 
-// Same shape as PROJECT_UUID in plane-hooks.
+// A Plane id: a UUID, any case.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TENANT_ID = /^[a-z][a-z0-9]{0,15}$/;
 const MIRO_TEAM_ID = /^\d{1,24}$/;
