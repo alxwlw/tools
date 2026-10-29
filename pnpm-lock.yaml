@@ -165,14 +165,14 @@ settings:
 catalogs:
   dev:
     '@alxwlw/oxlint-config':
-      specifier: 1.8.0
-      version: 1.8.0
+      specifier: 1.9.0
+      version: 1.9.0
     '@alxwlw/stack':
-      specifier: 1.8.0
-      version: 1.8.0
+      specifier: 1.9.0
+      version: 1.9.0
     '@alxwlw/tsconfig':
-      specifier: 1.8.0
-      version: 1.8.0
+      specifier: 1.9.0
+      version: 1.9.0
     '@types/bun':
       specifier: 1.4.3
       version: 1.4.3
@@ -195,13 +195,13 @@ importers:
     devDependencies:
       '@alxwlw/oxlint-config':
         specifier: catalog:dev
-        version: 1.8.0(oxlint-tsgolint@7.0.2004)(oxlint@1.88.0(oxlint-tsgolint@7.0.2004))
+        version: 1.9.0(oxlint-tsgolint@7.0.2004)(oxlint@1.88.0(oxlint-tsgolint@7.0.2004))
       '@alxwlw/stack':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       oxfmt:
         specifier: catalog:dev
         version: 0.73.0
@@ -219,7 +219,7 @@ importers:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       '@types/bun':
         specifier: catalog:dev
         version: 1.4.3
@@ -235,7 +235,7 @@ importers:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       '@types/bun':
         specifier: catalog:dev
         version: 1.4.3
@@ -247,7 +247,7 @@ importers:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       '@types/bun':
         specifier: catalog:dev
         version: 1.4.3
@@ -259,7 +259,7 @@ importers:
     devDependencies:
       '@alxwlw/tsconfig':
         specifier: catalog:dev
-        version: 1.8.0
+        version: 1.9.0
       '@types/bun':
         specifier: catalog:dev
         version: 1.4.3
@@ -269,8 +269,8 @@ importers:
 
 packages:
 
-  '@alxwlw/oxlint-config@1.8.0':
-    resolution: {integrity: sha512-crUya6rTEVari2GH13AvUrh5VQv9qAEu5OTDQIkBJbwDInooFrvslgwLTEbuP+5xtml0U/urd/iEZQXqqURaCQ==}
+  '@alxwlw/oxlint-config@1.9.0':
+    resolution: {integrity: sha512-+OJ8dPNadSxafzX7REoRNWNLQwQrfL3skF5u5ZoaE6z2Fu7eABmskBpHIW4sL1aNSMw1FAiarSzNn0VwmO8lPw==}
     peerDependencies:
       oxlint: '>=1.74.0'
       oxlint-tsgolint: '>=0.25.0'
@@ -278,12 +278,12 @@ packages:
       oxlint-tsgolint:
         optional: true
 
-  '@alxwlw/stack@1.8.0':
-    resolution: {integrity: sha512-AwVhfRd6x4ji1vZHnwSj0x5WzVygPDSm73owD56QwWonIzpCrWuBG/c2qtySq608dZvde90hRnJXfV4PXR/WZQ==}
+  '@alxwlw/stack@1.9.0':
+    resolution: {integrity: sha512-N4HFeDjDQ5KG4Ml5OzsMhLPz/ZrS0rV4t5VP21ePmFuGuAR3SjVpK2vhPWrVGN+Y8f1rMlWVCEnzqnH483+Fbw==}
     hasBin: true
 
-  '@alxwlw/tsconfig@1.8.0':
-    resolution: {integrity: sha512-5MSL2sliLpEzrQIUVHzSEINDTxVwmlvG8vNdmHnGh3VQPopy3aqQSk0nfcymLjPf+H2+v1DWgwBJdb7x6VF0Gg==}
+  '@alxwlw/tsconfig@1.9.0':
+    resolution: {integrity: sha512-TtuSAgT5weUEuzFzSWZ3TkXbtlccM5lLOD/xR69jCd3SlodAVPgzn6XmU9L0RMI9h4d6+gKWBT5V74lvhuhMRA==}
 
   '@microsoft/tsdoc-config@0.18.3':
     resolution: {integrity: sha512-0I0rGXo1eJziw3EEErkDS9p/0RzBcyOiV+zbSDqOZTeURmhtut+WIvpih0LM5g+ZpZ9SyFxDfkhAcl/r8e2zGw==}
@@ -800,7 +800,7 @@ packages:
 
 snapshots:
 
-  '@alxwlw/oxlint-config@1.8.0(oxlint-tsgolint@7.0.2004)(oxlint@1.88.0(oxlint-tsgolint@7.0.2004))':
+  '@alxwlw/oxlint-config@1.9.0(oxlint-tsgolint@7.0.2004)(oxlint@1.88.0(oxlint-tsgolint@7.0.2004))':
     dependencies:
       '@microsoft/tsdoc': 0.17.1
       '@microsoft/tsdoc-config': 0.18.3
@@ -808,13 +808,13 @@ snapshots:
     optionalDependencies:
       oxlint-tsgolint: 7.0.2004
 
-  '@alxwlw/stack@1.8.0':
+  '@alxwlw/stack@1.9.0':
     dependencies:
       json5: 2.2.3
       jsonc-parser: 3.3.1
       yaml: 2.9.1
 
-  '@alxwlw/tsconfig@1.8.0': {}
+  '@alxwlw/tsconfig@1.9.0': {}
 
   '@microsoft/tsdoc-config@0.18.3':
     dependencies:
