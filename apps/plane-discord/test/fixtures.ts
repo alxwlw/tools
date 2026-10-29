@@ -1,4 +1,4 @@
-// Sanitized Plane deliveries captured by the probe (Task 1). All files were produced by ONE
+// Sanitized Plane deliveries captured from a live workspace. All files were produced by ONE
 // createSanitizer over every capture, so a placeholder UUID means the same entity in every file
 // (the app bot in a mention equals agent_user_id of the agent run, and so on).
 // plane-comment-get-mention.json is an API response (GET comment), not a delivery: it is kept in
