@@ -457,7 +457,9 @@ use `/healthz` and the `listening` line to see that the hub is up), log lines wi
   from the last accepted delivery or from the start, whichever is later.
 
 Logs are one JSON line per event on stdout (`{ts, event, tenant?, …}`). Lines with `annotation: "deploy"` or
-`annotation: "incident"` carry `title`, `env`, `sha` and `source` for Grafana annotation layers. Secrets, tokens,
+`annotation: "incident"` carry `title`, `env`, `sha` and `source` for Grafana annotation layers. A Vercel production
+deploy is marked once: by the Vercel input when the tenant has one, else by the `deploy` line of its GitHub
+deployment. Secrets, tokens,
 request bodies, work item names, PR titles and comment texts never reach the log.
 
 ## Upgrading from the API-key version
