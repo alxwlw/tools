@@ -293,7 +293,7 @@ export class PlaneClient implements PlaneApi {
 			id: field(row, 'id'),
 			name: field(row, 'name'),
 			group: field(row, 'group'),
-			sequence: numberField(row, 'sequence'),
+			sequence: numericField(row, 'sequence'),
 			default: row.default === true,
 		}));
 	}
@@ -422,6 +422,16 @@ function numberField(value: unknown, key: string): number {
 	if (typeof found !== 'number' || !Number.isFinite(found))
 		throw new Error(`Plane response: no number field "${key}"`);
 	return found;
+}
+
+/** A number, or a numeric string: a Plane instance (Commercial v3.3.0) sends a state's `sequence` as "15000". */
+function numericField(value: unknown, key: string): number {
+	const found = isRecord(value) ? value[key] : undefined;
+	if (typeof found === 'string' && found.trim() !== '') {
+		const parsed = Number(found);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	return numberField(value, key);
 }
 
 function optionalString(value: unknown): string | null {

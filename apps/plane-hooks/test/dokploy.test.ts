@@ -9,6 +9,7 @@ import {
 import type { GitHubApi } from '../src/github/client.ts';
 import { BadPayload } from '../src/payload.ts';
 import { tenantOf } from './config-fixture.ts';
+import { fixture } from './fixtures.ts';
 import { FakeGitHub } from './fake-github.ts';
 
 const SECRET = 'dokploy-secret';
@@ -299,6 +300,12 @@ describe('parseDokployWebhook', () => {
 			kind: 'ignored',
 			type: 'server-threshold',
 		});
+	});
+
+	test('тело кнопки Test (title, message, timestamp без type) — ignored: test', async () => {
+		const { body } = await fixture('dokploy-test.json');
+		expect(Object.keys(body)).toEqual(['title', 'message', 'timestamp']);
+		expect(parseDokployWebhook(body)).toEqual({ kind: 'ignored', type: 'test' });
 	});
 
 	test('build с другим статусом — ignored', () => {

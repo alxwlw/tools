@@ -145,6 +145,18 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
 			}
 			case 'promoted':
 			case 'rolled_back': {
+				// The documented rollback body has no commit, only the target deployment id; resolving it takes a
+				// Vercel API key, which the hub does not hold (design §3.7). Nothing changes in Plane.
+				if (event.kind === 'rolled_back' && event.sha === null) {
+					log({
+						event: 'vercel.rollback.unresolved',
+						level: 'warn',
+						tenant,
+						project: event.project,
+						toDeploymentId: event.toDeploymentId ?? null,
+					});
+					return text(200, 'ignored');
+				}
 				let fact: Awaited<ReturnType<typeof vercelDeployFact>> = null;
 				try {
 					const client = event.repo === null ? null : await runtime.sync.github(event.repo);

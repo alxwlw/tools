@@ -630,12 +630,20 @@ describe('PlaneClient: проекты, ссылки, правка коммент
 		expect(await failure(client.listStates('p1'))).toBeInstanceOf(Error);
 	});
 
-	test('listStates: sequence строкой или бесконечность — ошибка разбора', async () => {
+	test('listStates: sequence строкой-числом (Plane Commercial v3.3.0) — число', async () => {
 		const row = '"id": "s1", "name": "Todo", "group": "unstarted", "default": false';
-		const asString = stub([{ status: 200, raw: `[{${row}, "sequence": "25000"}]` }]);
-		expect(await failure(asString.client.listStates('p1'))).toBeInstanceOf(Error);
-		const infinite = stub([{ status: 200, raw: `[{${row}, "sequence": 1e999}]` }]);
-		expect(await failure(infinite.client.listStates('p1'))).toBeInstanceOf(Error);
+		const { client } = stub([
+			{ status: 200, raw: `[{${row}, "sequence": "25000"}, {${row}, "sequence": "15000.5"}]` },
+		]);
+		expect((await client.listStates('p1')).map((s) => s.sequence)).toEqual([25000, 15000.5]);
+	});
+
+	test('listStates: sequence не числом, пустой строкой или бесконечностью — ошибка разбора', async () => {
+		const row = '"id": "s1", "name": "Todo", "group": "unstarted", "default": false';
+		for (const seq of ['"abc"', '""', '" "', '"Infinity"', '"1e999"', '1e999', 'null', 'true']) {
+			const bad = stub([{ status: 200, raw: `[{${row}, "sequence": ${seq}}]` }]);
+			expect(await failure(bad.client.listStates('p1'))).toBeInstanceOf(Error);
+		}
 	});
 
 	test('listComments: external_source не строка — null', async () => {

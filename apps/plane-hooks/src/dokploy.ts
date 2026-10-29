@@ -9,6 +9,7 @@ import { BadPayload, isRecord, optString } from './payload.ts';
 /** GitHub rejects a deployment description over 140 characters. */
 const DESCRIPTION_MAX = 140;
 const ERROR_MAX = 2000;
+const TEST_TITLE = 'Test Notification';
 const BACKUP_TITLE = /^(?:Database|Volume) Backup (?:Successful|Failed)$/;
 
 export type DokployEvent =
@@ -43,6 +44,8 @@ export function parseDokployWebhook(body: unknown): DokployEvent {
 
 	if (BACKUP_TITLE.test(title)) return backup(body, title, status);
 	if (type === 'build' && (status === 'success' || status === 'error')) return build(body, status);
+	// The Test button of the Custom notification sends only {title, message, timestamp}: no type, no status.
+	if (title === TEST_TITLE) return { kind: 'ignored', type: 'test' };
 	const kind = optString(body.alertType) ?? type;
 	if (kind === null) throw new BadPayload('dokploy: no event type');
 	return { kind: 'ignored', type: kind };

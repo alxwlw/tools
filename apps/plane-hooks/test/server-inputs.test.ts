@@ -255,14 +255,13 @@ describe('Vercel', () => {
 			expect([res.status, await res.text()]).toEqual([200, 'ignored']);
 			expect(w.store.inboxPending()).toEqual([]);
 			expect(w.lines('deploy')).toEqual([]);
-			expect(w.lines('vercel.switch')).toEqual([
+			expect(w.lines('vercel.rollback.unresolved')).toEqual([
 				{
-					event: 'vercel.switch',
+					event: 'vercel.rollback.unresolved',
 					level: 'warn',
 					tenant: 'acme',
-					kind: 'rolled_back',
 					project: 'prj_terminal',
-					action: 'no_deploy',
+					toDeploymentId: 'dpl_old',
 				},
 			]);
 			expect(w.gh.calls).toEqual([]);
@@ -471,5 +470,17 @@ describe('Dokploy', () => {
 		expect(
 			(await w.handler(dokployRequest('acme', restart, `Bearer ${VERCEL_SECRET}`))).status,
 		).toBe(401);
+	});
+
+	test('кнопка Test в Dokploy (реальное тело): 200 ignored, без побочных действий', async () => {
+		const w = world();
+		const { body } = await fixture('dokploy-test.json');
+		const res = await w.send(dokployRequest('acme', body));
+		expect([res.status, await res.text()]).toEqual([200, 'ignored']);
+		expect(w.lines('dokploy.ignored')).toEqual([
+			{ event: 'dokploy.ignored', tenant: 'acme', type: 'test' },
+		]);
+		expect(w.gh.calls).toEqual([]);
+		expect(w.store.inboxPending()).toEqual([]);
 	});
 });

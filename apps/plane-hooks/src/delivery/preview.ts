@@ -79,8 +79,12 @@ export async function handlePreview(
  * The GitHub deploy a Vercel promote / rollback stands for. `at` is the time of the promote/rollback event itself
  * (`event.at`): handleDeploy orders deploys by it and drops a fact older than its cursor as stale, so neither the
  * processing time nor the deployment's creation time may stand in. `deploymentId` is null — GitHub has no record
- * of the switch. The environment is the one where `vercel[bot]` has a Deployment record of `sha`; Vercel names it
- * `Production` or, with several projects in a repository, `Production – <project>`. No repo, sha or such a
+ * of the switch. The environment is the one where `vercel[bot]` has a Deployment record of `sha`. Observed on the
+ * GitHub API rows: `Production` for a repository with one Vercel project (older records `Production – <project>`), and
+ * `Production – <project>` for the projects of a repository with several; a preview is `Preview`. The
+ * promote and rollback bodies are not captured live — per the Vercel docs a rollback carries only
+ * `fromDeploymentId` / `toDeploymentId`, no sha, and the server answers it before this function with a
+ * `vercel.rollback.unresolved` warn line (resolving the id would need a Vercel API key). No repo, sha or such a
  * record → null. A deployment whose creator is gone (null) is not `vercel[bot]`.
  */
 export async function vercelDeployFact(

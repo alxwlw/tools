@@ -1,0 +1,10 @@
+{
+	"headers": {
+		"content-type": "application/json"
+	},
+	"body": {
+		"title": "Test Notification",
+		"message": "Hi, From Dokploy 👋",
+		"timestamp": "2026-10-29T02:30:00.539Z"
+	}
+}

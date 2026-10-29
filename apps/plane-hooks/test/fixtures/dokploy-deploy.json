@@ -1,0 +1,18 @@
+{
+	"headers": {
+		"content-type": "application/json"
+	},
+	"body": {
+		"title": "Build Success",
+		"message": "Build completed successfully",
+		"projectName": "example-project-1",
+		"applicationName": "example-app-1",
+		"applicationType": "compose",
+		"buildLink": "https://host1.example.com/dashboard/project/id1/environment/id2/services/compose/id3?tab=deployments",
+		"timestamp": "2026-10-29T02:58:22.912Z",
+		"date": "10/29/2026, 2:58:22 AM",
+		"domains": "app2.example.com",
+		"status": "success",
+		"type": "build"
+	}
+}

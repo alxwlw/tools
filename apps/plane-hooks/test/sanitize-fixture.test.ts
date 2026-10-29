@@ -75,6 +75,21 @@ test('sanitizeGithub заменяет организацию, логины, id, 
 	expect(Object.keys(out.pull_request)).toEqual(Object.keys(input.pull_request));
 });
 
+test('sanitizeGithub заменяет homepage репозитория', () => {
+	const out = sanitizeGithub({
+		repository: {
+			full_name: 'example-org/monorepo',
+			homepage: 'https://landing.vercel.app',
+			description: null,
+		},
+		other: { homepage: null },
+		empty: { homepage: '' },
+	}) as any;
+	expect(out.repository.homepage).toBe('https://example.com');
+	expect(out.other.homepage).toBeNull();
+	expect(out.empty.homepage).toBe('');
+});
+
 test('sanitizeGithub не меняет входной объект', () => {
 	const input = githubInput();
 	sanitizeGithub(input);
@@ -122,7 +137,7 @@ test('sanitizeVercel заменяет поля meta, id, хосты и ссыл�
 	expect(out.payload.team.id).toBe('team_example1');
 	expect(out.payload.team.slug).toBe('acme');
 	expect(out.payload.deployment.url).toBe('deployment-1.vercel.app');
-	expect(out.payload.links.deployment).toBe('https://vercel.com/acme/app1/Q1w2e3');
+	expect(out.payload.links.deployment).toBe('https://vercel.com/acme/app1/deployment1');
 	expect(out.payload.deployment.name).toBe('app1');
 	const flat = JSON.stringify(out);
 	for (const original of [
@@ -344,4 +359,252 @@ test('sanitizeGithub не включает .git и точку в конце пр
 	expect(out.repository.full_name).toBe('acme/api');
 	expect(out.repository.clone_url).toBe('https://github.com/acme/api.git');
 	expect(out.note).toBe('see acme/api.');
+});
+
+// Ответы API (compare, deployments, pulls) не несут `full_name`: владелец приходит из опций.
+test('sanitizeGithub с repos заменяет владельца в ответе API без full_name', () => {
+	const out = JSON.stringify(
+		sanitizeGithub(
+			{
+				url: 'https://api.github.com/repos/example-org/monorepo/compare/a...b',
+				base: { label: 'example-org:main' },
+			},
+			{ repos: ['example-org/monorepo'] },
+		),
+	);
+	expect(out).toContain('https://api.github.com/repos/acme/api/compare/a...b');
+	expect(out).toContain('acme:main');
+	expect(out).not.toContain('example-org');
+	expect(out).not.toContain('monorepo');
+});
+
+test('sanitizeGithub с apps заменяет слаг приватного GitHub App и оставляет [bot]', () => {
+	const out = JSON.stringify(
+		sanitizeGithub(
+			{
+				repository: { full_name: 'example-org/monorepo' },
+				creator: { login: 'secret-hooks[bot]', html_url: 'https://github.com/apps/secret-hooks' },
+				app: { slug: 'secret-hooks', name: 'secret-hooks' },
+			},
+			{ apps: ['secret-hooks'] },
+		),
+	);
+	expect(out).toContain('acme-app[bot]');
+	expect(out).toContain('https://github.com/apps/acme-app');
+	expect(out).not.toContain('secret-hooks');
+});
+
+test('sanitizeGithub заменяет короткий sha, у которого в документе есть полный', () => {
+	const out = sanitizeGithub({
+		sha: SHA_A,
+		description: `работает ${SHA_A.slice(0, 7)}, не ${SHA_B.slice(0, 7)}`,
+		url: `https://x/compare/${SHA_A.slice(0, 7)}...${SHA_B}`,
+	}) as { sha: string; description: string; url: string };
+	const fakeA = fakeSha(SHA_A);
+	expect(out.sha).toBe(fakeA);
+	expect(out.description).toBe(`работает ${fakeA.slice(0, 7)}, не ${fakeSha(SHA_B).slice(0, 7)}`);
+	expect(out.url).toBe(`https://x/compare/${fakeA.slice(0, 7)}...${fakeSha(SHA_B)}`);
+});
+
+test('sanitizeGithub с redactText прячет тексты, имена файлов и ветки, оставляя ключи задач', () => {
+	const input = {
+		repository: { full_name: 'example-org/monorepo' },
+		pull_request: {
+			title: 'secret feature (DX-14)',
+			body: 'private details, see LW-16 and DX-14',
+			head: { ref: 'feat-cld/secret-branch', label: 'example-org:feat-cld/secret-branch' },
+			base: { ref: 'main' },
+		},
+		commits: [
+			{ commit: { message: 'secret change (DX-14)\n\nCo-Authored-By: Someone' } },
+			{ commit: { message: 'Merge pull request #7 from example-org/feat-cld/secret-branch' } },
+			{ commit: { message: 'secret keyless change' } },
+		],
+		files: [
+			{
+				filename: 'secret/path.md',
+				previous_filename: 'secret/old.md',
+				blob_url: 'https://github.com/example-org/monorepo/blob/abc/secret/path.md',
+				patch: '@@ secret @@',
+			},
+			{ filename: 'secret/other.md', status: 'added' },
+		],
+		workflow_run: { display_title: 'secret feature (DX-14)' },
+		milestone: null,
+		draft: true,
+	};
+	const out = sanitizeGithub(input, { redactText: true }) as any;
+	const text = JSON.stringify(out);
+	expect(text).not.toContain('secret');
+	expect(text).not.toContain('private');
+	expect(out.milestone).toBeNull();
+	expect(out.draft).toBe(true);
+	expect(out.pull_request.title).toBe('Example change (ENG-1)');
+	expect(out.pull_request.body).toBe('Example description (ENG-2 ENG-1)');
+	expect(out.workflow_run.display_title).toBe('Example change (ENG-1)');
+	expect(out.pull_request.head.ref).toBe('feat/branch-1');
+	expect(out.pull_request.head.label).toBe('acme:feat/branch-1');
+	expect(out.pull_request.base.ref).toBe('main');
+	expect(out.commits[0].commit.message).toBe('chore: example change (ENG-1)');
+	expect(out.commits[1].commit.message).toMatch(/^Merge pull request #7 from /);
+	expect(out.files[0].filename).toBe('src/file-1.md');
+	expect(out.files[1].filename).toBe('src/file-2.md');
+	expect(out.files[0].previous_filename).toBe('src/old-1.md');
+	expect(out.files[0]).not.toHaveProperty('patch');
+	expect(out.files[0].blob_url).toBe('https://github.com/acme/api/blob/abc/src/file-1.md');
+	expect(out.files[1].filename).toBe('src/file-2.md');
+	expect(out.commits[2].commit.message).toBe('chore: example change');
+	expect(out.files[1].status).toBe('added');
+	// Без redactText тексты остаются как были.
+	expect((sanitizeGithub(input) as any).pull_request.title).toBe('secret feature (DX-14)');
+});
+
+test('cli передаёт --repo, --app и --redact-text в sanitizeGithub', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sanitize-'));
+	const file = join(dir, 'api.json');
+	writeFileSync(
+		file,
+		JSON.stringify({
+			url: 'https://api.github.com/repos/example-org/monorepo/x',
+			title: 'secret',
+			bot: 'other-hooks',
+		}),
+	);
+	const out = JSON.parse(
+		cli([
+			'github',
+			file,
+			'--repo',
+			'example-org/monorepo',
+			'--app',
+			'secret-hooks',
+			'--app',
+			'other-hooks',
+			'--redact-text',
+		]),
+	);
+	expect(out.body).toEqual({
+		url: 'https://api.github.com/repos/acme/api/x',
+		title: 'Example change',
+		bot: 'acme-app',
+	});
+});
+
+test('sanitizeVercel заменяет имя проекта на уровне payload и приватную ветку feat-cld', () => {
+	const out = sanitizeVercel({
+		payload: {
+			name: 'private-site',
+			deployment: {
+				name: 'private-site',
+				meta: { githubCommitRef: 'feat-cld/secret-thing', githubPrId: '9' },
+			},
+		},
+	}) as any;
+	expect(out.payload.name).toBe('app1');
+	expect(out.payload.deployment.name).toBe('app1');
+	expect(out.payload.deployment.meta.githubCommitRef).toBe('feat/branch-1');
+	expect(out.payload.deployment.meta.githubPrId).toBe('9');
+});
+
+test('sanitizeGithub заменяет хосты *.vercel.app, sanitizeDokploy — id в пути buildLink', () => {
+	const gh = sanitizeGithub({
+		a: 'https://secret-abc123-team.vercel.app/x',
+		b: 'secret-abc123-team.vercel.app',
+		c: 'https://other-site.vercel.app',
+	}) as any;
+	expect(gh).toEqual({
+		a: 'https://deployment-1.vercel.app/x',
+		b: 'deployment-1.vercel.app',
+		c: 'https://deployment-2.vercel.app',
+	});
+	const dk = sanitizeDokploy({
+		buildLink:
+			'https://dok.private.io/dashboard/project/AbC_1/environment/Env-2/services/compose/Svc9?tab=deployments',
+	}) as any;
+	expect(dk.buildLink).toBe(
+		'https://host1.example.com/dashboard/project/id1/environment/id2/services/compose/id3?tab=deployments',
+	);
+});
+
+test('sanitizeGithub убирает подпись и текст коммита из verification, даже без redactText', () => {
+	const input = {
+		repository: { full_name: 'example-org/monorepo' },
+		commit: {
+			message: 'secret msg',
+			verification: {
+				verified: true,
+				reason: 'valid',
+				signature: '-----BEGIN PGP SIGNATURE-----\nabc\n-----END PGP SIGNATURE-----',
+				payload: 'tree 0123\nauthor Someone\n\nsecret msg',
+			},
+		},
+	};
+	for (const options of [{ redactText: true }, {}]) {
+		const out = sanitizeGithub(input, options) as any;
+		expect(out.commit.verification).toEqual({
+			verified: true,
+			reason: 'valid',
+			signature: null,
+			payload: null,
+		});
+		expect(JSON.stringify(out)).not.toContain('PGP');
+		expect(JSON.stringify(out)).not.toContain('tree 0123');
+	}
+	expect(JSON.stringify(sanitizeGithub(input, { redactText: true }))).not.toContain('secret');
+});
+
+test('sanitizeGithub заменяет id деплоя и статуса в ссылках тем же номером, что и id объекта', () => {
+	const base = 'https://api.github.com/repos/example-org/monorepo';
+	const out = sanitizeGithub({
+		url: `${base}/deployments/7123456789/statuses/20123456789`,
+		id: 20123456789,
+		deployment_url: `${base}/deployments/7123456789`,
+		deployment: {
+			url: `${base}/deployments/7123456789`,
+			id: 7123456789,
+			statuses_url: `${base}/deployments/7123456789/statuses`,
+		},
+		repository: { full_name: 'example-org/monorepo' },
+	}) as any;
+	const { id: statusId } = out;
+	const { id: deploymentId } = out.deployment;
+	expect(statusId).not.toBe(deploymentId);
+	const api = 'https://api.github.com/repos/acme/api';
+	expect(out.url).toBe(`${api}/deployments/${deploymentId}/statuses/${statusId}`);
+	expect(out.deployment_url).toBe(`${api}/deployments/${deploymentId}`);
+	expect(out.deployment.url).toBe(`${api}/deployments/${deploymentId}`);
+	expect(out.deployment.statuses_url).toBe(`${api}/deployments/${deploymentId}/statuses`);
+	expect(JSON.stringify(out)).not.toMatch(/\d{6,}/);
+});
+
+test('sanitizeGithub нумерует id по порядку полей id, а не по порядку ссылок', () => {
+	const out = sanitizeGithub({
+		deployment_url: 'https://api.github.com/repos/example-org/monorepo/deployments/7123456789',
+		size: 77,
+		creator: { id: 41234567 },
+		deployment: { id: 7123456789 },
+		repository: { full_name: 'example-org/monorepo' },
+	}) as any;
+	expect(out.creator.id).toBe(1);
+	expect(out.deployment.id).toBe(2);
+	expect(out.deployment_url).toBe('https://api.github.com/repos/acme/api/deployments/2');
+});
+
+test('sanitizeHeaders даёт x-github-delivery фиктивный UUID', () => {
+	expect(sanitizeHeaders({ 'x-github-delivery': '72d3162e-cc78-11e3-81ab-4c9367dc0958' })).toEqual({
+		'x-github-delivery': '00000000-0000-4000-8000-000000000001',
+	});
+});
+
+test('sanitizeVercel нумерует id вебхука и id деплоя в ссылках', () => {
+	const out = sanitizeVercel({
+		id: 'aB3dE5gH7jK9mN1pQ3sT5',
+		payload: {
+			deployment: { inspectorUrl: 'https://vercel.com/team-a/site/EEzb2uAbC' },
+			links: { deployment: 'https://vercel.com/team-a/site/EEzb2uAbC' },
+		},
+	}) as any;
+	expect(out.id).toBe('evt_example1');
+	expect(out.payload.deployment.inspectorUrl).toBe('https://vercel.com/acme/app1/deployment1');
+	expect(out.payload.links.deployment).toBe('https://vercel.com/acme/app1/deployment1');
 });

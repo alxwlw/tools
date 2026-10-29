@@ -231,7 +231,8 @@ An account webhook to `https://hooks.example.com/hooks/<tenant>/vercel` with the
 `deployment.error`, `deployment.promoted` and `deployment.rollback`; its secret goes to
 `PLANE_HOOKS_<ID>_VERCEL_SECRET`. Vercel's own GitHub Deployments carry the production deploys; the webhook adds
 previews, promotes, rollbacks and failed builds. A failed deployment created by `vercel[bot]` opens no second
-incident through GitHub while the tenant's Vercel input is on.
+incident through GitHub while the tenant's Vercel input is on. `deployment.created` is accepted and ignored. A
+`deployment.rollback` carries no commit and is only logged (`vercel.rollback.unresolved`, see Rollback below).
 
 ### Grafana
 
@@ -393,7 +394,9 @@ silently, and a wrong state name appears only as a later `warning` line:
   one before. A deploy whose status time is older than the cursor's (a late redelivery) is ignored.
 - **Rollback.** A deploy of a commit behind the previous one writes «Откачено» on the work items of the PRs that
   left the environment; their status does not go back. A Vercel instant rollback carries no commit in Vercel's
-  documented payload and is logged and skipped.
+  documented payload (only `fromDeploymentId` / `toDeploymentId`; not captured live) and the hub holds no Vercel API
+  key to resolve it, so it logs one `vercel.rollback.unresolved` warn line (tenant, project, target deployment id)
+  and changes nothing in Plane: the work items get «Откачено» only with the next deploy.
 - **Promote.** A Vercel promote is the production deploy of its sha through the common deploy path, in the
   environment where `vercel[bot]` recorded that sha (`Production` or `Production – <project>`).
 - **Releases.** A deploy of a `release: true` environment creates one Plane release per `repository@sha` (named

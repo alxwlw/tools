@@ -754,6 +754,19 @@ describe('handleDeploy: ignored, релиз, сбои', () => {
 		expect(w.cursor.get(REPO, 'production')).toBe('m1');
 	});
 
+	test('релиз упал (403, у бота нет скоупа релизов — проба Task 1) — Выкачено сделано, releaseError заполнен', async () => {
+		const { w, id, fact: deploy } = releaseHistory();
+		w.failReleaseWith(new PlaneApiError(403, 'POST', '/releases/'));
+
+		const result = await handleDeploy(w.deps, deploy);
+
+		expect(result.action).toBe('delivered');
+		expect(result.release).toBeNull();
+		expect(result.releaseError).toBe('PlaneApiError: Plane POST /releases/ → 403');
+		expect(w.stateOf(id)).toBe('eng-done');
+		expect(w.cursor.get(REPO, 'production')).toBe('m1');
+	});
+
 	test('сбой Plane посреди деплоя — курсор прежний; повтор доводит до конца без дублей', async () => {
 		const w = setup();
 		w.gh.commit('a0', [], 'init');

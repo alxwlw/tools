@@ -1,0 +1,63 @@
+{
+	"headers": {
+		"content-type": "application/json",
+		"x-vercel-attempt": "0"
+	},
+	"body": {
+		"id": "evt_example1",
+		"payload": {
+			"user": {
+				"id": "user_example1"
+			},
+			"team": {
+				"id": "team_example1"
+			},
+			"project": {
+				"id": "prj_example1"
+			},
+			"alias": ["deployment-1.vercel.app"],
+			"deployment": {
+				"id": "dpl_example1",
+				"customEnvironmentId": null,
+				"meta": {
+					"githubCommitAuthorName": "Octo Cat",
+					"githubCommitAuthorEmail": "octocat@example.com",
+					"githubCommitMessage": "Example commit message",
+					"githubCommitOrg": "acme",
+					"githubCommitRef": "feat/branch-1",
+					"githubCommitRepo": "api",
+					"githubCommitSha": "d0aaf23defe8922670dcd6f7191a8caa806a6266",
+					"githubDeployment": "1",
+					"githubOrg": "acme",
+					"githubRepo": "api",
+					"githubRepoOwnerType": "Organization",
+					"githubCommitRepoId": "1",
+					"githubRepoId": "2",
+					"githubHost": "github.com",
+					"githubCommitAuthorLogin": "octocat",
+					"repoPushedAt": "1793220306000",
+					"branchAlias": "deployment-1.vercel.app",
+					"githubPrId": "153",
+					"originalDeploymentId": "dpl_example2",
+					"githubRepoVisibility": "private",
+					"githubCommitVerification": "verified"
+				},
+				"name": "app1",
+				"url": "deployment-2.vercel.app",
+				"inspectorUrl": "https://vercel.com/acme/app1/deployment1"
+			},
+			"links": {
+				"deployment": "https://vercel.com/acme/app1/deployment1",
+				"project": "https://vercel.com/acme/app1"
+			},
+			"name": "app1",
+			"plan": "pro",
+			"regions": ["iad1"],
+			"target": null,
+			"type": "LAMBDAS",
+			"url": "deployment-2.vercel.app"
+		},
+		"createdAt": 1793242916902,
+		"type": "deployment.created"
+	}
+}

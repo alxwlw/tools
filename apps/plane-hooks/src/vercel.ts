@@ -49,6 +49,8 @@ export type VercelHookEvent =
 			/** When the event itself happened (its own `createdAt`): the order of deploys on an environment. */
 			at: string;
 			url: string | null;
+			/** Rollback only: the deployment Vercel restores. The documented body carries no sha, only this id. */
+			toDeploymentId?: string;
 	  }
 	| { kind: 'ignored'; type: string };
 
@@ -57,6 +59,10 @@ export type VercelHookEvent =
  * incident keyed by project + target + branch; deployment.succeeded resolves it (a preview additionally yields the
  * preview link); promote and rollback become `promoted` / `rolled_back` for the deploy path. Other types are
  * ignored. Throws BadPayload on a body Vercel would not send.
+ *
+ * Seen live (observed on a live preview redeploy): `payload.target` is null for a preview, `meta.githubCommitOrg` /
+ * `githubCommitRepo` / `githubCommitRef` / `githubCommitSha` are present, `meta.githubPrId` is a string, and
+ * `deployment.created` arrives before `deployment.succeeded` (it is ignored). promote and rollback were not captured.
  */
 export function parseVercelEvent(body: unknown): VercelHookEvent {
 	if (!isRecord(body)) throw new BadPayload('vercel: body is not an object');
@@ -142,7 +148,10 @@ export function parseVercelEvent(body: unknown): VercelHookEvent {
 	};
 }
 
-/** promote / rollback: fields per the Vercel webhook docs; a rollback event carries no `payload.deployment` there. */
+/**
+ * promote / rollback: fields per the Vercel webhook docs (not captured live); a rollback event carries no
+ * `payload.deployment` there, only `fromDeploymentId` / `toDeploymentId`, so without a Vercel API key its sha is unknown.
+ */
 function parseSwitch(
 	body: Record<string, unknown>,
 	kind: 'promoted' | 'rolled_back',
@@ -159,6 +168,7 @@ function parseSwitch(
 		throw new BadPayload('vercel: deployment.rollback without toDeploymentId or project');
 	}
 	const meta = metaOf(body);
+	const toDeploymentId = optString(payload.toDeploymentId);
 	return {
 		kind,
 		project: (name ?? projectId) as string,
@@ -166,6 +176,7 @@ function parseSwitch(
 		sha: optString(meta.githubCommitSha),
 		at: eventTime(body.createdAt),
 		url: host === null ? null : /^https?:\/\//i.test(host) ? host : `https://${host}`,
+		...(kind === 'rolled_back' && toDeploymentId !== null ? { toDeploymentId } : {}),
 	};
 }
 

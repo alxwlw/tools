@@ -180,6 +180,7 @@ describe('parseVercelEvent: promote и rollback', () => {
 			sha: null,
 			at: '2026-10-06T10:36:40.000Z',
 			url: null,
+			toDeploymentId: 'dpl_old',
 		});
 	});
 
@@ -207,6 +208,7 @@ describe('parseVercelEvent: promote и rollback', () => {
 			sha: SHA,
 			at: '2026-10-06T10:36:40.000Z',
 			url: 'https://terminal-old-example.vercel.app',
+			toDeploymentId: 'dpl_old',
 		});
 	});
 
