@@ -13,10 +13,10 @@ catalogs:
     dependency-cruiser: 18.6.0
     vitest: 4.1.12
     '@playwright/test': 1.64.1
-    '@alxwlw/stack': 1.8.0
-    '@alxwlw/oxlint-config': 1.8.0
-    '@alxwlw/tsconfig': 1.8.0
+    '@alxwlw/stack': 1.9.0
+    '@alxwlw/oxlint-config': 1.9.0
+    '@alxwlw/tsconfig': 1.9.0
 minimumReleaseAgeExclude:
-  - '@alxwlw/oxlint-config@1.7.1 || 1.8.0'
-  - '@alxwlw/stack@1.7.1 || 1.8.0'
-  - '@alxwlw/tsconfig@1.7.1 || 1.8.0'
+  - '@alxwlw/oxlint-config@1.7.1 || 1.8.0 || 1.9.0'
+  - '@alxwlw/stack@1.7.1 || 1.8.0 || 1.9.0'
+  - '@alxwlw/tsconfig@1.7.1 || 1.8.0 || 1.9.0'
