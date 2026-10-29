@@ -24,3 +24,4 @@ pnpm exec stack check
 ## License
 
 [MIT](LICENSE)
+
