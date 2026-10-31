@@ -325,3 +325,20 @@ test('cli --names: флаг доходит до санитайзера', () => {
 	const out = JSON.parse(cli([file, 'rest', '--names'])) as { raw: string };
 	expect(JSON.parse(out.raw)).toEqual([{ name: 'Name1' }]);
 });
+
+test('задача без sequence_id (state и project объектами) и смена описания чистятся', () => {
+	const out = JSON.parse(
+		createSanitizer({ slugs: [], hosts: [] })(
+			JSON.stringify({
+				rel: { name: 'Связанная', state: { id: 's' }, project: { id: 'p' } },
+				activity: { field: 'description', old_value: '<p>а</p>', new_value: '<p>б</p>' },
+			}),
+		),
+	);
+	expect(out.rel.name).toBe('Задача 1');
+	expect(out.activity).toEqual({
+		field: 'description',
+		old_value: 'Задача 2',
+		new_value: 'Задача 3',
+	});
+});
