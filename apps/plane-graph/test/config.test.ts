@@ -89,6 +89,22 @@ describe('loadConfig', () => {
 		expect(message).not.toContain('ex-read-key');
 	});
 
+	test('оба ключа не заданы — только missing, без «must differ»', () => {
+		const env = baseEnv();
+		delete env.PLANE_GRAPH_EX_READ_KEY;
+		delete env.PLANE_GRAPH_EX_AGENT_KEY;
+		const message = errorOf(() => load(EXAMPLE, env));
+		expect(message).toContain('missing env PLANE_GRAPH_EX_READ_KEY');
+		expect(message).toContain('missing env PLANE_GRAPH_EX_AGENT_KEY');
+		expect(message).not.toContain('must differ');
+	});
+
+	test('PORT: дробный, строка и больше 65535 — ошибка', () => {
+		for (const port of ['1.5', 'abc', '65536'])
+			expect(errorOf(() => load(EXAMPLE, { ...baseEnv(), PORT: port }))).toContain('PORT');
+		expect(load(EXAMPLE, { ...baseEnv(), PORT: '65535' }).port).toBe(65_535);
+	});
+
 	test('плохой id тенанта', () => {
 		const file = example();
 		file.tenants[0]!.id = 'Ex-1';
@@ -120,6 +136,7 @@ describe('loadConfig', () => {
 		delete env.PLANE_GRAPH_PUBLIC_URL;
 		const message = errorOf(() => load(EXAMPLE, env));
 		expect(message).toContain('missing env PLANE_GRAPH_PLANE_URL, PLANE_GRAPH_PUBLIC_URL');
+		expect(message).not.toContain('must start with');
 		const bad = errorOf(() =>
 			load(EXAMPLE, { ...baseEnv(), PLANE_GRAPH_PUBLIC_URL: 'g.example.com', PORT: '0' }),
 		);
@@ -136,7 +153,7 @@ describe('loadConfig', () => {
 		const message = errorOf(() => load(file));
 		expect(message).toContain('tenants[0].extra is not a known key');
 		expect(message).toContain('tenants[0].workspaceId must be a UUID');
-		expect(message).toContain('tenants[0].clientId');
+		expect(message).toContain('tenants[0].clientId must be a non-empty string');
 		expect(message).toContain('tenants[0].installationId');
 		expect(message).not.toContain('not-a-uuid');
 	});
