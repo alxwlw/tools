@@ -335,6 +335,106 @@ describe('buildGraph', () => {
 		});
 	});
 
+	test('цикл из трёх задач и хвост за ним', () => {
+		const g = graphOf({
+			tasks: [task('ABC-1'), task('ABC-2'), task('ABC-3'), task('ABC-4'), task('ABC-5')],
+			edges: [
+				['ABC-1', 'blocks', 'ABC-2'],
+				['ABC-2', 'blocks', 'ABC-3'],
+				['ABC-3', 'blocks', 'ABC-1'],
+				['ABC-3', 'blocks', 'ABC-4'],
+				['ABC-4', 'blocks', 'ABC-5'],
+			],
+		});
+		expect(g.cycles.map(keys)).toEqual([['ABC-1', 'ABC-2', 'ABC-3']]);
+		expect(waves(g)).toEqual({
+			'ABC-1': null,
+			'ABC-2': null,
+			'ABC-3': null,
+			'ABC-4': 1,
+			'ABC-5': 2,
+		});
+	});
+
+	test('ребро с удалённой задачей не вводит задачу в граф', () => {
+		const g = graphOf({
+			tasks: [task('ABC-1'), task('ABC-2'), task('ABC-3')],
+			edges: [
+				['ABC-9', 'blocks', 'ABC-2'],
+				['ABC-3', 'relates', 'ABC-8'],
+			],
+		});
+		expect(g.items).toEqual([]);
+		expect(g.edges).toEqual([]);
+		expect(g.hiddenOpen).toBe(3);
+	});
+
+	test('задача с удалённым родителем скрыта', () => {
+		const g = graphOf({ tasks: [task('ABC-1', { parent: 'ABC-7' })] });
+		expect(g.items).toEqual([]);
+		expect(g.hiddenOpen).toBe(1);
+	});
+
+	test('задачи без области не дают конфликта', () => {
+		const g = graphOf({
+			tasks: [task('ABC-1'), task('ABC-2'), task('ABC-3')],
+			edges: [
+				['ABC-1', 'blocks', 'ABC-3'],
+				['ABC-2', 'blocks', 'ABC-3'],
+			],
+		});
+		expect(g.conflicts).toEqual([]);
+		expect(g.canStart.map((c) => ({ area: c.area, items: keys(c.items) }))).toEqual([
+			{ area: null, items: ['ABC-1', 'ABC-2'] },
+		]);
+	});
+
+	test('конфликты по волне и области, canStart по имени области, null последним', () => {
+		const g = graphOf({
+			tasks: [
+				task('ABC-1', { labels: ['код:a'] }),
+				task('ABC-2', { labels: ['код:a'] }),
+				task('ABC-3', { labels: ['код:b'] }),
+				task('ABC-4', { labels: ['код:b'] }),
+				task('ABC-5', { labels: ['код:a'] }),
+				task('ABC-6', { labels: ['код:a'] }),
+				task('ABC-7'),
+				task('ABC-8'),
+			],
+			edges: [
+				['ABC-3', 'blocks', 'ABC-1'],
+				['ABC-4', 'blocks', 'ABC-2'],
+				['ABC-5', 'blocks', 'ABC-8'],
+				['ABC-6', 'blocks', 'ABC-8'],
+				['ABC-7', 'blocks', 'ABC-8'],
+			],
+		});
+		expect(g.conflicts.map((c) => ({ wave: c.wave, area: c.area, items: keys(c.items) }))).toEqual([
+			{ wave: 0, area: 'код:a', items: ['ABC-5', 'ABC-6'] },
+			{ wave: 0, area: 'код:b', items: ['ABC-3', 'ABC-4'] },
+			{ wave: 1, area: 'код:a', items: ['ABC-1', 'ABC-2'] },
+		]);
+		expect(g.canStart.map((c) => ({ area: c.area, items: keys(c.items) }))).toEqual([
+			{ area: 'код:a', items: ['ABC-5', 'ABC-6'] },
+			{ area: 'код:b', items: ['ABC-3', 'ABC-4'] },
+			{ area: null, items: ['ABC-7'] },
+		]);
+	});
+
+	test('разные типы ребра между одной парой — по типу, не по порядку в копии', () => {
+		const g = graphOf({
+			tasks: [task('ABC-1'), task('ABC-2', { parent: 'ABC-1' })],
+			edges: [['ABC-1', 'relates', 'ABC-2']],
+		});
+		expect(edgeKeys(g.edges)).toEqual(['ABC-1 parent ABC-2', 'ABC-1 relates ABC-2']);
+	});
+
+	test('неизвестный проект — ошибка', () => {
+		const copy = copyOf({ tasks: [task('ABC-1')] });
+		copy.projects = [];
+		expect(() => buildGraph(copy, opts)).toThrow('unknown project');
+	});
+
 	test('неизвестное состояние — ошибка, не открытая задача', () => {
 		const copy = copyOf({ tasks: [task('ABC-1')] });
 		copy.states = [];
@@ -407,5 +507,28 @@ describe('buildSnapshot', () => {
 			'ABC-1 blocks ABC-3',
 			'ABC-3 relates XYZ-1',
 		]);
+	});
+
+	test('метки снимка по имени, затем по id; родитель-призрак отброшен', () => {
+		const copy = copyOf({
+			tasks: [
+				task('XYZ-1', { labels: ['a', 'same'] }),
+				task('ABC-1', { labels: ['b', 'same'], parent: 'ABC-7' }),
+			],
+		});
+		const s = buildSnapshot(copy, {
+			workspaceSlug: 'example-ws',
+			lastRun: null,
+			rejected: { relations: [], labels: [] },
+			now,
+		});
+		expect(s.labels.map((l) => l.id)).toEqual([
+			'label:XYZ:a',
+			'label:ABC:b',
+			'label:ABC:same',
+			'label:XYZ:same',
+		]);
+		expect(s.items[0]).toMatchObject({ key: 'ABC-1', parentId: null });
+		expect(s.edges).toEqual([]);
 	});
 });

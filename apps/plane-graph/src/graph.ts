@@ -138,7 +138,7 @@ function components(
 	return comp;
 }
 
-type Waves = { wave: Map<string, number>; cycles: string[][]; inBlocks: Set<string> };
+type Waves = { wave: Map<string, number>; cycles: string[][] };
 
 /** Waves over open "blocks": SCCs, then the longest chain of ancestor components. */
 function computeWaves(copy: CopyView, nodes: Map<string, Node>): Waves {
@@ -173,30 +173,20 @@ function computeWaves(copy: CopyView, nodes: Map<string, Node>): Waves {
 	}
 	cycles.sort((a, b) => byKey(nodes.get(a[0]!)!, nodes.get(b[0]!)!));
 
-	// Kahn over the condensation, longest path in edges.
-	const succ = new Map<number, Set<number>>();
-	const indegree = new Map<number, number>();
-	for (const c of members.keys()) {
-		succ.set(c, new Set());
-		indegree.set(c, 0);
-	}
+	// Tarjan numbers components in reverse topological order, so walking the numbers downwards visits every
+	// component after all of its ancestors; depth = longest chain of ancestor components.
+	const succ = new Map<number, Set<number>>([...members.keys()].map((c) => [c, new Set()]));
 	for (const [from, outs] of adj) {
 		for (const to of outs) {
 			const a = comp.get(from)!;
 			const b = comp.get(to)!;
-			if (a === b || succ.get(a)!.has(b)) continue;
-			succ.get(a)!.add(b);
-			indegree.set(b, indegree.get(b)! + 1);
+			if (a !== b) succ.get(a)!.add(b);
 		}
 	}
 	const depth = new Map<number, number>([...members.keys()].map((c) => [c, 0]));
-	const ready = [...members.keys()].filter((c) => indegree.get(c) === 0);
-	while (ready.length > 0) {
-		const c = ready.pop()!;
+	for (let c = members.size - 1; c >= 0; c--) {
 		for (const next of succ.get(c)!) {
 			depth.set(next, Math.max(depth.get(next)!, depth.get(c)! + 1));
-			indegree.set(next, indegree.get(next)! - 1);
-			if (indegree.get(next) === 0) ready.push(next);
 		}
 	}
 	const wave = new Map<string, number>();
@@ -204,7 +194,7 @@ function computeWaves(copy: CopyView, nodes: Map<string, Node>): Waves {
 		const c = comp.get(id)!;
 		if (!cyclic.has(c)) wave.set(id, depth.get(c)!);
 	}
-	return { wave, cycles, inBlocks };
+	return { wave, cycles };
 }
 
 export function buildGraph(
@@ -235,7 +225,7 @@ export function buildGraph(
 	}
 	for (const e of copy.edges) {
 		const from = nodes.get(e.from);
-		if (e.type === 'blocks' && from?.closed && nodes.get(e.to)?.closed === false) {
+		if (e.type === 'blocks' && from && nodes.get(e.to)?.closed === false) {
 			entered.add(from.row.id);
 		}
 	}
@@ -263,7 +253,7 @@ export function buildGraph(
 		if (w === undefined) continue;
 		const areas = n.labels.filter((l) => l.startsWith(AREA_PREFIX));
 		for (const area of areas.length > 0 ? areas : [null]) {
-			const id = `${w}\u0000${area ?? ''}\u0000${area === null}`;
+			const id = `${w}\u0000${area}`;
 			const group = groups.get(id) ?? { wave: w, area, nodes: [] };
 			group.nodes.push(n);
 			groups.set(id, group);
