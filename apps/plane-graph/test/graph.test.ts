@@ -429,16 +429,52 @@ describe('buildGraph', () => {
 		expect(edgeKeys(g.edges)).toEqual(['ABC-1 parent ABC-2', 'ABC-1 relates ABC-2']);
 	});
 
-	test('неизвестный проект — ошибка', () => {
-		const copy = copyOf({ tasks: [task('ABC-1')] });
-		copy.projects = [];
-		expect(() => buildGraph(copy, opts)).toThrow('unknown project');
+	test('задача с неизвестным состоянием пропущена, остальные считаются', () => {
+		const ghost = copyOf({ tasks: [task('ABC-2')] }).items[0]!;
+		const rest = copyOf({
+			tasks: [task('ABC-1'), task('ABC-4'), task('ABC-5')],
+			edges: [
+				['ABC-1', 'blocks', 'ABC-5'],
+				['ABC-1', 'relates', 'ABC-2'],
+				['ABC-6', 'blocks', 'ABC-4'],
+			],
+		});
+		rest.items.push({ ...ghost, stateId: 'state:ABC:missing' });
+		const g = buildGraph(rest, opts);
+		expect(waves(g)).toEqual({ 'ABC-1': 0, 'ABC-5': 1 });
+		expect(edgeKeys(g.edges)).toEqual(['ABC-1 blocks ABC-5']);
+		expect(g.hiddenOpen).toBe(1);
+		const s = buildSnapshot(rest, {
+			workspaceSlug: 'example-ws',
+			lastRun: null,
+			rejected: { relations: [], labels: [] },
+			now,
+		});
+		expect(s.items.map((i) => i.key)).toEqual(['ABC-1', 'ABC-4', 'ABC-5']);
+		expect(edgeKeys(s.edges)).toEqual(['ABC-1 blocks ABC-5']);
 	});
 
-	test('неизвестное состояние — ошибка, не открытая задача', () => {
-		const copy = copyOf({ tasks: [task('ABC-1')] });
-		copy.states = [];
-		expect(() => buildGraph(copy, opts)).toThrow('unknown state');
+	test('задача с неизвестным проектом пропущена, остальные считаются', () => {
+		const copy = copyOf({
+			tasks: [task('ABC-1'), task('ABC-3'), task('XYZ-1')],
+			edges: [
+				['ABC-1', 'blocks', 'ABC-3'],
+				['XYZ-1', 'blocks', 'ABC-3'],
+			],
+		});
+		copy.projects = copy.projects.filter((p) => p.identifier === 'ABC');
+		const g = buildGraph(copy, opts);
+		expect(waves(g)).toEqual({ 'ABC-1': 0, 'ABC-3': 1 });
+		expect(edgeKeys(g.edges)).toEqual(['ABC-1 blocks ABC-3']);
+		expect(g.hiddenOpen).toBe(0);
+		const s = buildSnapshot(copy, {
+			workspaceSlug: 'example-ws',
+			lastRun: null,
+			rejected: { relations: [], labels: [] },
+			now,
+		});
+		expect(s.items.map((i) => i.key)).toEqual(['ABC-1', 'ABC-3']);
+		expect(edgeKeys(s.edges)).toEqual(['ABC-1 blocks ABC-3']);
 	});
 });
 

@@ -23,7 +23,8 @@ function compareText(a: string, b: string): number {
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Resolves the copy into nodes by item id; throws on a dangling state or project reference. */
+/** Resolves the copy into nodes by item id; skips items whose state or project is not in the copy yet
+ * (their group is unknown; the next sync heals the copy), so they are in no output. */
 function indexItems(copy: CopyView): Map<string, Node> {
 	const groups = new Map(copy.states.map((s) => [s.id, s.group]));
 	const identifiers = new Map(copy.projects.map((p) => [p.id, p.identifier]));
@@ -31,10 +32,9 @@ function indexItems(copy: CopyView): Map<string, Node> {
 	const nodes = new Map<string, Node>();
 	for (const row of copy.items) {
 		const group = groups.get(row.stateId);
-		if (group === undefined) throw new Error(`item ${row.id}: unknown state ${row.stateId}`);
+		if (group === undefined) continue;
 		const identifier = identifiers.get(row.projectId);
-		if (identifier === undefined)
-			throw new Error(`item ${row.id}: unknown project ${row.projectId}`);
+		if (identifier === undefined) continue;
 		const labels: string[] = [];
 		for (const id of row.labelIds) {
 			const name = labelNames.get(id);
