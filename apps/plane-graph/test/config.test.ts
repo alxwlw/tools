@@ -105,6 +105,19 @@ describe('loadConfig', () => {
 		expect(load(EXAMPLE, { ...baseEnv(), PORT: '65535' }).port).toBe(65_535);
 	});
 
+	test('длина id тенанта: 16 символов проходит, 17 — ошибка', () => {
+		const ok = 'a'.repeat(16);
+		const env = baseEnv();
+		for (const f of ['PLANE_SECRET', 'WEBHOOK_SECRET', 'READ_KEY', 'AGENT_KEY'])
+			env[`PLANE_GRAPH_${ok.toUpperCase()}_${f}`] = `${f}-value`;
+		env[`PLANE_GRAPH_${ok.toUpperCase()}_AGENT_KEY`] = 'other-key';
+		const file = example();
+		file.tenants[0]!.id = ok;
+		expect(load(file, env).tenants.has(ok)).toBe(true);
+		file.tenants[0]!.id = 'a'.repeat(17);
+		expect(errorOf(() => load(file, env))).toContain('tenants[0].id');
+	});
+
 	test('плохой id тенанта', () => {
 		const file = example();
 		file.tenants[0]!.id = 'Ex-1';
