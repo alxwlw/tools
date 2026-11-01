@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Edge, GraphJson } from '../src/contract.ts';
-import { columnX, fitBox, projectColor, startGroups, visible } from '../web/logic.ts';
+import { clickAction, columnX, fitBox, projectColor, startGroups, visible } from '../web/logic.ts';
 
 type Item = GraphJson['items'][number];
 
@@ -195,5 +195,45 @@ describe('startGroups', () => {
 			shown,
 		);
 		expect(r).toEqual([{ area: 'код:api', items: ['a'], notParallel: false }]);
+	});
+});
+
+describe('clickAction', () => {
+	const base = {
+		sandboxed: false,
+		pointer: 'mouse',
+		focusedSame: false,
+		button: 0,
+		ctrl: false,
+		meta: false,
+		shift: false,
+	};
+	test('обычный клик мышью вне песочницы открывает задачу', () => {
+		expect(clickAction(base)).toBe('follow');
+	});
+	test('обычный клик мышью в песочнице показывает подсказку', () => {
+		expect(clickAction({ ...base, sandboxed: true })).toBe('hint');
+	});
+	test('колёсико и правая кнопка оставляют событие браузеру, и в песочнице тоже', () => {
+		expect(clickAction({ ...base, sandboxed: true, button: 1 })).toBe('follow');
+		expect(clickAction({ ...base, sandboxed: true, button: 2 })).toBe('follow');
+	});
+	test('Ctrl, ⌘ и Shift оставляют событие браузеру, и в песочнице тоже', () => {
+		expect(clickAction({ ...base, sandboxed: true, ctrl: true })).toBe('follow');
+		expect(clickAction({ ...base, sandboxed: true, meta: true })).toBe('follow');
+		expect(clickAction({ ...base, sandboxed: true, shift: true })).toBe('follow');
+	});
+	test('первое касание подсвечивает задачу, в песочнице и вне её', () => {
+		expect(clickAction({ ...base, pointer: 'touch' })).toBe('focus');
+		expect(clickAction({ ...base, pointer: 'pen', sandboxed: true })).toBe('focus');
+	});
+	test('второе касание по той же задаче открывает её, в песочнице даёт подсказку', () => {
+		expect(clickAction({ ...base, pointer: 'touch', focusedSame: true })).toBe('follow');
+		expect(clickAction({ ...base, pointer: 'touch', focusedSame: true, sandboxed: true })).toBe(
+			'hint',
+		);
+	});
+	test('Ctrl-касание не ждёт подсветки', () => {
+		expect(clickAction({ ...base, pointer: 'touch', ctrl: true })).toBe('follow');
 	});
 });

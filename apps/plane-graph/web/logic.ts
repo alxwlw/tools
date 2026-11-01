@@ -108,3 +108,23 @@ export function startGroups(
 		.filter((g) => g.items.length > 0)
 		.map((g) => ({ ...g, notParallel: g.area !== null && g.items.length >= 2 }));
 }
+
+export type ClickAction = 'focus' | 'hint' | 'follow';
+
+/**
+ * What a click on a node does. 'follow' leaves the event to the browser (the node is a link), 'focus' is the
+ * first tap on touch, 'hint' replaces a plain click inside a sandboxed frame, where a new tab would be blank.
+ */
+export function clickAction(i: {
+	sandboxed: boolean;
+	pointer: string;
+	focusedSame: boolean;
+	button: number;
+	ctrl: boolean;
+	meta: boolean;
+	shift: boolean;
+}): ClickAction {
+	if (i.button !== 0 || i.ctrl || i.meta || i.shift) return 'follow';
+	if (i.pointer !== 'mouse' && !i.focusedSame) return 'focus';
+	return i.sandboxed ? 'hint' : 'follow';
+}
