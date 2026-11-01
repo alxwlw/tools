@@ -1,0 +1,9 @@
+# Context is the repository root; only what the Dockerfile copies goes in.
+# (BuildKit reads <Dockerfile>.dockerignore; a plain .dockerignore beside the Dockerfile would be ignored.)
+**
+!apps/plane-graph/tsconfig.json
+!apps/plane-graph/src
+!apps/plane-graph/web
+!apps/plane-graph/scripts
+!packages/plane-app/package.json
+!packages/plane-app/src
