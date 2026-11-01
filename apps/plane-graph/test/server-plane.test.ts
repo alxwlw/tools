@@ -384,7 +384,10 @@ describe('прочие маршруты', () => {
 		const health = await get('/healthz');
 		expect(health.status).toBe(200);
 		expect(await health.text()).toBe('ok');
-		expect((await get('/nope')).status).toBe(404);
+		const nope = await get('/nope');
+		expect(nope.status).toBe(404);
+		expect(nope.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+		expect(nope.headers.get('x-content-type-options')).toBe('nosniff');
 		expect((await get('/plane/webhook/')).status).toBe(404);
 		expect(logs).toEqual([]);
 	});
@@ -416,7 +419,8 @@ describe('маршруты установки приложения', () => {
 		expect(res.status).toBe(200);
 		expect(await res.text()).toBe('app_installation_id=inst-1\n');
 		expect(logs).toEqual([{ event: 'plane.installed', appInstallationId: 'inst-1' }]);
-		expect((await handler(new Request('http://x/plane/oauth/callback'))).status).toBe(400);
+		const missing = await handler(new Request('http://x/plane/oauth/callback'));
+		expect(missing.status).toBe(400);
 	});
 
 	test('не GET → 405', async () => {

@@ -87,6 +87,9 @@ describe('parsePlaneDelivery: задача', () => {
 				parseBody(edited('plane-relation-deleted', (b) => (b.activity.field = f))),
 				String(f),
 			).toMatchObject({ kind: 'item.touched', projectId: null });
+		// a null field leaves an empty part in the key, not the word "null"
+		const nulled = parseBody(edited('plane-relation-deleted', (b) => (b.activity.field = null)));
+		expect(nulled?.eventKey).toMatch(/^issue\.touched:[^:]+::[0-9a-f]{32}$/);
 	});
 
 	test('ключ снятия связи: без x-plane-delivery — по телу; повтор доставки тот же, другое тело другой', () => {
@@ -134,6 +137,8 @@ describe('parsePlaneDelivery: задача', () => {
 			[null, 'body is not an object'],
 			[[], 'body is not an object'],
 			[{ event: 'issue' }, 'event or action is not a string'],
+			[{ action: 'created' }, 'event or action is not a string'],
+			[{ event: 7, action: 'created' }, 'event or action is not a string'],
 			[edited('plane-issue-state', (b) => delete b.activity), 'body.activity is not an object'],
 			[
 				edited('plane-issue-state', (b) => (b.activity.field = 7)),

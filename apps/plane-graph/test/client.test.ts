@@ -10,6 +10,7 @@ import {
 	PlaneApiError,
 	PlaneClient,
 } from '../src/plane/client.ts';
+import type { StateGroup } from '../src/contract.ts';
 import { fixture } from './fixtures.ts';
 
 type Reply = { status: number; body?: unknown; raw?: string };
@@ -355,5 +356,139 @@ describe('PlaneClient: 401, лимитер, сбои', () => {
 		expect(((await failure(shape.client.listProjects())) as Error).message).toContain(
 			'unexpected list shape',
 		);
+	});
+});
+
+describe('PlaneClient: границы', () => {
+	test('все шесть групп состояний принимаются', async () => {
+		const groups: StateGroup[] = [
+			'backlog',
+			'unstarted',
+			'started',
+			'completed',
+			'cancelled',
+			'triage',
+		];
+		const { client } = stub([
+			{
+				status: 200,
+				body: page(
+					groups.map((group, i) => ({ id: `s${i}`, name: 'n', group })),
+					null,
+				),
+			},
+		]);
+		expect((await client.listStates('p1')).map((s) => s.group)).toEqual(groups);
+	});
+
+	test('описание ровно 4000 символов не режется, 4001 режется; пара суррогатов не рвётся', async () => {
+		const [a, b, c] = rows('plane-work-items-page');
+		a.description_stripped = 'x'.repeat(4000);
+		b.description_stripped = 'x'.repeat(4001);
+		// the emoji takes UTF-16 units 3999 and 4000: cutting at 4000 would leave a lone high surrogate
+		c.description_stripped = `${'x'.repeat(3999)}😀tail`;
+		const { client } = stub([{ status: 200, body: page([a, b, c], null) }]);
+		const [ra, rb, rc] = await client.listWorkItems('p1');
+		expect(ra!.description).toBe('x'.repeat(4000));
+		expect(rb!.description).toBe('x'.repeat(4000));
+		expect(rc!.description).toBe('x'.repeat(3999));
+	});
+
+	test('обход страниц обрывается на 200-й с ошибкой, если курсор всё время новый', async () => {
+		const row = rows('plane-work-items-page')[0];
+		let n = 0;
+		const calls: Call[] = [];
+		const endless = new PlaneClient({
+			baseUrl: 'https://plane.test',
+			workspace: 'example-ws',
+			auth: fakeAuth().auth,
+			limiter: { acquire: async () => {} },
+			fetch: async (url) => {
+				calls.push({ url, method: 'GET', headers: {} });
+				return new Response(JSON.stringify(page([row], `100:${++n}:0`)));
+			},
+		});
+		expect(((await failure(endless.listWorkItems('p1'))) as Error).message).toBe(
+			'Plane GET /projects/p1/work-items/: more than 200 pages',
+		);
+		expect(calls).toHaveLength(200);
+	});
+
+	test('список бывает и голым массивом; не-объекты в нём и в results отбрасываются', async () => {
+		const label = { id: 'l1', name: 'one' };
+		const bare = stub([{ status: 200, body: [label, 'junk', null] }]);
+		expect(await bare.client.listLabels('p1')).toEqual([
+			{ id: 'l1', projectId: 'p1', name: 'one' },
+		]);
+		const paged = stub([{ status: 200, body: page([label, 7, [], null], null) }]);
+		expect(await paged.client.listLabels('p1')).toHaveLength(1);
+		const after = stub([
+			{ status: 200, body: page([label], '100:1:0') },
+			{ status: 200, body: [{ id: 'l2', name: 'two' }] },
+		]);
+		expect((await after.client.listLabels('p1')).map((l) => l.id)).toEqual(['l1', 'l2']);
+	});
+
+	test('ответ не объект, пустой курсор при следующей странице — ошибки', async () => {
+		const empty = stub([{ status: 200 }]);
+		expect(((await failure(empty.client.listLabels('p1'))) as Error).message).toBe(
+			'Plane GET /projects/p1/labels/: unexpected list shape',
+		);
+		const blank = stub([
+			{ status: 200, body: { results: [], next_page_results: true, next_cursor: '' } },
+		]);
+		expect(((await failure(blank.client.listLabels('p1'))) as Error).message).toContain(
+			'does not advance',
+		);
+	});
+
+	test('поля строки: пустая строка — не id; номер, parent и labels проверяются', async () => {
+		const row = rows('plane-work-items-page')[0];
+		const empty = stub([{ status: 200, body: page([{ id: '', name: 'n' }], null) }]);
+		expect(((await failure(empty.client.listLabels('p1'))) as Error).message).toContain('"id"');
+		for (const bad of [-1, 1.5, 2 ** 60]) {
+			const { client } = stub([{ status: 200, body: page([{ ...row, sequence_id: bad }], null) }]);
+			expect(((await failure(client.listWorkItems('p1'))) as Error).message, String(bad)).toContain(
+				'sequence_id',
+			);
+		}
+		const zero = stub([{ status: 200, body: page([{ ...row, sequence_id: 0 }], null) }]);
+		expect((await zero.client.listWorkItems('p1'))[0]!.sequenceId).toBe(0);
+		const noLabels = structuredClone(row);
+		delete noLabels.labels;
+		const lost = stub([{ status: 200, body: page([noLabels], null) }]);
+		expect(((await failure(lost.client.listWorkItems('p1'))) as Error).message).toContain(
+			'"labels"',
+		);
+		const noParent = structuredClone(row);
+		delete noParent.parent;
+		const ok = stub([{ status: 200, body: page([noParent], null) }]);
+		expect((await ok.client.listWorkItems('p1'))[0]!.parentId).toBeNull();
+	});
+
+	test('запрос идёт методом GET с таймаутом; без своего fetch и лимитера работает глобальный fetch', async () => {
+		const seen: Array<{ url: unknown; method: unknown; hasSignal: boolean }> = [];
+		const original = globalThis.fetch;
+		globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+			seen.push({
+				url: input,
+				method: init?.method,
+				hasSignal: init?.signal instanceof AbortSignal,
+			});
+			return new Response(JSON.stringify(page([], null)));
+		}) as typeof fetch;
+		try {
+			const client = new PlaneClient({
+				baseUrl: 'https://plane.test',
+				workspace: 'example-ws',
+				auth: fakeAuth().auth,
+			});
+			expect(await client.listProjects()).toEqual([]);
+		} finally {
+			globalThis.fetch = original;
+		}
+		expect(seen).toEqual([
+			{ url: `${ROOT}/projects/?per_page=100`, method: 'GET', hasSignal: true },
+		]);
 	});
 });
