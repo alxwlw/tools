@@ -1,0 +1,7 @@
+{
+	"headers": {
+		"x-plane-event": "rest",
+		"x-plane-signature": "5a7e4b21cf257f8a12a4218400e46bc9d98e740a7cdcad395043a8dedd33ff09"
+	},
+	"raw": "{\n  \"blocking\": [\n    \"00000000-0000-4000-8000-000000000001\"\n  ],\n  \"blocked_by\": [\n    \"00000000-0000-4000-8000-000000000002\"\n  ],\n  \"start_after\": [],\n  \"start_before\": [],\n  \"finish_after\": [],\n  \"finish_before\": [],\n  \"relates_to\": [\n    \"00000000-0000-4000-8000-000000000002\"\n  ],\n  \"duplicate\": []\n}"
+}
