@@ -3,6 +3,7 @@ import type { AgentRunIn, CopyView } from '../src/contract.ts';
 import type { LogEntry } from '../src/log.ts';
 import { PlaneApiError } from '../src/plane/client.ts';
 import type { PlaneEvent } from '../src/plane/webhook.ts';
+import { buildGraph } from '../src/graph.ts';
 import { SerialQueue } from '../src/queue.ts';
 import { Store } from '../src/store.ts';
 import {
@@ -291,6 +292,22 @@ describe('refreshItem и очередь событий', () => {
 		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
 	});
 
+	test('позднее событие с другим проектом заменяет ожидающее', async () => {
+		const { deps, store, plane, refresh, queue } = setup();
+		await reconcile(deps);
+		store.deleteItem(TENANT, idOf('ABC-1'));
+		plane.calls = [];
+		let release!: () => void;
+		queue.push('blocker', () => new Promise<void>((resolve) => (release = resolve)));
+		refresh(touched('project:OLD', idOf('ABC-1')));
+		refresh(touched('project:ABC', idOf('ABC-1')));
+		release();
+		await queue.idle();
+		// a read with the old project would get null and delete the item
+		expect(store.copy(TENANT).items.map((i) => i.id)).toContain(idOf('ABC-1'));
+		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
+	});
+
 	test('сбой push не оставляет задачу в ожидающих', async () => {
 		const { deps, plane, queue } = setup();
 		await reconcile(deps);
@@ -404,6 +421,38 @@ describe('метки агента', () => {
 			relations: [{ fromId: a, toId: b }],
 			labels: [{ itemId: a, label: 'код:x' }],
 		});
+	});
+
+	test('метка, созданная агентом после сверки, подтягивается при обновлении задачи', async () => {
+		const { deps, store, plane, queue, refresh } = setup();
+		await reconcile(deps);
+		const b = idOf('ABC-2');
+		plane.labels.push({ id: 'label:ABC:код:web', projectId: 'project:ABC', name: 'код:web' });
+		plane.items.get(b)!.labelIds.push('label:ABC:код:web');
+		await acceptRun(deps, run({ labelsAdded: [{ itemId: b, label: 'код:web' }] }), refresh);
+		await queue.idle();
+		const view = store.copy(TENANT);
+		const areas = buildGraph(view, {
+			planeUrl: 'https://plane.example',
+			workspaceSlug: 'w',
+			lastRun: null,
+			now: NOW,
+		}).items.find((i) => i.key === 'ABC-2')?.areas;
+		expect(areas).toEqual(['код:web']);
+		expect(store.marks(TENANT).map((m) => m.confirmedAt)).toEqual([NOW.toISOString()]);
+
+		// the owner takes the label away before the next reconcile
+		plane.items.get(b)!.labelIds = [];
+		await refreshItem(deps, 'project:ABC', b);
+		expect(store.rejected(TENANT).labels).toEqual([{ itemId: b, label: 'код:web' }]);
+	});
+
+	test('известная метка не добавляет запрос меток', async () => {
+		const { deps, plane } = setup();
+		await reconcile(deps);
+		plane.calls = [];
+		await refreshItem(deps, 'project:ABC', idOf('ABC-1'));
+		expect(plane.calls).not.toContain('listLabels');
 	});
 
 	test('отвергнутая метка логируется без названий', async () => {

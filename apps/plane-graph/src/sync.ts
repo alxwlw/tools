@@ -81,9 +81,21 @@ export async function refreshItem(d: SyncDeps, projectId: string, itemId: string
 	}
 	const edges = await d.plane.getRelations(projectId, itemId);
 	warnIfStale(d, item);
+	await healLabels(d, item);
 	d.store.putItem(d.tenant, item, edges);
 	const neighbours = edges.map((e) => (e.from === itemId ? e.to : e.from));
 	checkMarks(d, [itemId, ...neighbours]);
+}
+
+/**
+ * A label id the copy does not know (the agent just created it): re-read the project's labels, one request,
+ * so the item's areas and the agent's label marks resolve before the next reconcile.
+ */
+async function healLabels(d: SyncDeps, item: ItemRow): Promise<void> {
+	if (item.labelIds.length === 0) return;
+	const known = new Set(d.store.copy(d.tenant).labels.map((l) => l.id));
+	if (item.labelIds.every((id) => known.has(id))) return;
+	d.store.replaceProjectLabels(d.tenant, item.projectId, await d.plane.listLabels(item.projectId));
 }
 
 /** An item whose state or project the copy does not know is kept, but the copy is stale: ask for a reconcile. */
@@ -220,8 +232,8 @@ export function createRefresher(d: SyncDeps, queue: SerialQueue): (ev: PlaneEven
 			}
 			for (const id of new Set(ev.workItemIds)) {
 				if (pending.has(id)) {
-					// a later event may name the project the waiting one lacked
-					if (pending.get(id) === null && ev.projectId !== null) pending.set(id, ev.projectId);
+					// the latest event names the project: an earlier one may be stale (the item moved)
+					if (ev.projectId !== null) pending.set(id, ev.projectId);
 					continue;
 				}
 				pending.set(id, ev.projectId);

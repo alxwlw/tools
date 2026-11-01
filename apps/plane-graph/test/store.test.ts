@@ -114,6 +114,30 @@ describe('Store: копия', () => {
 		expect(store.copy('acme')).toEqual({ ...data, syncedAt: '2026-03-01T00:00:00Z' });
 	});
 
+	test('replaceProjectLabels меняет метки одного проекта и не трогает чужие', () => {
+		const store = new Store(':memory:');
+		store.replaceCopy(
+			'acme',
+			copyOf({
+				labels: [
+					{ id: 'l1', projectId: 'p1', name: 'код:api' },
+					{ id: 'l9', projectId: 'p2', name: 'другой' },
+				],
+			}),
+			'2026-03-01T00:00:00Z',
+		);
+		store.replaceProjectLabels('acme', 'p1', [
+			{ id: 'l1', projectId: 'p1', name: 'код:api' },
+			{ id: 'l2', projectId: 'p1', name: 'код:web' },
+		]);
+		store.replaceProjectLabels('other', 'p1', [{ id: 'l1', projectId: 'p1', name: 'x' }]);
+		expect(store.copy('acme').labels).toEqual([
+			{ id: 'l1', projectId: 'p1', name: 'код:api' },
+			{ id: 'l2', projectId: 'p1', name: 'код:web' },
+			{ id: 'l9', projectId: 'p2', name: 'другой' },
+		]);
+	});
+
 	test('вторая сверка заменяет копию целиком', () => {
 		const store = new Store(':memory:');
 		store.replaceCopy('acme', copyOf(), '2026-03-01T00:00:00Z');

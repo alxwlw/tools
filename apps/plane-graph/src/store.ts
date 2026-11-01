@@ -8,6 +8,7 @@ import type {
 	CopyView,
 	Edge,
 	ItemRow,
+	LabelRow,
 	MarkKey,
 	RunSummary,
 	SnapshotJson,
@@ -186,6 +187,20 @@ export class Store {
 			)
 			.get(tenant);
 		return row?.last_event_at ?? null;
+	}
+
+	/** Replaces one project's labels in the copy (an agent-made label the copy did not know yet). */
+	replaceProjectLabels(tenant: string, projectId: string, labels: readonly LabelRow[]): void {
+		this.#db.transaction(() => {
+			this.#db
+				.query('DELETE FROM labels WHERE tenant = ? AND project_id = ?')
+				.run(tenant, projectId);
+			for (const l of labels) {
+				this.#db
+					.query('INSERT INTO labels (tenant, id, project_id, name) VALUES (?, ?, ?, ?)')
+					.run(tenant, l.id, l.projectId, l.name);
+			}
+		})();
 	}
 
 	/** Replaces the tenant's whole copy in one transaction; a throw (duplicate id, bad edge type) keeps the old one. */
