@@ -53,8 +53,11 @@ export type PlaneClientOptions = {
 };
 
 const PAGE_SIZE = '100';
-/** As plane-hooks: ~1 % of the ~5000/min the bot token showed (design §10, decision 4). */
-export const PLANE_RATE_MAX = 50;
+/**
+ * ~6 % of the ~5000/min the bot token showed (owner ruling R24, 2026-11-01; plane-hooks keeps 50).
+ * About 100 refreshes take ~40 s, a reconcile ~3 min.
+ */
+export const PLANE_RATE_MAX = 300;
 export const PLANE_RATE_WINDOW_MS = 60_000;
 const MAX_PAGES = 200;
 export const DESCRIPTION_MAX = 4000;
@@ -274,6 +277,17 @@ function descriptionOf(row: Rec): string {
 	return text.slice(0, cut >= 0xd800 && cut <= 0xdbff ? DESCRIPTION_MAX - 1 : DESCRIPTION_MAX);
 }
 
+/** The list endpoint sends label ids; the single-item endpoint sends label objects with an `id`. */
+function labelIdsOf(labels: unknown): string[] {
+	if (!Array.isArray(labels)) throw new Error('Plane response: "labels" is not a list of ids');
+	return labels.map((l: unknown) => {
+		const id: unknown = isRecord(l) ? l.id : l;
+		if (typeof id !== 'string' || id === '')
+			throw new Error('Plane response: "labels" is not a list of ids');
+		return id;
+	});
+}
+
 function itemRow(value: unknown): ItemRow {
 	const row = isRecord(value) ? value : {};
 	const sequenceId = row.sequence_id;
@@ -282,8 +296,7 @@ function itemRow(value: unknown): ItemRow {
 	const parent = row.parent;
 	if (parent !== null && parent !== undefined && (typeof parent !== 'string' || parent === ''))
 		throw new Error('Plane response: "parent" is not an id');
-	if (!Array.isArray(row.labels) || row.labels.some((l) => typeof l !== 'string' || l === ''))
-		throw new Error('Plane response: "labels" is not a list of ids');
+	const labelIds = labelIdsOf(row.labels);
 	return {
 		id: field(row, 'id'),
 		projectId: field(row, 'project'),
@@ -292,7 +305,7 @@ function itemRow(value: unknown): ItemRow {
 		description: descriptionOf(row),
 		stateId: field(row, 'state'),
 		parentId: parent ?? null,
-		labelIds: row.labels as string[],
+		labelIds,
 		createdAt: field(row, 'created_at'),
 		updatedAt: field(row, 'updated_at'),
 	};
