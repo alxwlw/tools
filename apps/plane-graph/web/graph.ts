@@ -1,7 +1,15 @@
 /// <reference lib="dom" />
 // The order graph (view B): wave columns, a d3 force layout, hover/tap to highlight neighbours.
 import type { Edge, EdgeType, GraphJson, RunSummary } from '../src/contract.ts';
-import { columnX, type Filters, fitBox, projectColor, startGroups, visible } from './logic.ts';
+import {
+	clickAction,
+	columnX,
+	type Filters,
+	fitBox,
+	projectColor,
+	startGroups,
+	visible,
+} from './logic.ts';
 
 // document.currentScript is null once the script has yielded, so read it before any await.
 const SELF = document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
@@ -89,9 +97,11 @@ function agentText(run: RunSummary | null): string {
 }
 
 const isHttp = (url: string) => /^https?:\/\//i.test(url);
-function openItem(item: Item): void {
-	if (isHttp(item.url)) window.open(item.url, '_blank', 'noopener');
-}
+// Plane sandboxes its HTML block (opaque origin): a popup opened by a script or a plain click there inherits
+// the sandbox, only the browser's own new-tab gestures (Ctrl/Cmd+click, middle button) escape it.
+const HINT_MOUSE = 'Ctrl/⌘+клик или колёсико мыши — открыть в новой вкладке';
+const HINT_TOUCH = 'долгое нажатие — открыть в новой вкладке';
+const sandboxed = window.origin === 'null';
 
 function el<K extends keyof HTMLElementTagNameMap>(
 	tag: K,
@@ -371,9 +381,13 @@ function drawGraph(): void {
 		.attr('marker-end', (l) => (l.type === 'blocks' ? 'url(#pg-arrow)' : null));
 	const nodeSel = layer
 		.append('g')
-		.selectAll('circle')
+		.selectAll('a')
 		.data(nodes)
-		.join('circle')
+		.join('a')
+		.attr('href', (n) => (isHttp(n.item.url) ? n.item.url : null))
+		.attr('target', (n) => (isHttp(n.item.url) ? '_blank' : null))
+		.attr('rel', (n) => (isHttp(n.item.url) ? 'noopener noreferrer' : null))
+		.append('circle')
 		.attr(
 			'class',
 			(n) =>
@@ -420,10 +434,24 @@ function drawGraph(): void {
 		.on('pointerleave', (e) => {
 			if ((e as PointerEvent).pointerType === 'mouse') focus(null);
 		})
-		.on('click', (_e, n) => {
-			// A first tap highlights, a second tap on the same node opens it; a mouse hover has done the first.
-			if (pointer !== 'mouse' && focused !== n.id) focus(n.id);
-			else openItem(n.item);
+		.on('click', (e, n) => {
+			const m = e as MouseEvent;
+			const action = clickAction({
+				sandboxed,
+				pointer,
+				focusedSame: focused === n.id,
+				button: m.button,
+				ctrl: m.ctrlKey,
+				meta: m.metaKey,
+				shift: m.shiftKey,
+			});
+			// 'follow' leaves the event alone: the surrounding <a> opens the task.
+			if (action === 'follow') return;
+			m.preventDefault();
+			focus(n.id);
+			if (action === 'hint') {
+				tip.textContent += ` · ${pointer === 'mouse' ? HINT_MOUSE : HINT_TOUCH}`;
+			}
 		});
 	svg.on('click', (e) => {
 		if (e.target instanceof SVGSVGElement) focus(null);

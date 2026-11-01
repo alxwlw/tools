@@ -110,6 +110,9 @@ Open `https://plane-graph.example.com/t/<tenant>/plane-block.html?k=<read key>`:
 graph itself is `https://plane-graph.example.com/t/<tenant>/graph?k=<read key>`; a work item shows as its key,
 for instance `ABC-1`, and opens in Plane.
 
+Plane sandboxes the HTML block, and a task opened by a plain click there would show a blank tab. Inside the block
+a plain click on a task therefore shows a hint; Ctrl/⌘+click or the middle mouse button opens the task.
+
 ## Operations
 
 - **Logs** are one JSON line per event on stdout: `{ts, event, tenant?, …ids, ms?, error?}`. Secrets, keys,
