@@ -219,6 +219,36 @@ describe('PlaneClient: чтение', () => {
 		expect((err as Error).message).not.toContain('SECRET-BODY');
 	});
 
+	test('getWorkItem на ответе одной задачи: labels — объекты, id берутся из них', async () => {
+		const single = body('plane-work-item');
+		const { client } = stub([{ status: 200, body: single }]);
+		expect(await client.getWorkItem(single.project, single.id)).toEqual({
+			id: single.id,
+			projectId: single.project,
+			sequenceId: 151,
+			name: 'Задача 1',
+			description: 'Задача 3',
+			stateId: single.state,
+			parentId: null,
+			labelIds: [single.labels[0].id],
+			createdAt: '2026-10-28T18:56:07.788491Z',
+			updatedAt: '2026-11-01T13:44:19.011767Z',
+		});
+	});
+
+	test('getWorkItem: элемент labels без id или с не-строкой в id — ошибка', async () => {
+		const single = body('plane-work-item');
+		const good = single.labels[0];
+		const cases: unknown[] = [{}, { ...good, id: '' }, { ...good, id: 1 }, null, 7, ''];
+		for (const label of cases) {
+			const { client } = stub([{ status: 200, body: { ...single, labels: [good, label] } }]);
+			expect(
+				((await failure(client.getWorkItem('p1', single.id))) as Error).message,
+				JSON.stringify(label),
+			).toBe('Plane response: "labels" is not a list of ids');
+		}
+	});
+
 	test('getRelations читает /relations/ задачи и разбирает тело', async () => {
 		const relations = body('plane-relations');
 		const { calls, client } = stub([{ status: 200, body: relations }]);
@@ -331,8 +361,8 @@ describe('PlaneClient: 401, лимитер, сбои', () => {
 		expect(calls).toHaveLength(4);
 	});
 
-	test('лимит бота: 50 запросов в минуту', () => {
-		expect(PLANE_RATE_MAX).toBe(50);
+	test('лимит бота: 300 запросов в минуту', () => {
+		expect(PLANE_RATE_MAX).toBe(300);
 		expect(PLANE_RATE_WINDOW_MS).toBe(60_000);
 	});
 

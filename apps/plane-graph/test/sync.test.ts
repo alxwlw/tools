@@ -200,6 +200,24 @@ describe('refreshItem и очередь событий', () => {
 		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
 	});
 
+	test('всплеск: 100 задач и 10 повторов первой — по одному чтению на задачу', async () => {
+		const tasks = Array.from({ length: 100 }, (_, i) => ({ key: `ABC-${i + 1}` }));
+		const { deps, plane, refresh, queue } = setup({ tasks, edges: [] });
+		await reconcile(deps);
+		plane.calls = [];
+		const read: string[] = [];
+		const getWorkItem = plane.getWorkItem.bind(plane);
+		plane.getWorkItem = (projectId, id) => (read.push(id), getWorkItem(projectId, id));
+		// one tick: Plane sends a status change twice (fields `state_id` and `state`)
+		for (const t of tasks) refresh(touched('project:ABC', idOf(t.key)));
+		for (let i = 0; i < 10; i++) refresh(touched('project:ABC', idOf('ABC-1')));
+		await queue.idle();
+		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(100);
+		expect(plane.calls.filter((c) => c === 'getRelations')).toHaveLength(100);
+		expect(read.filter((id) => id === idOf('ABC-1'))).toHaveLength(1);
+		expect(new Set(read).size).toBe(100);
+	});
+
 	test('событие после начала чтения ставит ещё одно чтение', async () => {
 		const { deps, plane, refresh, queue } = setup();
 		await reconcile(deps);
