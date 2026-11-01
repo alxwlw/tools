@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { PLANE_SCOPES } from '../src/config.ts';
 import type { CopyView } from '../src/contract.ts';
 import {
 	installProcessHandlers,
@@ -239,6 +240,33 @@ describe('startService', () => {
 	});
 });
 
+describe('клиент Plane', () => {
+	test('без подмены: токен бота по учётным данным тенанта, чтение воркспейса с этим токеном', async () => {
+		const w = world();
+		const calls: Array<{ url: string; init: RequestInit }> = [];
+		w.options.plane = undefined;
+		w.options.fetch = async (input, init) => {
+			calls.push({ url: input, init });
+			return input.endsWith('/auth/o/token/')
+				? Response.json({ access_token: 'bot-token', expires_in: 3600 })
+				: Response.json({ results: [], next_page_results: false });
+		};
+		await start(w);
+		const [token, read] = calls;
+		expect(token?.url).toBe('https://plane.example.com/auth/o/token/');
+		expect(token?.init.headers).toMatchObject({
+			Authorization: `Basic ${Buffer.from(`example-client-id:${PLANE_SECRET}`).toString('base64')}`,
+		});
+		const form = new URLSearchParams(token?.init.body as string);
+		expect(form.get('app_installation_id')).toBe('inst-1');
+		expect(form.get('scope')).toBe(PLANE_SCOPES.join(' '));
+		expect(read?.url).toStartWith(
+			'https://plane.example.com/api/v1/workspaces/example-ws/projects/',
+		);
+		expect(read?.init.headers).toMatchObject({ Authorization: 'Bearer bot-token' });
+	});
+});
+
 describe('сверка по таймеру', () => {
 	test('после удачной сверки следующая — в 03:00 UTC', async () => {
 		const { w } = await start();
@@ -371,13 +399,23 @@ describe('сверка по таймеру', () => {
 });
 
 describe('периодические проверки', () => {
-	test('сторож: тик через 15 минут пишет plane.silent после долгой тишины', async () => {
+	test('сторож: тик через 15 минут пишет plane.silent и watchdog.stale_sync с часами', async () => {
 		const { w } = await start();
 		w.clock.ms += 100 * 3_600_000;
 		w.tickOf(15 * MIN)();
-		const events = w.entries().map((e) => e.event);
-		expect(events).toContain('plane.silent');
-		expect(events).toContain('watchdog.stale_sync');
+		const alerts = w
+			.entries()
+			.filter((e) => e.event === 'plane.silent' || e.event === 'watchdog.stale_sync');
+		expect(alerts).toEqual([
+			{ ts: expect.any(String), event: 'plane.silent', level: 'error', tenant: 'acme', hours: 100 },
+			{
+				ts: expect.any(String),
+				event: 'watchdog.stale_sync',
+				level: 'error',
+				tenant: 'acme',
+				hours: 100,
+			},
+		]);
 	});
 
 	test('чистка: тик раз в час удаляет ключи старше 30 суток', async () => {
