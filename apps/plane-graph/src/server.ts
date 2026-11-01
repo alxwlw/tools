@@ -1,8 +1,12 @@
 // Adapted from apps/plane-miro/src/server.ts.
 import { planeOauthCallback, planeSetupRedirect } from '@alxwlw/plane-app';
 
+import { agentKeyOk, parseAgentRun, readKeyOk } from './access.ts';
 import { type Config, PLANE_SCOPES, type TenantConfig } from './config.ts';
+import type { AgentRunIn } from './contract.ts';
+import { buildGraph, buildSnapshot } from './graph.ts';
 import type { Log } from './log.ts';
+import { graphPage, planeBlock } from './page.ts';
 import {
 	BadDelivery,
 	deliveryWorkspace,
@@ -11,8 +15,10 @@ import {
 	verifyPlaneSignature,
 } from './plane/webhook.ts';
 import type { Store } from './store.ts';
+import { createWeb, type WebAssets } from './web.ts';
 
 export const MAX_PLANE_BODY = 4 * 1024 * 1024;
+export const MAX_RUN_BODY = 1024 * 1024;
 
 export type ServerDeps = {
 	config: Config;
@@ -20,6 +26,9 @@ export type ServerDeps = {
 	log: Log;
 	now: () => number;
 	enqueue: (event: PlaneEvent) => void;
+	assets: WebAssets;
+	/** true = a new run, false = a runId seen before. */
+	acceptRun: (tenant: string, run: AgentRunIn) => Promise<boolean>;
 };
 
 const ok = () => new Response('ok', { status: 200 });
@@ -48,6 +57,21 @@ export async function readBounded(
 	}
 	return out;
 }
+
+const json = (body: unknown, status: number, headers: Record<string, string> = {}): Response =>
+	new Response(JSON.stringify(body), {
+		status,
+		headers: {
+			'content-type': 'application/json; charset=utf-8',
+			'x-content-type-options': 'nosniff',
+			...headers,
+		},
+	});
+const unauthorized = () => json({ error: 'unauthorized' }, 401);
+const badRequest = (detail: string) => json({ error: 'bad_request', detail }, 400);
+
+const TENANT_ROUTE =
+	/^\/t\/([a-z][a-z0-9]{0,15})\/(graph|graph\.json|plane-block\.html|snapshot\.json|agent-runs)$/;
 
 const text = (body: string, status: number): Response =>
 	new Response(body, {
@@ -130,10 +154,110 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 		});
 	}
 
+	const web = createWeb(deps.assets);
+
+	/** Only failures are logged, by route and tenant: never the query string nor headers (they carry keys). */
+	async function guarded(
+		route: string,
+		tenant: string,
+		run: () => Promise<Response> | Response,
+	): Promise<Response> {
+		try {
+			return await run();
+		} catch {
+			log({ event: 'http.failed', level: 'error', route, tenant, reason: 'internal' });
+			return text('internal error', 500);
+		}
+	}
+
+	function graph(tenant: TenantConfig, name: string): Response {
+		const k = encodeURIComponent(tenant.readKey);
+		const dataPath = `/t/${tenant.id}/graph.json?k=${k}`;
+		const nowDate = new Date(now());
+		if (name === 'graph.json') {
+			const body = buildGraph(store.copy(tenant.id), {
+				planeUrl: config.planeUrl,
+				workspaceSlug: tenant.workspaceSlug,
+				lastRun: store.lastRun(tenant.id),
+				now: nowDate,
+			});
+			return json(body, 200, { 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+		}
+		const html = (body: string, extra: Record<string, string> = {}) =>
+			new Response(body, {
+				status: 200,
+				headers: {
+					'content-type': 'text/html; charset=utf-8',
+					'cache-control': 'no-store',
+					'referrer-policy': 'no-referrer',
+					'x-content-type-options': 'nosniff',
+					...extra,
+				},
+			});
+		if (name === 'graph')
+			return html(graphPage({ scriptUrl: '/assets/graph.js', dataUrl: dataPath }));
+		return html(
+			planeBlock({
+				scriptUrl: `${config.publicUrl}/assets/graph.js`,
+				dataUrl: `${config.publicUrl}${dataPath}`,
+			}),
+			{ 'content-disposition': 'attachment; filename="plane-graph.html"' },
+		);
+	}
+
+	function snapshot(tenant: TenantConfig): Response {
+		const body = buildSnapshot(store.copy(tenant.id), {
+			workspaceSlug: tenant.workspaceSlug,
+			lastRun: store.lastRun(tenant.id),
+			rejected: store.rejected(tenant.id),
+			now: new Date(now()),
+		});
+		return json(body, 200, { 'cache-control': 'no-store' });
+	}
+
+	async function agentRun(tenant: TenantConfig, req: Request): Promise<Response> {
+		const bytes = await readBounded(req, MAX_RUN_BODY);
+		if (bytes === null) return badRequest('body');
+		let body: unknown;
+		try {
+			body = JSON.parse(new TextDecoder().decode(bytes));
+		} catch {
+			return badRequest('body');
+		}
+		const run = parseAgentRun(body);
+		if ('error' in run) return badRequest(run.error);
+		return json({ ok: true }, (await deps.acceptRun(tenant.id, run)) ? 201 : 200);
+	}
+
+	/** /t/<tenant>/<name>: unknown tenant → 404, wrong method → 405, wrong or missing key → 401. */
+	function tenantRoute(
+		tenantId: string,
+		name: string,
+		req: Request,
+		url: URL,
+	): Promise<Response> | Response {
+		const tenant = config.tenants.get(tenantId);
+		if (tenant === undefined) return text('not found', 404);
+		const post = name === 'agent-runs';
+		if (req.method !== (post ? 'POST' : 'GET')) return text('method not allowed', 405);
+		const agent = post || name === 'snapshot.json';
+		if (!(agent ? agentKeyOk(tenant, req) : readKeyOk(tenant, url))) return unauthorized();
+		return guarded(name, tenant.id, () =>
+			post ? agentRun(tenant, req) : agent ? snapshot(tenant) : graph(tenant, name),
+		);
+	}
+
 	return async (req) => {
 		const url = new URL(req.url);
 		const path = url.pathname;
 		if (path === '/healthz') return ok();
+		const asset = web(url);
+		if (asset !== null) {
+			if (req.method !== 'GET') return text('method not allowed', 405);
+			return asset;
+		}
+		const route = TENANT_ROUTE.exec(path);
+		if (route !== null) return tenantRoute(route[1] as string, route[2] as string, req, url);
 		if (path === '/plane/setup' || path === '/plane/oauth/callback') {
 			if (req.method !== 'GET') return text('method not allowed', 405);
 			return path === '/plane/setup' ? setup(url) : planeOauthCallback(url, log);

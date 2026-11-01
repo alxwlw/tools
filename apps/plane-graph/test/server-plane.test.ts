@@ -45,6 +45,8 @@ function setup(opts: { store?: Store; enqueue?: (e: PlaneEvent) => void } = {}) 
 		enqueue: opts.enqueue ?? ((e) => events.push(e)),
 		log: (e) => logs.push(e),
 		now: () => (clock += 7),
+		assets: new Map(),
+		acceptRun: async () => true,
 	});
 	return { handler, store, events, logs };
 }
@@ -324,6 +326,8 @@ describe('POST /plane/webhook', () => {
 			store: new Store(':memory:'),
 			enqueue: (e) => events.push(e),
 			now: Date.now,
+			assets: new Map(),
+			acceptRun: async () => true,
 			log: () => {
 				throw new Error('EPIPE');
 			},
