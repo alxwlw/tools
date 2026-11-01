@@ -142,6 +142,10 @@ function delivery(key: string, activityAt: string): RequestInit {
 		headers: { 'x-plane-event': 'issue', 'x-plane-signature': sign(raw) },
 	};
 }
+/** Lets pending microtasks and I/O callbacks run; no wall-clock wait. */
+const flush = async () => {
+	for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+};
 const count = (plane: FakePlane, method: string) => plane.calls.filter((c) => c === method).length;
 
 describe('startService', () => {
@@ -282,9 +286,9 @@ describe('сверка по таймеру', () => {
 			return realList();
 		};
 		await fetch(url('/plane/webhook'), delivery('ABC-1', '2026-11-01T10:06:00.000Z'));
-		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		await flush();
 		w.armed()[0]?.fire();
-		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		await flush();
 		expect(order).toEqual(['refresh:start']);
 		release();
 		await service.idle();
@@ -310,6 +314,8 @@ describe('сверка по таймеру', () => {
 		const [early, ...rest] = w.armed();
 		expect(rest).toEqual([]);
 		expect(early?.ms).toBe(10 * MIN);
+		// the daily timer and one early timer: the second request did not arm another
+		expect(w.timers).toHaveLength(2);
 		w.clock.ms += 10 * MIN;
 		early?.fire();
 		await service.idle();
@@ -342,6 +348,25 @@ describe('сверка по таймеру', () => {
 		running.splice(0);
 		expect(timer?.cancelled).toBe(true);
 		expect(w.armed()).toEqual([]);
+	});
+
+	test('остановка во время сверки: после её конца новый таймер не взводится', async () => {
+		const w = world();
+		w.options.drainMs = 0;
+		let release = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const realList = w.plane.listProjects.bind(w.plane);
+		w.plane.listProjects = async () => {
+			await gate;
+			return realList();
+		};
+		const service = await startService(w.env, w.options);
+		await service.stop();
+		release();
+		await service.idle();
+		expect(w.timers).toEqual([]);
 	});
 });
 
