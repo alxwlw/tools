@@ -392,6 +392,14 @@ describe('PlaneClient: границы', () => {
 		expect(ra!.description).toBe('x'.repeat(4000));
 		expect(rb!.description).toBe('x'.repeat(4000));
 		expect(rc!.description).toBe('x'.repeat(3999));
+		// a pair that ends exactly at the limit is whole: nothing is dropped
+		const whole = stub([
+			{
+				status: 200,
+				body: page([{ ...a, description_stripped: `${'x'.repeat(3998)}😀tail` }], null),
+			},
+		]);
+		expect((await whole.client.listWorkItems('p1'))[0]!.description).toBe(`${'x'.repeat(3998)}😀`);
 	});
 
 	test('обход страниц обрывается на 200-й с ошибкой, если курсор всё время новый', async () => {
