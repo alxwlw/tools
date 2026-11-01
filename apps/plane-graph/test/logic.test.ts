@@ -68,6 +68,7 @@ describe('columnX', () => {
 	});
 	test('единственная колонка без деления на ноль', () => {
 		expect(columnX(0, 0, 1000)).toBe(80);
+		expect(columnX(1, 0, 1000)).toBe(920);
 	});
 });
 
@@ -80,6 +81,15 @@ describe('visible', () => {
 			edge('XYZ-1', 'blocks', 'XYZ-2'),
 			edge('XYZ-3', 'relates', 'XYZ-2'),
 		]);
+	});
+	test('ребро к скрытой закрытой задаче убирается, даже если открытый конец виден', () => {
+		const g = graph(
+			[item('ABC-1'), item('ABC-2', { closed: true, stateGroup: 'completed' })],
+			[edge('ABC-1', 'blocks', 'ABC-2')],
+		);
+		const r = visible(g, { ...ALL, showClosed: false });
+		expect(keys(r.items)).toEqual(['ABC-1']);
+		expect(r.edges).toEqual([]);
 	});
 	test('с переключателем закрытые остаются и все рёбра на месте', () => {
 		const r = visible(G, ALL);
