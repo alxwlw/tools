@@ -340,6 +340,55 @@ describe('метки агента', () => {
 		expect(store.marks(TENANT)[0]).toMatchObject({ confirmedAt: first, rejectedAt: null });
 	});
 
+	test('подтверждение ставится один раз и не сдвигается', async () => {
+		const { deps, store } = setup();
+		await reconcile(deps);
+		store.putRun(
+			TENANT,
+			run({ relationsAdded: [{ fromId: idOf('ABC-1'), toId: idOf('ABC-2') }] }),
+			'x',
+		);
+		checkMarks(deps);
+		const later = { ...deps, now: () => new Date('2026-11-02T10:00:00.000Z') };
+		checkMarks(later);
+		expect(store.marks(TENANT)[0]?.confirmedAt).toBe(NOW.toISOString());
+	});
+
+	test('сверка проверяет метки: связь исчезла из Plane', async () => {
+		const { deps, store, plane } = setup();
+		await reconcile(deps);
+		store.putRun(
+			TENANT,
+			run({ relationsAdded: [{ fromId: idOf('ABC-1'), toId: idOf('ABC-2') }] }),
+			'x',
+		);
+		await reconcile(deps);
+		expect(store.marks(TENANT)[0]).toMatchObject({
+			confirmedAt: NOW.toISOString(),
+			rejectedAt: null,
+		});
+		plane.relations.set(idOf('ABC-1'), []);
+		plane.relations.set(idOf('ABC-2'), []);
+		await reconcile(deps);
+		expect(store.marks(TENANT)[0]?.rejectedAt).toBe(NOW.toISOString());
+	});
+
+	test('задача исчезла при чтении: подтверждённая метка отвергается', async () => {
+		const { deps, store, plane } = setup();
+		await reconcile(deps);
+		store.putRun(
+			TENANT,
+			run({ relationsAdded: [{ fromId: idOf('ABC-1'), toId: idOf('ABC-2') }] }),
+			'x',
+		);
+		checkMarks(deps);
+		plane.items.delete(idOf('ABC-2'));
+		await refreshItem(deps, 'project:ABC', idOf('ABC-2'));
+		expect(store.rejected(TENANT).relations).toEqual([
+			{ fromId: idOf('ABC-1'), toId: idOf('ABC-2') },
+		]);
+	});
+
 	test('повтор прохода не перечитывает задачи', async () => {
 		const { deps, plane, queue, refresh } = setup();
 		await reconcile(deps);
