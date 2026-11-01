@@ -123,7 +123,21 @@ describe('reconcile', () => {
 		expect(await reconcile(deps)).toBe(false);
 		expect(store.copy(TENANT)).toEqual(before);
 		const failed = logs.find((l) => l.event === 'sync.failed');
-		expect(failed).toMatchObject({ level: 'error', tenant: TENANT });
+		expect(failed).toMatchObject({
+			level: 'error',
+			tenant: TENANT,
+			error: 'Plane GET /relations/ → 500',
+		});
+	});
+});
+
+describe('reconcile: журнал', () => {
+	test('sync.done несёт длительность по часам зависимостей', async () => {
+		const { deps, logs } = setup();
+		const times = [0, 250].map((ms) => new Date(NOW.getTime() + ms));
+		let i = 0;
+		await reconcile({ ...deps, now: () => times[Math.min(i++, 1)]! });
+		expect(logs.find((l) => l.event === 'sync.done')).toMatchObject({ ms: 250 });
 	});
 });
 
@@ -246,12 +260,34 @@ describe('refreshItem и очередь событий', () => {
 		expect(reconciles).toHaveLength(1);
 	});
 
+	test('задача с неизвестным проектом просит сверку', async () => {
+		const { deps, plane, reconciles } = setup();
+		await reconcile(deps);
+		plane.items.get(idOf('ABC-1'))!.projectId = 'project:new';
+		await refreshItem(deps, 'project:new', idOf('ABC-1'));
+		expect(reconciles).toHaveLength(1);
+	});
+
 	test('известные состояние и проект не просят сверку', async () => {
 		const { deps, reconciles, logs } = setup();
 		await reconcile(deps);
 		await refreshItem(deps, 'project:ABC', idOf('ABC-1'));
 		expect(reconciles).toHaveLength(0);
 		expect(logs.filter((l) => l.event === 'sync.stale_copy')).toEqual([]);
+	});
+
+	test('сбой постановки в очередь логируется и не выбрасывается', () => {
+		const { deps, logs } = setup();
+		const broken = {
+			push: () => {
+				throw new Error('boom');
+			},
+		} as unknown as SerialQueue;
+		const refresh = createRefresher(deps, broken);
+		expect(() => refresh(touched('project:ABC', idOf('ABC-1')))).not.toThrow();
+		expect(logs).toEqual([
+			{ event: 'sync.enqueue_failed', level: 'error', tenant: TENANT, error: 'boom' },
+		]);
 	});
 
 	test('ошибка Plane в событии не выбрасывается из обработчика', async () => {
@@ -387,6 +423,45 @@ describe('метки агента', () => {
 		expect(store.rejected(TENANT).relations).toEqual([
 			{ fromId: idOf('ABC-1'), toId: idOf('ABC-2') },
 		]);
+	});
+
+	test('метка на задачу вне копии не подтверждается', async () => {
+		const { deps, store } = setup();
+		await reconcile(deps);
+		store.putRun(TENANT, run({ labelsAdded: [{ itemId: 'item:nowhere', label: 'код:x' }] }), 'x');
+		checkMarks(deps);
+		expect(store.marks(TENANT)[0]).toMatchObject({ confirmedAt: null, rejectedAt: null });
+	});
+
+	test('отказ ставится один раз', async () => {
+		const { deps, store, logs } = setup();
+		await reconcile(deps);
+		const a = idOf('ABC-1');
+		store.putRun(TENANT, run({ relationsAdded: [{ fromId: a, toId: idOf('DEF-1') }] }), 'x');
+		store.setMark(
+			TENANT,
+			{ kind: 'relation', fromId: a, toId: idOf('DEF-1') },
+			{ confirmedAt: 'c', rejectedAt: 'r' },
+		);
+		checkMarks(deps);
+		expect(store.marks(TENANT)[0]?.rejectedAt).toBe('r');
+		expect(logs.filter((l) => l.event === 'mark.rejected')).toEqual([]);
+	});
+
+	test('проход с одними метками просит чтение их задач', async () => {
+		const { deps } = setup();
+		const events: PlaneEvent[] = [];
+		await acceptRun(deps, run({ labelsAdded: [{ itemId: 'solo', label: 'код:x' }] }), (ev) =>
+			events.push(ev),
+		);
+		expect(events.map((e) => (e.kind === 'item.touched' ? e.workItemIds : []))).toEqual([['solo']]);
+	});
+
+	test('пустой проход не просит чтения', async () => {
+		const { deps } = setup();
+		const events: PlaneEvent[] = [];
+		expect(await acceptRun(deps, run(), (ev) => events.push(ev))).toBe(true);
+		expect(events).toEqual([]);
 	});
 
 	test('повтор прохода не перечитывает задачи', async () => {
