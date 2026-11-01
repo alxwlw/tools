@@ -70,6 +70,22 @@ describe('parseAgentRun', () => {
 		).toEqual(good());
 	});
 
+	test('время — только канонический ISO UTC', () => {
+		for (const field of ['startedAt', 'finishedAt']) {
+			for (const bad of [
+				'1',
+				'Feb 1 2026',
+				'2026-02-01T10:00:00+05:00',
+				'2026-13-45T10:00:00Z',
+				'',
+			]) {
+				expect(parseAgentRun({ ...good(), [field]: bad })).toEqual({ error: field });
+			}
+			const withMs = { ...good(), [field]: '2026-02-01T10:00:00.123Z' };
+			expect(parseAgentRun(withMs)).toEqual(withMs);
+		}
+	});
+
 	test('имя первого неверного поля — путь', () => {
 		expect(parseAgentRun({ ...good(), runId: 5 })).toEqual({ error: 'runId' });
 		expect(parseAgentRun({ ...good(), kind: 'weekly' })).toEqual({ error: 'kind' });
@@ -97,12 +113,13 @@ describe('страница', () => {
 		}
 	});
 
-	test('d3 с integrity и crossorigin', () => {
-		const html = graphPage({ scriptUrl: '/a.js', dataUrl: '/d' });
-		expect(html).toContain('https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js');
-		expect(html).toContain(
-			'integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i"',
-		);
-		expect(html).toContain('crossorigin="anonymous"');
+	test('d3 в оболочку не входит', () => {
+		for (const html of [
+			graphPage({ scriptUrl: '/a.js', dataUrl: '/d' }),
+			planeBlock({ scriptUrl: '/a.js', dataUrl: '/d' }),
+		]) {
+			expect(html).not.toContain('d3.min.js');
+			expect(html).toContain('src="/a.js" data-graph="/d"');
+		}
 	});
 });

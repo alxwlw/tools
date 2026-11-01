@@ -108,6 +108,23 @@ describe('graph.json', () => {
 		);
 	});
 
+	test('401 и 404 графа тоже с CORS', async () => {
+		const { handler } = setup();
+		for (const [path, status] of [
+			['/t/acme/graph.json?k=wrong', 401],
+			['/t/acme/graph.json', 401],
+			['/t/nobody/graph.json?k=x', 404],
+		] as const) {
+			const res = await handler(get(path));
+			expect([path, res.status]).toEqual([path, status]);
+			expect(res.headers.get('access-control-allow-origin')).toBe('*');
+			expect(res.headers.get('cache-control')).toBe('no-store');
+		}
+		expect(
+			(await handler(get('/t/acme/graph?k=wrong'))).headers.get('access-control-allow-origin'),
+		).toBeNull();
+	});
+
 	test('граф берёт данные своего тенанта', async () => {
 		const { handler } = setup();
 		const res = await handler(get('/t/other/graph.json?k=read-key-3333'));

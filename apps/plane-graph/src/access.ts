@@ -27,7 +27,10 @@ const KINDS: readonly string[] = ['batch', 'daily', 'first'];
 const isObject = (v: unknown): v is Record<string, unknown> =>
 	typeof v === 'object' && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === 'string' && v !== '';
-const isTime = (v: unknown): v is string => isText(v) && !Number.isNaN(Date.parse(v));
+/** Canonical ISO UTC only: marks are ordered by these strings as text. */
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const isTime = (v: unknown): v is string =>
+	typeof v === 'string' && ISO_UTC.test(v) && !Number.isNaN(Date.parse(v));
 
 /** Validates `rows` as an array of objects whose `fields` are non-empty strings; returns the path of the first bad one. */
 function rows<F extends string>(

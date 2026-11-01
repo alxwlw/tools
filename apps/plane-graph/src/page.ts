@@ -1,13 +1,9 @@
 import { esc } from './html.ts';
 
-// d3 is loaded in the browser, not bundled: the service has no runtime dependencies.
-const D3 =
-	'<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i" crossorigin="anonymous"></script>';
-
 type Urls = { scriptUrl: string; dataUrl: string };
 
 const mount = (o: Urls) =>
-	`<div id="graph"></div>\n${D3}\n<script src="${esc(o.scriptUrl)}" data-graph="${esc(o.dataUrl)}"></script>`;
+	`<div id="graph"></div>\n<script src="${esc(o.scriptUrl)}" data-graph="${esc(o.dataUrl)}"></script>`;
 
 /** The full "Граф задач" page; the addresses may be relative. */
 export function graphPage(o: Urls): string {

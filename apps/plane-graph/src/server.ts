@@ -257,7 +257,15 @@ export function createHandler(deps: ServerDeps): (req: Request) => Promise<Respo
 			return asset;
 		}
 		const route = TENANT_ROUTE.exec(path);
-		if (route !== null) return tenantRoute(route[1] as string, route[2] as string, req, url);
+		if (route !== null) {
+			const res = await tenantRoute(route[1] as string, route[2] as string, req, url);
+			// A Plane block (Origin null) must see 401/404 of graph.json, not a CORS error.
+			if (route[2] === 'graph.json') {
+				res.headers.set('access-control-allow-origin', '*');
+				res.headers.set('cache-control', 'no-store');
+			}
+			return res;
+		}
 		if (path === '/plane/setup' || path === '/plane/oauth/callback') {
 			if (req.method !== 'GET') return text('method not allowed', 405);
 			return path === '/plane/setup' ? setup(url) : planeOauthCallback(url, log);
