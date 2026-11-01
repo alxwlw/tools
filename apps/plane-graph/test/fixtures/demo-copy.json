@@ -1,0 +1,787 @@
+{
+	"projects": [
+		{
+			"id": "project:ABC",
+			"identifier": "ABC",
+			"name": "Каталог"
+		},
+		{
+			"id": "project:PAY",
+			"identifier": "PAY",
+			"name": "Платежи"
+		},
+		{
+			"id": "project:INF",
+			"identifier": "INF",
+			"name": "Инфраструктура"
+		}
+	],
+	"states": [
+		{
+			"id": "state:ABC:backlog",
+			"projectId": "project:ABC",
+			"group": "backlog"
+		},
+		{
+			"id": "state:ABC:unstarted",
+			"projectId": "project:ABC",
+			"group": "unstarted"
+		},
+		{
+			"id": "state:ABC:started",
+			"projectId": "project:ABC",
+			"group": "started"
+		},
+		{
+			"id": "state:ABC:completed",
+			"projectId": "project:ABC",
+			"group": "completed"
+		},
+		{
+			"id": "state:ABC:cancelled",
+			"projectId": "project:ABC",
+			"group": "cancelled"
+		},
+		{
+			"id": "state:ABC:triage",
+			"projectId": "project:ABC",
+			"group": "triage"
+		},
+		{
+			"id": "state:PAY:backlog",
+			"projectId": "project:PAY",
+			"group": "backlog"
+		},
+		{
+			"id": "state:PAY:unstarted",
+			"projectId": "project:PAY",
+			"group": "unstarted"
+		},
+		{
+			"id": "state:PAY:started",
+			"projectId": "project:PAY",
+			"group": "started"
+		},
+		{
+			"id": "state:PAY:completed",
+			"projectId": "project:PAY",
+			"group": "completed"
+		},
+		{
+			"id": "state:PAY:cancelled",
+			"projectId": "project:PAY",
+			"group": "cancelled"
+		},
+		{
+			"id": "state:PAY:triage",
+			"projectId": "project:PAY",
+			"group": "triage"
+		},
+		{
+			"id": "state:INF:backlog",
+			"projectId": "project:INF",
+			"group": "backlog"
+		},
+		{
+			"id": "state:INF:unstarted",
+			"projectId": "project:INF",
+			"group": "unstarted"
+		},
+		{
+			"id": "state:INF:started",
+			"projectId": "project:INF",
+			"group": "started"
+		},
+		{
+			"id": "state:INF:completed",
+			"projectId": "project:INF",
+			"group": "completed"
+		},
+		{
+			"id": "state:INF:cancelled",
+			"projectId": "project:INF",
+			"group": "cancelled"
+		},
+		{
+			"id": "state:INF:triage",
+			"projectId": "project:INF",
+			"group": "triage"
+		}
+	],
+	"labels": [
+		{
+			"id": "label:ABC:код:api",
+			"projectId": "project:ABC",
+			"name": "код:api"
+		},
+		{
+			"id": "label:ABC:код:web",
+			"projectId": "project:ABC",
+			"name": "код:web"
+		},
+		{
+			"id": "label:ABC:код:db",
+			"projectId": "project:ABC",
+			"name": "код:db"
+		},
+		{
+			"id": "label:ABC:код:ci",
+			"projectId": "project:ABC",
+			"name": "код:ci"
+		},
+		{
+			"id": "label:PAY:код:api",
+			"projectId": "project:PAY",
+			"name": "код:api"
+		},
+		{
+			"id": "label:PAY:код:db",
+			"projectId": "project:PAY",
+			"name": "код:db"
+		},
+		{
+			"id": "label:PAY:код:web",
+			"projectId": "project:PAY",
+			"name": "код:web"
+		},
+		{
+			"id": "label:INF:код:db",
+			"projectId": "project:INF",
+			"name": "код:db"
+		},
+		{
+			"id": "label:INF:код:ci",
+			"projectId": "project:INF",
+			"name": "код:ci"
+		}
+	],
+	"modules": [],
+	"items": [
+		{
+			"id": "demo:ABC-1",
+			"projectId": "project:ABC",
+			"sequenceId": 1,
+			"name": "Схема каталога",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-2",
+			"projectId": "project:ABC",
+			"sequenceId": 2,
+			"name": "Поиск по каталогу",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-3",
+			"projectId": "project:ABC",
+			"sequenceId": 3,
+			"name": "Фильтры в поиске",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-4",
+			"projectId": "project:ABC",
+			"sequenceId": 4,
+			"name": "Экспорт результатов",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-5",
+			"projectId": "project:ABC",
+			"sequenceId": 5,
+			"name": "Импорт товаров",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-6",
+			"projectId": "project:ABC",
+			"sequenceId": 6,
+			"name": "Проверка дублей",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-7",
+			"projectId": "project:ABC",
+			"sequenceId": 7,
+			"name": "Нормализация названий",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-8",
+			"projectId": "project:ABC",
+			"sequenceId": 8,
+			"name": "Отчёт об импорте",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-9",
+			"projectId": "project:ABC",
+			"sequenceId": 9,
+			"name": "Выбрать формат выгрузки",
+			"description": "",
+			"stateId": "state:ABC:completed",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-10",
+			"projectId": "project:ABC",
+			"sequenceId": 10,
+			"name": "Скрипт выгрузки",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:ci"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-11",
+			"projectId": "project:ABC",
+			"sequenceId": 11,
+			"name": "Карточка товара",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-12",
+			"projectId": "project:ABC",
+			"sequenceId": 12,
+			"name": "Галерея фото",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": "demo:ABC-11",
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-13",
+			"projectId": "project:ABC",
+			"sequenceId": 13,
+			"name": "Блок характеристик",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": "demo:ABC-11",
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-14",
+			"projectId": "project:ABC",
+			"sequenceId": 14,
+			"name": "Подсказки при вводе",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-15",
+			"projectId": "project:ABC",
+			"sequenceId": 15,
+			"name": "История запросов",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": ["label:ABC:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-16",
+			"projectId": "project:ABC",
+			"sequenceId": 16,
+			"name": "Тёмная тема витрины",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-17",
+			"projectId": "project:ABC",
+			"sequenceId": 17,
+			"name": "Переименовать колонки таблицы",
+			"description": "",
+			"stateId": "state:ABC:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:ABC-18",
+			"projectId": "project:ABC",
+			"sequenceId": 18,
+			"name": "Старый баннер",
+			"description": "",
+			"stateId": "state:ABC:completed",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-1",
+			"projectId": "project:PAY",
+			"sequenceId": 1,
+			"name": "Расчёт комиссии",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-2",
+			"projectId": "project:PAY",
+			"sequenceId": 2,
+			"name": "Округление сумм",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-3",
+			"projectId": "project:PAY",
+			"sequenceId": 3,
+			"name": "Единая валюта отчёта",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-4",
+			"projectId": "project:PAY",
+			"sequenceId": 4,
+			"name": "Приём платежей",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-5",
+			"projectId": "project:PAY",
+			"sequenceId": 5,
+			"name": "Возвраты",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:api"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-6",
+			"projectId": "project:PAY",
+			"sequenceId": 6,
+			"name": "Сверка с банком",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-7",
+			"projectId": "project:PAY",
+			"sequenceId": 7,
+			"name": "Страница оплаты",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-8",
+			"projectId": "project:PAY",
+			"sequenceId": 8,
+			"name": "Квитанции на почту",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": ["label:PAY:код:web"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-9",
+			"projectId": "project:PAY",
+			"sequenceId": 9,
+			"name": "Лимиты на сумму",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-10",
+			"projectId": "project:PAY",
+			"sequenceId": 10,
+			"name": "Ночной пересчёт",
+			"description": "",
+			"stateId": "state:PAY:completed",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-11",
+			"projectId": "project:PAY",
+			"sequenceId": 11,
+			"name": "Тестовые карты",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:PAY-12",
+			"projectId": "project:PAY",
+			"sequenceId": 12,
+			"name": "Описание ошибок банка",
+			"description": "",
+			"stateId": "state:PAY:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-1",
+			"projectId": "project:INF",
+			"sequenceId": 1,
+			"name": "Миграция базы",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": ["label:INF:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-2",
+			"projectId": "project:INF",
+			"sequenceId": 2,
+			"name": "Новый пул соединений",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": ["label:INF:код:db"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-3",
+			"projectId": "project:INF",
+			"sequenceId": 3,
+			"name": "Окно обслуживания",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-4",
+			"projectId": "project:INF",
+			"sequenceId": 4,
+			"name": "Алерты на задержки",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": ["label:INF:код:ci"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-5",
+			"projectId": "project:INF",
+			"sequenceId": 5,
+			"name": "Перенос логов",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": ["label:INF:код:ci"],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-6",
+			"projectId": "project:INF",
+			"sequenceId": 6,
+			"name": "Чистка старых бэкапов",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-7",
+			"projectId": "project:INF",
+			"sequenceId": 7,
+			"name": "Документация по запуску",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-8",
+			"projectId": "project:INF",
+			"sequenceId": 8,
+			"name": "Ротация ключей доступа",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-9",
+			"projectId": "project:INF",
+			"sequenceId": 9,
+			"name": "Сменить версию рантайма",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-10",
+			"projectId": "project:INF",
+			"sequenceId": 10,
+			"name": "Кэш образов сборки",
+			"description": "",
+			"stateId": "state:INF:completed",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-11",
+			"projectId": "project:INF",
+			"sequenceId": 11,
+			"name": "Проверка резервных копий",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		},
+		{
+			"id": "demo:INF-12",
+			"projectId": "project:INF",
+			"sequenceId": 12,
+			"name": "Шаблон отчёта об инциденте",
+			"description": "",
+			"stateId": "state:INF:started",
+			"parentId": null,
+			"labelIds": [],
+			"createdAt": "2026-01-01T00:00:00.000Z",
+			"updatedAt": "2026-01-02T00:00:00.000Z"
+		}
+	],
+	"edges": [
+		{
+			"from": "demo:ABC-1",
+			"to": "demo:ABC-2",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-2",
+			"to": "demo:ABC-3",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-3",
+			"to": "demo:ABC-4",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-5",
+			"to": "demo:ABC-6",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-5",
+			"to": "demo:ABC-7",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-6",
+			"to": "demo:ABC-8",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-7",
+			"to": "demo:ABC-8",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-9",
+			"to": "demo:ABC-10",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-1",
+			"to": "demo:PAY-2",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-2",
+			"to": "demo:PAY-3",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-3",
+			"to": "demo:PAY-1",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-4",
+			"to": "demo:PAY-4",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-4",
+			"to": "demo:PAY-5",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-5",
+			"to": "demo:PAY-6",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-4",
+			"to": "demo:PAY-7",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:PAY-10",
+			"to": "demo:PAY-8",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:INF-1",
+			"to": "demo:INF-2",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:INF-2",
+			"to": "demo:ABC-5",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:INF-4",
+			"to": "demo:INF-5",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:INF-10",
+			"to": "demo:INF-4",
+			"type": "blocks"
+		},
+		{
+			"from": "demo:ABC-14",
+			"to": "demo:ABC-15",
+			"type": "relates"
+		},
+		{
+			"from": "demo:PAY-7",
+			"to": "demo:ABC-2",
+			"type": "relates"
+		},
+		{
+			"from": "demo:INF-3",
+			"to": "demo:INF-1",
+			"type": "relates"
+		},
+		{
+			"from": "demo:PAY-9",
+			"to": "demo:PAY-5",
+			"type": "relates"
+		}
+	]
+}

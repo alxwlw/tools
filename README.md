@@ -13,6 +13,8 @@ Small standalone tools, one per directory under `apps/`, and shared code under `
   on one) and `/plane KEY`, a public card of a work item.
 - [`apps/plane-miro`](apps/plane-miro/README.md) — a Bun service that links Plane and Miro: stickers become
   work items, a work item's status shows on its cards on the board, and a Miro link in a comment puts a card there.
+- [`apps/plane-graph`](apps/plane-graph/README.md) — a Bun service that keeps a read-only copy of Plane work items
+  and relations, draws the order the work can be done in, and serves an agent that adds the missing relations.
 
 ## Packages
 

@@ -1,0 +1,14 @@
+{
+	"name": "@alxwlw/plane-graph",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@alxwlw/plane-app": "workspace:*"
+	},
+	"devDependencies": {
+		"@alxwlw/tsconfig": "catalog:dev",
+		"@types/bun": "catalog:dev",
+		"typescript": "catalog:dev"
+	}
+}

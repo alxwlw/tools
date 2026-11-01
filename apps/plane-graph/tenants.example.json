@@ -1,0 +1,11 @@
+{
+	"tenants": [
+		{
+			"id": "ex",
+			"workspaceSlug": "example-ws",
+			"workspaceId": "00000000-0000-4000-8000-000000000001",
+			"clientId": "example-client-id",
+			"installationId": "00000000-0000-4000-8000-000000000002"
+		}
+	]
+}

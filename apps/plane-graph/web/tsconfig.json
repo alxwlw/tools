@@ -1,0 +1,6 @@
+{
+	// The browser side: DOM types instead of Bun's, which clash with each other in one program.
+	"extends": "@alxwlw/tsconfig/bun.json",
+	"compilerOptions": { "lib": ["ES2022", "DOM"], "types": [] },
+	"include": ["."]
+}
