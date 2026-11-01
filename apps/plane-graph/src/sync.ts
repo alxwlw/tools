@@ -177,22 +177,36 @@ function acceptRunNow(d: SyncDeps, run: AgentRunIn, refresh: (ev: PlaneEvent) =>
  * delivery key is already claimed when it is called.
  */
 export function createRefresher(d: SyncDeps, queue: SerialQueue): (ev: PlaneEvent) => void {
-	const pending = new Set<string>();
+	// id -> project named by the events folded into the waiting job (null: none named it yet)
+	const pending = new Map<string, string | null>();
 
-	const refreshJob =
-		(ev: Extract<PlaneEvent, { kind: 'item.touched' }>, id: string) => async () => {
+	const refreshJob = (id: string) => {
+		let named: string | null | undefined;
+		return async () => {
 			// Yield before leaving `pending`: events that arrive in this tick still fold into this read, later
-			// ones (the read has started) schedule another.
+			// ones (the read has started) schedule another. A retry keeps the project read the first time.
 			await Promise.resolve();
-			pending.delete(id);
+			if (named === undefined) {
+				named = pending.get(id) ?? null;
+				pending.delete(id);
+			}
 			const projectId =
-				ev.projectId ?? d.store.copy(d.tenant).items.find((i) => i.id === id)?.projectId ?? null;
+				named ?? d.store.copy(d.tenant).items.find((i) => i.id === id)?.projectId ?? null;
 			if (projectId === null) {
 				d.log({ event: 'plane.unknown_item', tenant: d.tenant, workItemId: id });
 				return;
 			}
 			await refreshItem(d, projectId, id);
 		};
+	};
+
+	const logEnqueueFailure = (err: unknown) =>
+		d.log({
+			event: 'sync.enqueue_failed',
+			level: 'error',
+			tenant: d.tenant,
+			error: describeError(err),
+		});
 
 	return (ev) => {
 		try {
@@ -205,17 +219,22 @@ export function createRefresher(d: SyncDeps, queue: SerialQueue): (ev: PlaneEven
 				return;
 			}
 			for (const id of new Set(ev.workItemIds)) {
-				if (pending.has(id)) continue;
-				pending.add(id);
-				queue.push(`refresh:${id}`, refreshJob(ev, id));
+				if (pending.has(id)) {
+					// a later event may name the project the waiting one lacked
+					if (pending.get(id) === null && ev.projectId !== null) pending.set(id, ev.projectId);
+					continue;
+				}
+				pending.set(id, ev.projectId);
+				try {
+					queue.push(`refresh:${id}`, refreshJob(id));
+				} catch (err) {
+					// nothing waits for this id: let the next event schedule it again, and go on with the others
+					pending.delete(id);
+					logEnqueueFailure(err);
+				}
 			}
 		} catch (err) {
-			d.log({
-				event: 'sync.enqueue_failed',
-				level: 'error',
-				tenant: d.tenant,
-				error: describeError(err),
-			});
+			logEnqueueFailure(err);
 		}
 	};
 }

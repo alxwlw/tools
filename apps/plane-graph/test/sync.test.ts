@@ -276,6 +276,63 @@ describe('refreshItem и очередь событий', () => {
 		expect(logs.filter((l) => l.event === 'sync.stale_copy')).toEqual([]);
 	});
 
+	test('позднее событие с проектом дополняет ожидающее без проекта', async () => {
+		const { deps, store, plane, refresh, queue } = setup();
+		await reconcile(deps);
+		store.deleteItem(TENANT, idOf('ABC-1'));
+		plane.calls = [];
+		let release!: () => void;
+		queue.push('blocker', () => new Promise<void>((resolve) => (release = resolve)));
+		refresh(touched(null, idOf('ABC-1')));
+		refresh(touched('project:ABC', idOf('ABC-1')));
+		release();
+		await queue.idle();
+		expect(store.copy(TENANT).items.map((i) => i.id)).toContain(idOf('ABC-1'));
+		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
+	});
+
+	test('сбой push не оставляет задачу в ожидающих', async () => {
+		const { deps, plane, queue } = setup();
+		await reconcile(deps);
+		let first = true;
+		const flaky = {
+			push: (label: string, job: () => Promise<void>) => {
+				if (first) {
+					first = false;
+					throw new Error('boom');
+				}
+				queue.push(label, job);
+			},
+		} as unknown as SerialQueue;
+		const refresh = createRefresher(deps, flaky);
+		plane.calls = [];
+		refresh(touched('project:ABC', idOf('ABC-1')));
+		refresh(touched('project:ABC', idOf('ABC-1')));
+		await queue.idle();
+		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
+	});
+
+	test('сбой push одной задачи не отменяет остальные в событии', async () => {
+		const { deps, plane, queue, logs } = setup();
+		await reconcile(deps);
+		let first = true;
+		const flaky = {
+			push: (label: string, job: () => Promise<void>) => {
+				if (first) {
+					first = false;
+					throw new Error('boom');
+				}
+				queue.push(label, job);
+			},
+		} as unknown as SerialQueue;
+		const refresh = createRefresher(deps, flaky);
+		plane.calls = [];
+		refresh(touched('project:ABC', idOf('ABC-1'), idOf('ABC-2')));
+		await queue.idle();
+		expect(plane.calls.filter((c) => c === 'getWorkItem')).toHaveLength(1);
+		expect(logs.filter((l) => l.event === 'sync.enqueue_failed')).toHaveLength(1);
+	});
+
 	test('сбой постановки в очередь логируется и не выбрасывается', () => {
 		const { deps, logs } = setup();
 		const broken = {
