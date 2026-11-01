@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // The order graph (view B): wave columns, a d3 force layout, hover/tap to highlight neighbours.
 import type { Edge, EdgeType, GraphJson, RunSummary } from '../src/contract.ts';
-import { columnX, type Filters, projectColor, visible } from './logic.ts';
+import { columnX, type Filters, fitBox, projectColor, startGroups, visible } from './logic.ts';
 
 // document.currentScript is null once the script has yielded, so read it before any await.
 const SELF = document.currentScript instanceof HTMLScriptElement ? document.currentScript : null;
@@ -64,6 +64,8 @@ let d3State: 'loading' | 'ready' | 'failed' = 'loading';
 const filters: Filters = { showClosed: false, project: null, area: null };
 let simulation: D3Simulation<Node> | null = null;
 let fit: () => void = () => {};
+/** The view the user set by zoom or pan; kept across data refreshes, dropped when the filters change. */
+let userView: { x: number; y: number; k: number } | null = null;
 
 const root = document.getElementById('graph');
 const barEl = document.createElement('div');
@@ -168,6 +170,7 @@ function renderBar(): void {
 			filters.project,
 			(v) => {
 				filters.project = v;
+				userView = null;
 				refresh();
 			},
 		),
@@ -177,6 +180,7 @@ function renderBar(): void {
 			filters.area,
 			(v) => {
 				filters.area = v;
+				userView = null;
 				refresh();
 			},
 		),
@@ -187,12 +191,16 @@ function renderBar(): void {
 	box.checked = filters.showClosed;
 	box.onchange = () => {
 		filters.showClosed = box.checked;
+		userView = null;
 		refresh();
 	};
 	label.append(box, 'Показать закрытые');
 	const fitBtn = el('button', 'Вписать');
 	fitBtn.type = 'button';
-	fitBtn.onclick = () => fit();
+	fitBtn.onclick = () => {
+		userView = null;
+		fit();
+	};
 	barEl.append(label, fitBtn);
 }
 
@@ -212,9 +220,7 @@ function renderPanels(): void {
 		panelsEl.append(box);
 	}
 
-	const groups = g.canStart
-		.map((grp) => ({ area: grp.area, items: grp.items.filter((id) => ids.has(id)) }))
-		.filter((grp) => grp.items.length > 0);
+	const groups = startGroups(g.canStart, ids);
 	if (groups.length > 0) {
 		const box = el('div');
 		box.append(el('h3', 'Можно сейчас'));
@@ -222,7 +228,7 @@ function renderPanels(): void {
 			const row = el('div', undefined, 'grp');
 			const head = el('div');
 			head.append(el('span', grp.area ?? 'без области', 'area'));
-			if (grp.items.length >= 2) head.append(el('span', 'не параллельно', 'par'));
+			if (grp.notParallel) head.append(el('span', 'не параллельно', 'par'));
 			const list = el('ul');
 			for (const id of grp.items) {
 				const item = byId.get(id);
@@ -321,13 +327,22 @@ function drawGraph(): void {
 	const zoom = d3
 		.zoom()
 		.scaleExtent([0.3, 4])
-		.on('zoom', (e) =>
+		.on('zoom', (e) => {
+			// A zoom with a source event comes from the user; fit() and the restore below have none.
+			if (e.sourceEvent !== null) {
+				autoFit = false;
+				userView = { x: e.transform.x, y: e.transform.y, k: e.transform.k };
+			}
 			layer.attr(
 				'transform',
 				`translate(${e.transform.x},${e.transform.y}) scale(${e.transform.k})`,
-			),
-		);
+			);
+		});
 	svg.call(zoom);
+	// Fit once per drawing, and not at all when the user has already set a view.
+	let autoFit = userView === null;
+	if (userView !== null)
+		svg.call(zoom.transform, d3.zoomIdentity.translate(userView.x, userView.y).scale(userView.k));
 
 	for (let r = 0; r <= maxWave; r++) {
 		const x = columnX(r, maxWave, W) as number;
@@ -442,6 +457,7 @@ function drawGraph(): void {
 		d3
 			.drag<Node>()
 			.on('start', (e, n) => {
+				autoFit = false;
 				if (e.active === 0) sim.alphaTarget(0.3).restart();
 				n.fx = n.x;
 				n.fy = n.y;
@@ -476,12 +492,13 @@ function drawGraph(): void {
 	});
 
 	fit = () => {
-		const xs = nodes.map((n) => n.x ?? 0);
-		const ys = nodes.map((n) => n.y ?? 0);
-		const x0 = Math.min(...xs) - 30;
-		const x1 = Math.max(...xs) + 30;
-		const y0 = Math.min(...ys) - 30;
-		const y1 = Math.max(...ys) + 20;
+		const columns = Array.from({ length: maxWave + 1 }, (_, r) => columnX(r, maxWave, W) as number);
+		const box = fitBox(
+			nodes.map((n) => ({ x: n.x ?? 0, y: n.y ?? 0, r: n.r })),
+			columns,
+			H,
+		);
+		const { x0, x1, y0, y1 } = box;
 		const k = Math.min(1.6, W / (x1 - x0), H / (y1 - y0));
 		svg
 			.transition()
@@ -491,7 +508,12 @@ function drawGraph(): void {
 				d3.zoomIdentity.translate((W - k * (x1 + x0)) / 2, (H - k * (y1 + y0)) / 2).scale(k),
 			);
 	};
-	sim.on('end', () => fit());
+	sim.on('end', () => {
+		// d3 fires `end` after every cool-down (a drag restarts the simulation); only the first one fits.
+		if (!autoFit) return;
+		autoFit = false;
+		fit();
+	});
 }
 
 /** The id behind a link end, before and after d3 swaps ids for node objects. */

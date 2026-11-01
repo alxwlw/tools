@@ -58,3 +58,53 @@ const PALETTE = [
 export function projectColor(index: number): string {
 	return PALETTE[index % PALETTE.length] as string;
 }
+
+export type Box = { x0: number; y0: number; x1: number; y1: number };
+const LABEL_HALF_WIDTH = 30;
+const LABEL_HEIGHT = 14;
+const COLUMN_HALF_WIDTH = 45;
+const COLUMN_TOP = 4;
+const FIT_PAD = 10;
+
+/**
+ * The rectangle a fit has to show: node circles with their key labels (above the circle) and,
+ * when there are wave columns, their header labels (about 90 px wide, centred on the column).
+ */
+export function fitBox(
+	nodes: { x: number; y: number; r: number }[],
+	columns: number[],
+	height: number,
+): Box {
+	const xs: number[] = [];
+	const ys: number[] = [];
+	for (const n of nodes) {
+		xs.push(n.x - Math.max(n.r, LABEL_HALF_WIDTH), n.x + Math.max(n.r, LABEL_HALF_WIDTH));
+		ys.push(n.y - n.r - 4 - LABEL_HEIGHT, n.y + n.r);
+	}
+	for (const x of columns) {
+		xs.push(x - COLUMN_HALF_WIDTH, x + COLUMN_HALF_WIDTH);
+		ys.push(COLUMN_TOP, height - 40);
+	}
+	return {
+		x0: Math.min(...xs) - FIT_PAD,
+		y0: Math.min(...ys) - FIT_PAD,
+		x1: Math.max(...xs) + FIT_PAD,
+		y1: Math.max(...ys) + FIT_PAD,
+	};
+}
+
+export type StartGroup = { area: string | null; items: string[]; notParallel: boolean };
+
+/**
+ * «Можно сейчас» as the panel shows it: only ids that are drawn, empty groups dropped. Only a group
+ * of a known area with two or more tasks is «не параллельно»; tasks without an area share no known code.
+ */
+export function startGroups(
+	canStart: GraphJson['canStart'],
+	shown: ReadonlySet<string>,
+): StartGroup[] {
+	return canStart
+		.map((g) => ({ area: g.area, items: g.items.filter((id) => shown.has(id)) }))
+		.filter((g) => g.items.length > 0)
+		.map((g) => ({ ...g, notParallel: g.area !== null && g.items.length >= 2 }));
+}

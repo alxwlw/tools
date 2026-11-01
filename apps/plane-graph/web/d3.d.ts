@@ -26,6 +26,7 @@ interface D3ZoomTransform {
 	scale(k: number): D3ZoomTransform;
 }
 interface D3ZoomEvent {
+	sourceEvent: Event | null;
 	transform: D3ZoomTransform;
 }
 interface D3Zoom {

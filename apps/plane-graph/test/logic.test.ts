@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Edge, GraphJson } from '../src/contract.ts';
-import { columnX, projectColor, visible } from '../web/logic.ts';
+import { columnX, fitBox, projectColor, startGroups, visible } from '../web/logic.ts';
 
 type Item = GraphJson['items'][number];
 
@@ -125,5 +125,56 @@ describe('projectColor', () => {
 		expect(projectColor(0)).toBe('#4e79a7');
 		expect(projectColor(9)).toBe('#bab0ac');
 		expect(projectColor(11)).toBe('#f28e2b');
+	});
+});
+
+describe('fitBox', () => {
+	test('охватывает подписи первой и последней колонок, а не только узлы', () => {
+		const W = 1000;
+		const box = fitBox(
+			[
+				{ x: 200, y: 200, r: 6 },
+				{ x: 700, y: 300, r: 6 },
+			],
+			[80, W - 80],
+			520,
+		);
+		// «МОЖНО СЕЙЧАС» about 90 px wide, centred on x = 80, and the last header on x = 920.
+		expect(box.x0).toBeLessThanOrEqual(80 - 45);
+		expect(box.x1).toBeGreaterThanOrEqual(W - 80 + 45);
+		expect(box.y0).toBeLessThanOrEqual(4);
+	});
+	test('подпись узла над кружком входит в рамку', () => {
+		const box = fitBox([{ x: 300, y: 100, r: 10 }], [], 520);
+		expect(box.y0).toBeLessThanOrEqual(100 - 10 - 4 - 14);
+		expect(box.y1).toBeGreaterThanOrEqual(110);
+		expect(box.x0).toBeLessThanOrEqual(300 - 30);
+		expect(box.x1).toBeGreaterThanOrEqual(300 + 30);
+	});
+});
+
+describe('startGroups', () => {
+	const shown = new Set(['a', 'b', 'c', 'd', 'e']);
+	test('область с двумя задачами помечена «не параллельно»', () => {
+		const r = startGroups([{ area: 'код:api', items: ['a', 'b'] }], shown);
+		expect(r).toEqual([{ area: 'код:api', items: ['a', 'b'], notParallel: true }]);
+	});
+	test('группа без области с двумя задачами не помечена', () => {
+		const r = startGroups([{ area: null, items: ['c', 'd'] }], shown);
+		expect(r).toEqual([{ area: null, items: ['c', 'd'], notParallel: false }]);
+	});
+	test('группа из одной задачи не помечена', () => {
+		const r = startGroups([{ area: 'код:web', items: ['e'] }], shown);
+		expect(r).toEqual([{ area: 'код:web', items: ['e'], notParallel: false }]);
+	});
+	test('скрытые задачи отбрасываются, пустая группа пропадает, остаток из одной не помечен', () => {
+		const r = startGroups(
+			[
+				{ area: 'код:api', items: ['a', 'zz'] },
+				{ area: 'код:db', items: ['yy'] },
+			],
+			shown,
+		);
+		expect(r).toEqual([{ area: 'код:api', items: ['a'], notParallel: false }]);
 	});
 });
