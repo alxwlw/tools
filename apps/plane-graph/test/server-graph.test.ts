@@ -297,6 +297,23 @@ describe('снимок и проход агента', () => {
 		expect(accepted).toEqual([]);
 	});
 
+	test('kind first принимается', async () => {
+		const { handler, accepted } = setup();
+		expect((await handler(postRun(run({ kind: 'first' })))).status).toBe(201);
+		expect(accepted[0]?.run.kind).toBe('first');
+	});
+
+	test('тело ровно в 1 MiB принимается, на байт больше — нет', async () => {
+		const { handler, accepted } = setup();
+		const bodyOf = (pad: number) => JSON.stringify(run({ runId: 'x'.repeat(pad) }));
+		const pad = 1_048_576 - Buffer.byteLength(bodyOf(0));
+		expect(Buffer.byteLength(bodyOf(pad))).toBe(1_048_576);
+		expect((await handler(postRun(bodyOf(pad)))).status).toBe(201);
+		expect(accepted.length).toBe(1);
+		expect((await handler(postRun(bodyOf(pad + 1)))).status).toBe(400);
+		expect(accepted.length).toBe(1);
+	});
+
 	test('первое неверное поле, а не последнее', async () => {
 		const { handler } = setup();
 		const res = await handler(postRun(run({ kind: 'x', skipped: -1, costUsd: 'z' })));
