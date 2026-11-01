@@ -61,7 +61,8 @@ One timer per tenant, and the reconcile runs as a job of the tenant's queue, nev
 After a success the next one is at 03:00 UTC; after a failure, in 10 minutes. When a refreshed item names a state
 or project the copy does not know, the next reconcile is moved to 10 minutes after the last one finished (or to
 now, if that was longer ago); asking again while one is queued or running changes nothing. Reads are limited to
-50 requests a minute per tenant.
+50 requests a minute per tenant. Webhook refreshes wait behind a running reconcile, about 18 minutes at start, at
+03:00 UTC and after every restart; the copy catches up when it ends.
 
 ## Configuration
 
@@ -112,8 +113,8 @@ for instance `ABC-1`, and opens in Plane.
 ## Operations
 
 - **Logs** are one JSON line per event on stdout: `{ts, event, tenant?, …ids, ms?, error?}`. Secrets, keys,
-  tokens and the titles and descriptions of work items never reach them, and a request line carries no query
-  string.
+  tokens and the titles and descriptions of work items never reach them. There is no access log: failures are
+  logged by route; no query string or header is logged.
 - **State** is one SQLite file (`/data`, a named volume): deduplication keys, the copy, the agent's runs and
   marks, the watchdog heartbeat. Losing it costs the history of the agent's runs and the deduplication window;
   the next reconcile rebuilds the copy from Plane.
