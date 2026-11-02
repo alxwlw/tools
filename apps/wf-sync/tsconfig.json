@@ -1,0 +1,8 @@
+{
+	"extends": "@alxwlw/tsconfig/bun.json",
+	"compilerOptions": {
+		// Plugins import the public SDK as a bare module; at runtime resolveConnector registers it.
+		"paths": { "wf-sync": ["./src/sdk.ts"] }
+	},
+	"include": ["src", "tests", "plugins"]
+}

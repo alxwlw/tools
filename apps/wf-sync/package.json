@@ -1,0 +1,25 @@
+{
+	"name": "@alxwlw/wf-sync",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Background sync of crypto exchanges, on-chain wallets and Monobank into self-hosted Wealthfolio",
+	"exports": {
+		".": "./src/sdk.ts"
+	},
+	"scripts": {
+		"start": "bun src/cli.ts daemon",
+		"once": "bun src/cli.ts run",
+		"dry-run": "bun src/cli.ts dry-run",
+		"check": "bun src/cli.ts check"
+	},
+	"dependencies": {
+		"ccxt": "4.5.91",
+		"yaml": "2.9.1"
+	},
+	"devDependencies": {
+		"@alxwlw/tsconfig": "catalog:dev",
+		"@types/bun": "catalog:dev",
+		"typescript": "catalog:dev"
+	}
+}

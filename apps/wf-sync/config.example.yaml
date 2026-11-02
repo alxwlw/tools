@@ -1,0 +1,85 @@
+# wf-sync config. Secrets come from environment variables (${NAME}); put them in .env.
+
+wealthfolio:
+  url: http://wealthfolio:8088 # self-hosted Wealthfolio (web/server mode)
+  password: ${WF_PASSWORD} # the password matching WF_AUTH_PASSWORD_HASH
+
+interval_minutes: 60 # daemon mode: how often to sync
+state_file: ./data/state.json # account/asset ids and cursors (keep it on a volume)
+min_value_usd: 1 # ignore balances worth less than this (dust, airdrops)
+stablecoins_as_cash: true # USDT/USDC/… become USD cash instead of separate assets
+plugins_dir: ./plugins # where your own connectors live
+
+pricing:
+  # Coins Wealthfolio's providers (Yahoo) get wrong or don't have; wf-sync prices them itself.
+  # Unpriced MARKET assets are switched to wf-sync pricing automatically after a few hours.
+  manual_symbols: [WBT]
+  exchanges: [binance, okx, kraken] # public tickers used as a price fallback (no keys needed)
+
+connectors:
+  # --- exchanges: create READ-ONLY API keys, ideally with an IP whitelist -------------
+  - id: binance
+    type: binance
+    api_key: ${BINANCE_API_KEY}
+    secret: ${BINANCE_SECRET}
+    # wallets: [spot, funding]        # default; add "future" / "margin" if you use them
+    # earn: true                      # Simple Earn flexible + locked (default true)
+
+  - id: okx
+    type: okx
+    api_key: ${OKX_API_KEY}
+    secret: ${OKX_SECRET}
+    password: ${OKX_PASSPHRASE}
+    # wallets: [trading, funding]
+
+  - id: kraken
+    type: kraken
+    api_key: ${KRAKEN_API_KEY}
+    secret: ${KRAKEN_SECRET} # staking balances (DOT.S, ETH2.S…) are merged into the coin
+
+  - id: whitebit
+    type: whitebit
+    api_key: ${WHITEBIT_API_KEY}
+    secret: ${WHITEBIT_SECRET}
+    # wallets: [spot, main]
+
+  # --- on-chain wallets: public addresses only, no keys --------------------------------
+  - id: evm
+    type: evm
+    name: MetaMask
+    addresses:
+      - '0x0000000000000000000000000000000000000000'
+    chains: [ethereum, arbitrum, base, optimism, polygon, bsc]
+    # rpc: { ethereum: "https://eth-mainnet.g.alchemy.com/v2/KEY" }
+    # tokens:                         # beyond the built-in USDC/USDT/DAI/WETH/WBTC/ARB/OP
+    #   base:
+    #     - { address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", symbol: AERO }
+
+  - id: solana
+    type: solana
+    name: Phantom
+    address: '11111111111111111111111111111111'
+    # rpc: https://mainnet.helius-rpc.com/?api-key=KEY   # public RPC is rate-limited
+    # tokens: { "<mint>": "SYMBOL" }
+    # unknown_tokens: price           # keep unlisted mints DefiLlama can price ("skip" to ignore)
+
+  # --- banks -----------------------------------------------------------------------------
+  - id: monobank
+    type: monobank
+    token: ${MONOBANK_TOKEN} # https://api.monobank.ua/ → "Отримати токен"
+    history_days: 31 # first import depth; each 31 days = 1 request/minute per card
+    # accounts: ["1234"]              # only these cards (last 4 digits, IBAN or account id)
+    # jars: true                      # jars ("банки") as savings accounts
+
+  # --- anything without an API --------------------------------------------------------------
+  - id: cash
+    type: manual
+    name: Наличка
+    currency: UAH
+    cash: { UAH: 0, USD: 0 }
+
+  # --- your own plugin (see plugins/example-bank.ts) ------------------------------------------
+  # - id: my-bank
+  #   type: ./example-bank.ts
+  #   balance: 1000
+  #   currency: EUR

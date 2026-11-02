@@ -1,0 +1,38 @@
+# Wealthfolio + wf-sync on one host.
+#   cp .env.example .env && cp config.example.yaml config.yaml   # then fill both in
+#   docker compose up -d
+# Wealthfolio UI: http://localhost:8088
+
+services:
+  wealthfolio:
+    image: wealthfolio/wealthfolio:latest
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8088:8088'
+    environment:
+      WF_LISTEN_ADDR: 0.0.0.0:8088
+      WF_DB_PATH: /data/wealthfolio.db
+      WF_SECRET_KEY: ${WF_SECRET_KEY}
+      WF_AUTH_PASSWORD_HASH: ${WF_AUTH_PASSWORD_HASH}
+      # Required with auth: the origin you open the UI from (comma-separated if several).
+      WF_CORS_ALLOW_ORIGINS: ${WF_CORS_ALLOW_ORIGINS:-http://localhost:8088}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - wealthfolio-data:/data
+
+  wf-sync:
+    image: ghcr.io/alxwlw/wf-sync:main
+    build: .
+    restart: unless-stopped
+    depends_on: [wealthfolio]
+    env_file: .env
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./plugins:/app/plugins:ro # your own connectors
+      - wf-sync-data:/app/data # state.json (state_file: ./data/state.json)
+
+volumes:
+  wealthfolio-data:
+  wf-sync-data:
