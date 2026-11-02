@@ -1,10 +1,10 @@
 # Canon pins. This file is sync-managed: edits happen in alxwlw/stack, not here.
-proto = "0.63.1"
-node = "26.12.0"
-pnpm = "12.14.0"
-bun = "1.4.3"
-moon = "2.6.2"
-uv = "0.13.1"
+proto = "0.63.2"
+node = "26.13.0"
+pnpm = "12.16.1"
+bun = "1.4.4"
+moon = "2.6.5"
+uv = "0.13.6"
 
 # Guardrail binaries: versions pinned for reproducibility.
 actionlint = "1.7.12"
