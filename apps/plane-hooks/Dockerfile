@@ -1,7 +1,7 @@
 # plane-hooks — Plane App hub: GitHub, Vercel, Dokploy and Grafana → Plane work items.
 # Build context: the repository root (docker build -f apps/plane-hooks/Dockerfile .): the image carries
 # packages/plane-app as its only dependency, copied as source. Nothing is installed.
-FROM oven/bun:1.4.2-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 COPY apps/plane-hooks/tsconfig.json ./
