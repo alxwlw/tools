@@ -15,6 +15,8 @@ Small standalone tools, one per directory under `apps/`, and shared code under `
   work items, a work item's status shows on its cards on the board, and a Miro link in a comment puts a card there.
 - [`apps/plane-graph`](apps/plane-graph/README.md) — a Bun service that keeps a read-only copy of Plane work items
   and relations, draws the order the work can be done in, and serves an agent that adds the missing relations.
+- [`apps/wf-sync`](apps/wf-sync/README.md) — a Bun service that syncs crypto exchanges (Binance, OKX, Kraken,
+  WhiteBIT), EVM and Solana wallets and Monobank into a self-hosted Wealthfolio, with plugins for any other source.
 
 ## Packages
 

@@ -1,0 +1,75 @@
+name: wf-sync image
+on:
+  pull_request:
+    paths:
+      - 'apps/wf-sync/**'
+      - '.github/workflows/wf-sync-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/wf-sync/**'
+      - '.github/workflows/wf-sync-image.yml'
+permissions:
+  contents: read
+  packages: write
+env:
+  IMAGE: ghcr.io/alxwlw/wf-sync
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: apps/wf-sync
+          platforms: linux/amd64
+          load: true
+          tags: wf-sync:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke
+        # dry-run fetches and prints without touching Wealthfolio, so no server is needed;
+        # it proves the image starts, parses a config, loads a built-in and a plugin connector.
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/config.yaml" <<'EOF'
+          wealthfolio: { url: 'http://wealthfolio.invalid:8088' }
+          state_file: ./data/state.json
+          plugins_dir: ./plugins
+          connectors:
+            - { id: cash, type: manual, name: Cash, currency: UAH, cash: { UAH: 100 } }
+            - { id: example, type: ./example-bank.ts, balance: 42, currency: EUR }
+          EOF
+          out="$(docker run --rm -v "$RUNNER_TEMP/config.yaml:/app/config.yaml:ro" wf-sync:smoke dry-run)"
+          echo "$out"
+          grep -F 'UAH        100 (cash)' <<<"$out"
+          grep -F 'EUR        42 (cash)' <<<"$out"
+          grep -F '2 connector(s) ok' <<<"$out"
+          docker run --rm wf-sync:smoke --help | grep -F 'Usage: wf-sync'
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: apps/wf-sync
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          labels: org.opencontainers.image.source=https://github.com/alxwlw/tools
+          cache-from: type=gha
+      - name: Digest
+        if: github.event_name == 'push'
+        run: echo "${IMAGE}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}

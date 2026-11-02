@@ -1,0 +1,171 @@
+# wf-sync
+
+A [Bun](https://bun.sh) service that keeps a self-hosted [Wealthfolio](https://wealthfolio.app) up to date
+with balances and transactions from crypto exchanges, on-chain wallets and Monobank, so net worth and
+savings plans stay current without manual entry. It talks to Wealthfolio through its REST API (`/api/v1`).
+
+| Source                                                                                       | Becomes in Wealthfolio                                                               |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Binance, OKX, Kraken, WhiteBIT (and any other [ccxt](https://github.com/ccxt/ccxt) exchange) | a **Holdings** account: a balance snapshot every run, Spot + Funding + Earn          |
+| EVM wallets (Ethereum, Arbitrum, Base, Optimism, Polygon, BSC)                               | a **Holdings** account: the native coin + listed tokens                              |
+| Solana wallets                                                                               | a **Holdings** account: SOL + every SPL / Token-2022 balance that can be priced      |
+| Monobank cards                                                                               | a **Transactions** cash account: each operation imported once, exact opening balance |
+| Monobank jars ("банки")                                                                      | a savings account with a balance snapshot                                            |
+| Cash and anything without an API                                                             | the `manual` connector: amounts from the config                                      |
+| Anything else                                                                                | your own plugin, one `.ts` file                                                      |
+
+Exchange keys are read-only; wallets need only a public address.
+
+## Why a service and not a Wealthfolio addon
+
+Wealthfolio addons run in a sandboxed iframe and only when their page is open, so they can't sync on a
+schedule. wf-sync runs next to Wealthfolio (web/server mode) as its own process.
+
+## Quick start (Docker Compose)
+
+```bash
+cp .env.example .env              # passwords, exchange keys, Monobank token
+cp config.example.yaml config.yaml
+# .env: WF_PASSWORD, its argon2id hash WF_AUTH_PASSWORD_HASH, WF_SECRET_KEY (commands are in the file)
+# config.yaml: keep the connectors you use, fill in wallet addresses
+docker compose run --rm wf-sync check     # Wealthfolio login + every connector
+docker compose run --rm wf-sync dry-run   # what would be written, nothing is written
+docker compose up -d                      # Wealthfolio + a sync every interval_minutes
+```
+
+Wealthfolio is on http://localhost:8088. Already running one? Drop the `wealthfolio` service and point
+`wealthfolio.url` in `config.yaml` at it. The desktop app has no HTTP API; the server build does.
+
+A fresh Wealthfolio whose onboarding was skipped has no base currency, and then values nothing; wf-sync
+sets it to `base_currency` from the config (USD by default). Change it in Wealthfolio settings at any time.
+
+## Without Docker
+
+```bash
+pnpm install                      # from the repository root
+cd apps/wf-sync
+bun src/cli.ts check
+bun src/cli.ts run                # one pass; exit code 2 if a connector failed
+bun src/cli.ts daemon             # a pass every interval_minutes
+bun src/cli.ts dry-run            # fetch and print, write nothing
+```
+
+`-v` turns on debug logging; the config path is `-c path` or `WF_SYNC_CONFIG` (default `config.yaml`).
+
+## Keys and tokens
+
+- **Binance:** API Management → Create API → only _Enable Reading_. Earn is read with the same key.
+- **OKX:** API → Create → _Read_ only, set a passphrase.
+- **Kraken:** Settings → API → _Query Funds_ and _Query Ledger Entries_.
+- **WhiteBIT:** API keys → read-only.
+- **Monobank:** https://api.monobank.ua/ → "Отримати токен" (confirmed in the app).
+
+Restrict keys to the server's IP wherever the exchange allows it.
+
+## How a run works
+
+1. Every connector reports the current state of its accounts. One failing connector is logged; the others
+   still sync.
+2. Positions are normalized: stablecoins become USD cash (`stablecoins_as_cash`); dust below
+   `min_value_usd` and unpriceable tokens are dropped; Kraken staking suffixes (`DOT.S`, `ETH2.S`) and
+   Binance `LD*` earn shares collapse into the base coin.
+3. Accounts are found or created in Wealthfolio, tagged `provider = WF_SYNC` with a stable key, so they
+   can be renamed in the UI.
+4. Holdings accounts get today's snapshot (one per day, updated in place); one coin is one asset across
+   all accounts.
+5. Transactions accounts get only new operations, deduplicated by operation id and `idempotencyKey`.
+   After a lost `state.json` or a crash mid-write, operations already in Wealthfolio are skipped, not
+   duplicated; the Monobank cursor moves only after a successful write.
+
+### Prices
+
+Coins are `CRYPTO` assets quoted in USD, and Wealthfolio prices the common ones itself (Yahoo `BTC-USD`).
+If its providers return no quote at all within 6 hours (an obscure token), wf-sync switches the asset to
+`MANUAL` and writes its own price every run: DefiLlama by contract or mint for wallets, public exchange
+tickers (no keys) otherwise. An asset that had quotes and only went stale is left alone and logged.
+Symbols in `pricing.manual_symbols` are priced by wf-sync from the start (WBT is not on Yahoo).
+
+### Monobank
+
+- A card is a cash account: spending is `WITHDRAWAL`, income `DEPOSIT`, moves between your own cards and
+  into jars `TRANSFER_OUT` / `TRANSFER_IN`, so spending analytics count them as savings, not expenses.
+- Balances are own funds: the credit limit is subtracted.
+- The opening balance comes from the `balance` field of the earliest operation: a positive one is a
+  `CREDIT` (neither income nor spending), a negative one a `TRANSFER_OUT`.
+- After each import the balance is reconciled with the bank's. A difference (a hold that settled for
+  another amount, say) becomes an adjustment flagged _needs review_: `CREDIT` when there's more money,
+  `WITHDRAWAL` when there's less. (Wealthfolio's `ADJUSTMENT` type does not move cash.) A credit limit
+  that changed inside the history window can cause one false adjustment; delete it.
+- The API allows one request a minute: the first import takes a minute per 31 days of history per card,
+  later runs one request per card.
+
+## Your own connector (plugin)
+
+Copy [`plugins/example-bank.ts`](plugins/example-bank.ts):
+
+```ts
+import { Connector, HoldingsSnapshot, type AccountData } from 'wf-sync';
+
+export default class MyBank extends Connector {
+	async fetch(): Promise<AccountData[]> {
+		const data = await this.http<{ balance: number }>('https://api.my-bank.com/balance', {
+			headers: { authorization: `Bearer ${this.opt('token')}` },
+		});
+		const snap = new HoldingsSnapshot();
+		snap.addCash('EUR', String(data.balance));
+		return [
+			{
+				key: this.id,
+				name: this.displayName('My bank'),
+				currency: 'EUR',
+				accountType: 'CASH',
+				holdings: snap,
+			},
+		];
+	}
+}
+```
+
+```yaml
+plugins_dir: ./plugins
+connectors:
+  - id: my-bank
+    type: ./my-bank.ts # or ./my-bank.ts#NamedExport
+    token: ${MY_BANK_TOKEN} # this.opt('token')
+```
+
+`import … from 'wf-sync'` works from any folder: wf-sync registers the module before loading plugins. It
+exports `Connector`, `HoldingsSnapshot`, decimal helpers (`add`, `fromUnits`, …), `requestJson` and
+`rpcBatch`. Return a snapshot (`holdings`: positions + cash) or operations (`transactions` +
+`currentBalance`); the engine does accounts, assets, prices, dedupe, opening balance and reconciliation.
+`this.stored(key, init)` is persistent per-connector state (cursors); `onSynced()` runs after a successful
+write.
+
+## Limits
+
+- **Cost basis.** Exchange snapshots don't carry it, so per-position gains in Wealthfolio are not real
+  P&L. Total value and its history are correct; history starts with the first run.
+- **EVM tokens.** RPC can't enumerate holdings without an indexer: the built-in stablecoins, WETH, WBTC,
+  ARB, OP and whatever is listed under `tokens` are read. That also keeps airdropped spam out.
+- **Public RPCs** (Solana, some EVM chains) are rate-limited; set your own free endpoint (Helius, Alchemy,
+  QuickNode). An RPC error fails the connector instead of writing a zero snapshot.
+
+## Development
+
+```bash
+pnpm exec moon run wf-sync:lint wf-sync:format wf-sync:typecheck wf-sync:test
+```
+
+Tests run every connector and the engine against mocked APIs (exchanges, EVM/Solana RPC, Monobank,
+DefiLlama, Wealthfolio). The engine was also checked against a locally built Wealthfolio server.
+
+```text
+src/
+  cli.ts            run / daemon / dry-run / check
+  engine.ts         one sync pass
+  wealthfolio.ts    Wealthfolio REST client
+  pricing.ts        prices: stablecoins → DefiLlama → exchange tickers
+  connectors/       binance/okx/kraken/whitebit (ccxt), evm, solana, monobank, manual
+  sdk.ts            the 'wf-sync' module plugins import
+plugins/            your connectors
+```

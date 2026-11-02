@@ -1,0 +1,10 @@
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: 'typescript'
+layer: 'application'
+
+# The canon looks at src/ and tests/; plugins/ holds the example connector users copy.
+fileGroups:
+  sources:
+    - 'src/**/*'
+    - 'plugins/**/*'
