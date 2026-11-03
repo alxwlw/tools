@@ -8,12 +8,14 @@ savings plans stay current without manual entry. It talks to Wealthfolio through
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | Binance, OKX, Kraken, WhiteBIT (and any other [ccxt](https://github.com/ccxt/ccxt) exchange) | a **Holdings** account: a balance snapshot every run, Spot + Funding + Earn          |
 | EVM and Solana wallets, through the [Zerion API](https://developers.zerion.io)               | a **Holdings** account per address: every token that has a price, on every chain     |
+| TRON wallets, through the public TronGrid API                                                | a **Holdings** account per address: TRX, staked TRX, USDT and USDC                   |
+| Bitcoin addresses, through the public mempool.space API                                      | a **Holdings** account per address                                                   |
 | Monobank cards                                                                               | a **Transactions** cash account: each operation imported once, exact opening balance |
 | Monobank jars ("банки")                                                                      | a savings account with a balance snapshot                                            |
 | Cash and anything without an API                                                             | the `manual` connector: amounts from the config                                      |
 | Anything else                                                                                | your own plugin, one `.ts` file                                                      |
 
-Exchange keys are read-only. Wallets need a public address and a free Zerion API key.
+Exchange keys are read-only. Wallets need only a public address; EVM and Solana also a free Zerion API key.
 
 ## Why a service and not a Wealthfolio addon
 
@@ -167,6 +169,11 @@ write.
   the free plan allows 2000 a day. An API error fails the connector instead of writing a zero snapshot.
 - **What a wallet account leaves out.** Tokens with no price, and rent locked in Solana token accounts. Debt
   isn't counted either, only logged as a warning, and Zerion has no protocol positions for Solana.
+- **TRON and Bitcoin.** TRON reads TRX, USDT and USDC only: its other token balances are mostly airdropped
+  spam. Bitcoin reads the listed addresses only, so a wallet that moves change to new addresses of its own
+  holds more than they show.
+- **Protocol positions can overlap.** A receipt token in the wallet (Aave's aToken, say) counts beside its
+  deposit. Debt isn't subtracted.
 - **Unverified tokens** that have a price show with part of their contract in the symbol
   (`SOL-USDC-8HOQNE`), so a fake USDT can't count as cash. Their value is whatever Zerion reports.
 
@@ -176,8 +183,8 @@ write.
 pnpm exec moon run wf-sync:lint wf-sync:format wf-sync:typecheck wf-sync:test
 ```
 
-Tests run every connector and the engine against mocked APIs (exchanges, Zerion, Monobank,
-DefiLlama, Wealthfolio). The engine was also checked against a locally built Wealthfolio server.
+Tests run every connector and the engine against mocked APIs (exchanges, Zerion, TronGrid, mempool.space,
+Monobank, DefiLlama, Wealthfolio). The engine was also checked against a locally built Wealthfolio server.
 
 ```text
 src/
@@ -185,7 +192,7 @@ src/
   engine.ts         one sync pass
   wealthfolio.ts    Wealthfolio REST client
   pricing.ts        prices: stablecoins → the source's own → DefiLlama → exchange tickers
-  connectors/       binance/okx/kraken/whitebit (ccxt), zerion, monobank, manual
+  connectors/       binance/okx/kraken/whitebit (ccxt), zerion, tron, bitcoin, monobank, manual
   sdk.ts            the 'wf-sync' module plugins import
 plugins/            your connectors
 ```

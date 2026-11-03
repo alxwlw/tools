@@ -113,6 +113,8 @@ const BUILTIN: Record<string, () => Promise<ConnectorClass>> = {
 	whitebit: async () => (await import('./exchanges.ts')).ExchangeConnector,
 	ccxt: async () => (await import('./exchanges.ts')).ExchangeConnector,
 	zerion: async () => (await import('./zerion.ts')).ZerionConnector,
+	tron: async () => (await import('./tron.ts')).TronConnector,
+	bitcoin: async () => (await import('./bitcoin.ts')).BitcoinConnector,
 	monobank: async () => (await import('./monobank.ts')).MonobankConnector,
 	manual: async () => (await import('./manual.ts')).ManualConnector,
 };
