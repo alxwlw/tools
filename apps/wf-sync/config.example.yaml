@@ -43,6 +43,15 @@ connectors:
     secret: ${WHITEBIT_SECRET}
     # wallets: [spot, main]
 
+  # Any other ccxt exchange. Without `wallets` it reads only ccxt's default wallet.
+  - id: bybit
+    type: ccxt
+    exchange: bybit
+    name: Bybit
+    api_key: ${BYBIT_API_KEY}
+    secret: ${BYBIT_SECRET}
+    wallets: [unified, funding]
+
   # --- on-chain wallets: public addresses and a free key from https://developers.zerion.io ---
   - id: wallets
     type: zerion
