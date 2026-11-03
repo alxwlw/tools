@@ -165,8 +165,13 @@ write.
 
 - **Cost basis.** Exchange snapshots don't carry it, so per-position gains in Wealthfolio are not real
   P&L. Total value and its history are correct; history starts with the first run.
-- **Wallets depend on Zerion.** It sees the addresses you track. A run makes one request per address, and
-  the free plan allows 2000 a day. An API error fails the connector instead of writing a zero snapshot.
+- **Wallets depend on Zerion.** It sees the addresses you track. A run makes one request per address. An API
+  error fails the connector instead of writing a zero snapshot, so its accounts keep the last one.
+- **Zerion's quota limits how often a run can go.** EVM addresses ask for protocol positions, and those requests
+  get only a quarter of the daily quota. The price list says 2000 a day for a free key, but a key can be on the
+  `demo` tier: 300 a day, 75 of them for EVM, one a second. Keep `EVM addresses × runs a day` under that limit:
+  six addresses on a demo key need `interval_minutes: 180`, with room left for manual runs. Past the limit EVM
+  connectors get 429 until midnight UTC. The `ratelimit-*` headers of any answer show a key's real limits.
 - **What a wallet account leaves out.** Tokens with no price, and rent locked in Solana token accounts. Debt
   isn't counted either, only logged as a warning, and Zerion has no protocol positions for Solana.
 - **TRON and Bitcoin.** TRON reads TRX, USDT and USDC only: its other token balances are mostly airdropped
