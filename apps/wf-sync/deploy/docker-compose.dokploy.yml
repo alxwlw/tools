@@ -28,7 +28,7 @@ services:
       - wealthfolio-data:/data
 
   wf-sync:
-    image: ghcr.io/alxwlw/wf-sync:main@sha256:4cc76cf88353cd880824b92ca15fc367e6f2373a193c53f8780d40579d3efb94
+    image: ghcr.io/alxwlw/wf-sync:main@sha256:0265b2d82dff5cfcea37459f42cab96a12a48c4431469fe86f8a0299dbf97bdc
     restart: unless-stopped
     logging: *logging
     depends_on: [wealthfolio]
