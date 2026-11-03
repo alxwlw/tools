@@ -33,7 +33,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { requestJson, type RequestOptions } from '../http.ts';
 import { path, str } from '../json.ts';
 import type { Logger } from '../log.ts';
-import type { AccountData } from '../models.ts';
+import type { AccountData, SpendingRule } from '../models.ts';
 
 export interface ConnectorContext {
 	/** Persistent object private to this connector; saved after every run. */
@@ -96,6 +96,12 @@ export abstract class Connector {
 
 	/** Optional: called after everything fetch() returned was written to Wealthfolio (commit cursors here). */
 	onSynced?(): void | Promise<void>;
+
+	/**
+	 * Optional: rules for Wealthfolio's spending reports. A connector that returns some has its
+	 * transaction accounts joined to the reports once, and its rules seeded once per version.
+	 */
+	spendingRules?(): SpendingRule[];
 }
 
 export type ConnectorClass = new (

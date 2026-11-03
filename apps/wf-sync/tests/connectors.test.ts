@@ -3,6 +3,7 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { resolveConnector } from '../src/connectors/base.ts';
 import { BitcoinConnector } from '../src/connectors/bitcoin.ts';
 import { ExchangeConnector } from '../src/connectors/exchanges.ts';
+import { MCC_RULES, mccTag } from '../src/connectors/mcc.ts';
 import { MonobankConnector } from '../src/connectors/monobank.ts';
 import { TronConnector } from '../src/connectors/tron.ts';
 import { ZerionConnector } from '../src/connectors/zerion.ts';
@@ -610,6 +611,88 @@ describe('monobank', () => {
 			ctx(),
 		);
 		await expect(c.fetch()).rejects.toThrow(/403/);
+	});
+
+	test('a note ends with its MCC, for the rules that sort it into a category', async () => {
+		const c = new MonobankConnector(
+			'mono',
+			'monobank',
+			undefined,
+			{ token: 'tok', api_url: server.url, min_interval_ms: 0, accounts: ['1234'] },
+			ctx(),
+		);
+		const [card] = await c.fetch();
+		expect(card!.transactions![0]!.description).toBe('Shop 0 [mcc 5411]');
+		expect(c.spendingRules()).toBe(MCC_RULES);
+	});
+
+	test('categories: false leaves the notes and the reports alone', async () => {
+		const c = new MonobankConnector(
+			'mono',
+			'monobank',
+			undefined,
+			{
+				token: 'tok',
+				api_url: server.url,
+				min_interval_ms: 0,
+				accounts: ['1234'],
+				categories: false,
+			},
+			ctx(),
+		);
+		const [card] = await c.fetch();
+		expect(card!.transactions![0]!.description).toBe('Shop 0');
+		expect(c.spendingRules()).toEqual([]);
+	});
+});
+
+describe('mcc rules', () => {
+	const categories = (note: string) =>
+		MCC_RULES.filter((r) => new RegExp(r.pattern).test(note)).map((r) => r.categoryId);
+	const of = (mcc: number) => categories(`Shop ${mccTag(mcc)}`);
+
+	test('a code lands in its category', () => {
+		expect(of(5411)).toEqual(['cat_groceries']);
+		expect(of(5812)).toEqual(['cat_food_restaurants']);
+		expect(of(4121)).toEqual(['cat_transport_rideshare']);
+		expect(of(5912)).toEqual(['cat_health_pharmacy']);
+		expect(of(5734)).toEqual(['cat_bills_software']);
+		expect(of(3000)).toEqual(['cat_travel']);
+		expect(of(3999)).toEqual(['cat_travel']);
+	});
+
+	test('money moves stay uncategorized: they say nothing about what was bought', () => {
+		for (const mcc of [0, 4829, 6010, 6011, 6012, 6051, 6538, 6540]) expect(of(mcc)).toEqual([]);
+	});
+
+	test('no code belongs to two categories', () => {
+		for (let mcc = 0; mcc <= 9999; mcc++) expect(of(mcc).length).toBeLessThanOrEqual(1);
+	});
+
+	test('only the tag at the end of a note counts', () => {
+		expect(categories('Paid [mcc 5411] by mistake [mcc 4829]')).toEqual([]);
+		expect(categories('5411')).toEqual([]);
+	});
+
+	test("every target is a category Wealthfolio 3.12's database has", () => {
+		const seeded = new Set(
+			[
+				'housing housing_rent housing_utilities housing_insurance housing_maintenance housing_furnishing',
+				'groceries food food_restaurants food_coffee food_delivery food_alcohol',
+				'transport transport_gas transport_parking transport_public transport_rideshare',
+				'transport_maintenance transport_insurance',
+				'shopping shopping_clothing shopping_electronics shopping_home shopping_online',
+				'entertainment entertainment_streaming entertainment_movies entertainment_games',
+				'entertainment_hobbies entertainment_sports',
+				'health health_medical health_pharmacy health_dental health_vision health_fitness health_insurance',
+				'bills bills_phone bills_internet bills_subscriptions bills_software',
+				'personal education travel gifts fees fees_bank fees_atm fees_interest fees_late other_expense',
+			]
+				.join(' ')
+				.split(' ')
+				.map((id) => `cat_${id}`),
+		);
+		for (const r of MCC_RULES) expect(seeded.has(r.categoryId)).toBe(true);
 	});
 });
 

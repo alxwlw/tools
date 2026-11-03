@@ -135,6 +135,7 @@ export class SyncEngine {
 			try {
 				for (const a of accounts) {
 					const accountId = await this.ensureAccount(a);
+					if (a.transactions) await this.joinSpendingReports(connector, accountId);
 					if (a.holdings) {
 						const holdings = [];
 						for (const p of a.holdings.positions) {
@@ -157,6 +158,7 @@ export class SyncEngine {
 					}
 					summary.accounts++;
 				}
+				await this.seedSpendingRules(connector);
 				await connector.onSynced?.();
 				summary.ok.push(connector.id);
 			} catch (e) {
@@ -262,6 +264,44 @@ export class SyncEngine {
 		this.wfAccounts.push(created);
 		this.state.accounts[a.key] = created.id;
 		return created.id;
+	}
+
+	// ---------------------------------------------------------------------------
+	// spending reports: a report without categories loses no money, so failures only warn
+
+	/**
+	 * Once per account and before its operations arrive: Wealthfolio applies its rules on
+	 * arrival, to accounts in the reports only. Taking one out in the UI later stays that way.
+	 */
+	private async joinSpendingReports(connector: Connector, accountId: string): Promise<void> {
+		if (!connector.spendingRules?.().length) return;
+		const joined = (this.state.connector(connector.id).spendingAccounts ??= {}) as Record<
+			string,
+			boolean
+		>;
+		if (joined[accountId]) return;
+		try {
+			const { accountIds } = await this.wf.spendingAccounts();
+			await this.wf.setSpendingAccounts([...new Set([...accountIds, accountId])]);
+			joined[accountId] = true;
+		} catch (e) {
+			this.log.warn(`[${connector.id}] could not join spending reports: ${errorMessage(e)}`);
+		}
+	}
+
+	/** Once per version of the rules, so a rule changed in the UI stays changed until then. */
+	private async seedSpendingRules(connector: Connector): Promise<void> {
+		const rules = connector.spendingRules?.() ?? [];
+		if (!rules.length) return;
+		const cstate = this.state.connector(connector.id);
+		const version = String(Bun.hash(JSON.stringify(rules)));
+		if (cstate.spendingRules === version) return;
+		try {
+			for (const rule of rules) await this.wf.upsertSpendingRule(rule);
+			cstate.spendingRules = version;
+		} catch (e) {
+			this.log.warn(`[${connector.id}] could not seed spending rules: ${errorMessage(e)}`);
+		}
 	}
 
 	private async ensureAsset(symbol: string, name?: string): Promise<AssetState> {

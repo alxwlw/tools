@@ -67,6 +67,7 @@ bun src/cli.ts check
 bun src/cli.ts run                # one pass; exit code 2 if a connector failed
 bun src/cli.ts daemon             # a pass every interval_minutes
 bun src/cli.ts dry-run            # fetch and print, write nothing
+bun src/cli.ts report Infra       # a top-level category per subcategory and month, as charged
 ```
 
 `-v` turns on debug logging; the config path is `-c path` or `WF_SYNC_CONFIG` (default `config.yaml`).
@@ -117,7 +118,20 @@ Symbols in `pricing.manual_symbols` are priced by wf-sync from the start (WBT is
   `WITHDRAWAL` when there's less. (Wealthfolio's `ADJUSTMENT` type does not move cash.) A credit limit
   that changed inside the history window can cause one false adjustment; delete it.
 - The API allows one request a minute: the first import takes a minute per 31 days of history per card,
-  later runs one request per card.
+  later runs one request per card. `history_days` is read by the first import only.
+- **Categories.** Each note ends with `[mcc 5411]`, because Wealthfolio's rules read notes and nothing else.
+  wf-sync adds its cards to the spending reports (`Insights` → `Spending`) once, and seeds one rule per
+  category in `Settings` → `Spending` → `Rules`. They sit below the priority a rule written by hand starts
+  from, so yours wins. A card you take out stays out, and a rule you edit stays edited until the table in
+  `connectors/mcc.ts` changes. Transfers, cash and other money moves stay `Uncategorized`: the code says
+  nothing about what the money bought. `categories: false` turns all of it off.
+- **Spending per vendor.** Add a top-level category with a subcategory per vendor, and a rule on each name.
+  Wealthfolio shows a subcategory's sum for any period, but a trend and the change against the prior period
+  only for the top level. `wf-sync report <category>` prints the rest: a vendor per row, a month per column, in
+  the currency charged. Rules apply to new operations by themselves; for existing ones press rerun on the
+  rules page.
+- **Amounts in the reports are approximate.** They're in the base currency, at one rate for the whole period,
+  so a dollar charge on a hryvnia card won't match its dollar price. Refunds count as income.
 
 ## Your own connector (plugin)
 

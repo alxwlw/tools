@@ -6,6 +6,7 @@
  *   wf-sync daemon   [--config config.yaml]   sync every interval_minutes
  *   wf-sync dry-run  [--config config.yaml]   fetch & print, write nothing
  *   wf-sync check    [--config config.yaml]   test each connector and the Wealthfolio login
+ *   wf-sync report <category>                 what a top-level category cost, per subcategory and month
  */
 
 import { parseArgs } from 'node:util';
@@ -15,10 +16,11 @@ import { buildConnectors, type RunSummary, SyncEngine } from './engine.ts';
 import { sleep } from './http.ts';
 import { errorMessage } from './json.ts';
 import { createLogger, setLevel } from './log.ts';
+import { spendingReport } from './report.ts';
 import { State } from './state.ts';
 import { WealthfolioClient } from './wealthfolio.ts';
 
-const USAGE = `Usage: wf-sync <run|daemon|dry-run|check> [--config path] [--verbose]`;
+const USAGE = `Usage: wf-sync <run|daemon|dry-run|check|report <category>> [--config path] [--verbose]`;
 
 async function main(): Promise<number> {
 	const { values, positionals } = parseArgs({
@@ -49,6 +51,16 @@ async function main(): Promise<number> {
 	switch (command) {
 		case 'check':
 			return check();
+		case 'report': {
+			const category = positionals[1];
+			if (!category) {
+				console.error(USAGE);
+				return 1;
+			}
+			await wf.login();
+			console.log(await spendingReport(wf, category));
+			return 0;
+		}
 		case 'dry-run': {
 			const engine = new SyncEngine(config, state, wf, log);
 			const built = await buildConnectors(config, state, log);

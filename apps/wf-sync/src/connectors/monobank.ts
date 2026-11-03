@@ -6,6 +6,7 @@
  *   history_days     — how far back the first import goes (default 31)
  *   accounts         — optional filter: list of account ids, IBANs or last 4 card digits
  *   jars             — sync jars ("банки") as savings accounts (default true)
+ *   categories       — sort card spending into Wealthfolio's categories by MCC (default true)
  *
  * Cards become TRANSACTIONS-mode cash accounts: every statement item is imported
  * once (WITHDRAWAL / DEPOSIT, or TRANSFER_* for moves between your own cards and
@@ -18,8 +19,14 @@
 import { fromUnits } from '../decimal.ts';
 import { HttpError, request, sleep } from '../http.ts';
 import { num } from '../json.ts';
-import { type AccountData, type CashTransaction, HoldingsSnapshot } from '../models.ts';
+import {
+	type AccountData,
+	type CashTransaction,
+	HoldingsSnapshot,
+	type SpendingRule,
+} from '../models.ts';
 import { Connector } from './base.ts';
+import { MCC_RULES, mccTag } from './mcc.ts';
 
 const API = 'https://api.monobank.ua';
 const MIN_INTERVAL_MS = 61_000;
@@ -92,6 +99,14 @@ export class MonobankConnector extends Connector {
 
 	private get minInterval(): number {
 		return this.optional<number>('min_interval_ms', MIN_INTERVAL_MS);
+	}
+
+	private get categories(): boolean {
+		return this.optional<boolean>('categories', true);
+	}
+
+	override spendingRules(): SpendingRule[] {
+		return this.categories ? MCC_RULES : [];
 	}
 
 	private async api<T>(path: string): Promise<T> {
@@ -207,12 +222,13 @@ export class MonobankConnector extends Connector {
 	): CashTransaction {
 		const isOwnTransfer =
 			(it.counterIban && this.ownIbans.has(it.counterIban)) || JAR_RE.test(it.description);
+		const note = [it.description, it.comment].filter(Boolean).join(' — ');
 		return {
 			id: it.id,
 			time: new Date(it.time * 1000),
 			amount: fromUnits(it.amount, 2),
 			currency,
-			description: [it.description, it.comment].filter(Boolean).join(' — '),
+			description: this.categories ? `${note} ${mccTag(it.mcc)}` : note,
 			balanceAfter: fromUnits(it.balance - acc.creditLimit, 2),
 			mcc: it.mcc,
 			metadata: {

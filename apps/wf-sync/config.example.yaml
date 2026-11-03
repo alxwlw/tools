@@ -65,9 +65,10 @@ connectors:
   - id: monobank
     type: monobank
     token: ${MONOBANK_TOKEN} # https://api.monobank.ua/ → "Отримати токен"
-    history_days: 31 # first import depth; each 31 days = 1 request/minute per card
+    history_days: 31 # first import only; each 31 days = 1 request/minute per card
     # accounts: ["1234"]              # only these cards (last 4 digits, IBAN or account id)
     # jars: true                      # jars ("банки") as savings accounts
+    # categories: true                # sort spending into Wealthfolio's categories by MCC
 
   # --- anything without an API --------------------------------------------------------------
   - id: cash
