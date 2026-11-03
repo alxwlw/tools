@@ -113,7 +113,7 @@ done
 unset wf_password wf_secret_key password_hash value
 
 echo 'Dokploy: writing compose, env and config.yaml'
-jq -Rs --arg id "$compose_id" '{composeId: $id, composeFile: ., sourceType: "raw", composeType: "docker-compose"}' <"$COMPOSE_FILE" |
+jq -Rs --arg id "$compose_id" '{composeId: $id, composeFile: ., sourceType: "raw", composeType: "docker-compose"}' "$COMPOSE_FILE" |
 	post compose.update >/dev/null
 printf '%s' "$env_block" | jq -Rs --arg id "$compose_id" '{composeId: $id, env: .}' | post compose.saveEnvironment >/dev/null
 stored=$(get "compose.one?composeId=$compose_id")
@@ -125,10 +125,10 @@ mount_id=$(jq -r '[(.mounts // [])[] | select(.type == "file" and .filePath == "
 last_deployment=$(jq -r '(.deployments // []) | sort_by(.createdAt) | last // empty | .deploymentId' <<<"$stored")
 unset stored
 if [ -z "$mount_id" ]; then
-	jq -Rs --arg id "$compose_id" '{type: "file", filePath: "config.yaml", mountPath: "/app/config.yaml", content: ., serviceId: $id, serviceType: "compose"}' <"$CONFIG_FILE" |
+	jq -Rs --arg id "$compose_id" '{type: "file", filePath: "config.yaml", mountPath: "/app/config.yaml", content: ., serviceId: $id, serviceType: "compose"}' "$CONFIG_FILE" |
 		post mounts.create >/dev/null
 else
-	jq -Rs --arg id "$mount_id" '{mountId: $id, content: .}' <"$CONFIG_FILE" | post mounts.update >/dev/null
+	jq -Rs --arg id "$mount_id" '{mountId: $id, content: .}' "$CONFIG_FILE" | post mounts.update >/dev/null
 fi
 
 echo "Dokploy: deploying $app_name"
