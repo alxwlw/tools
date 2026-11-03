@@ -5,7 +5,8 @@
  *   address | addresses   — T… addresses (one Wealthfolio account each)
  *
  * The token list is explicit on purpose: TRC-20 balances are full of airdropped spam.
- * Without a key TronGrid answers 429 to quick requests; the HTTP layer waits and retries.
+ * Without a key TronGrid suspends the caller after a quick request, and keeps answering 429 for
+ * up to 7 s when measured: longer than the default retries wait.
  */
 
 import { fromUnits, isZero } from '../decimal.ts';
@@ -34,6 +35,7 @@ export class TronConnector extends Connector {
 		for (const address of addresses) {
 			const res = await this.http(
 				`${this.optional<string>('api_url', API)}/v1/accounts/${address}`,
+				{ retries: 4 },
 			);
 			if (path(res, 'success') !== true) throw new Error(`[${this.id}] TronGrid: no account data`);
 			// An address that was never activated has no record: an empty wallet.
