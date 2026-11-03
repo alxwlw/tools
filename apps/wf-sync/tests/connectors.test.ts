@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 
 import { resolveConnector } from '../src/connectors/base.ts';
 import { BitcoinConnector } from '../src/connectors/bitcoin.ts';
@@ -294,11 +294,16 @@ describe('tron', () => {
 	const address = 'TFakeAddress1111111111111111111111';
 	const USDT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 	let answer: { status: number; body: unknown };
-	const api = mockServer((_req, url) =>
-		url.pathname === `/v1/accounts/${address}`
+	let suspended = 0;
+	const api = mockServer((_req, url) => {
+		if (suspended > 0) {
+			suspended--;
+			return json({ Error: 'request rate exceeded the allowed_rps(1)' }, 429);
+		}
+		return url.pathname === `/v1/accounts/${address}`
 			? json(answer.body, answer.status)
-			: json({ success: false }, 404),
-	);
+			: json({ success: false }, 404);
+	});
 	afterAll(() => api.stop());
 	const connector = (more: Record<string, unknown> = {}, name?: string) =>
 		new TronConnector(
@@ -342,6 +347,28 @@ describe('tron', () => {
 		const [acc] = await connector().fetch();
 		expect(acc!.name).toBe('TRON TFak…1111');
 		expect(acc!.holdings!.positions).toEqual([]);
+	});
+
+	test('waits out a TronGrid suspension, which lasted up to 7 s when measured', async () => {
+		answer = { status: 200, body: { success: true, data: [] } };
+		suspended = 4;
+		const waits: number[] = [];
+		const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+			run: () => void,
+			ms: number,
+		) => {
+			waits.push(ms);
+			run();
+			return 0;
+		}) as never);
+		try {
+			const [acc] = await connector().fetch();
+			expect(acc!.holdings!.positions).toEqual([]);
+			expect(waits.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThan(7000);
+		} finally {
+			timer.mockRestore();
+			suspended = 0;
+		}
 	});
 
 	test('an unsuccessful answer fails the connector instead of writing a zero snapshot', async () => {
