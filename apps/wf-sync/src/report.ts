@@ -73,11 +73,14 @@ function addCharge(
 ): void {
 	const assignment = arr(path(item, 'assignments')).find((a) => path(a, 'taxonomyId') === TAXONOMY);
 	const name = names.get(str(path(assignment, 'categoryId')) ?? '') ?? fallback;
-	const charged = str(path(item, 'metadata', 'operationAmount'));
+	// A foreign charge stays in the vendor's currency. In the card's own currency what left the
+	// card can differ from the bank's operation amount, and only the former matches the statement.
+	const card = str(path(item, 'currency')) ?? '?';
+	const vendor = str(path(item, 'metadata', 'operationCurrency'));
+	const charged =
+		vendor && vendor !== card ? str(path(item, 'metadata', 'operationAmount')) : undefined;
 	const amount = abs(charged ?? str(path(item, 'amount')) ?? '0');
-	const currency =
-		(charged && str(path(item, 'metadata', 'operationCurrency'))) ||
-		(str(path(item, 'currency')) ?? '?');
+	const currency = charged ? vendor! : card;
 	const month = (str(path(item, 'activityDate')) ?? '').slice(0, 7);
 
 	const key = `${currency} ${name}`;

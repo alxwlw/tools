@@ -31,6 +31,7 @@ import { MCC_RULES, mccTag } from './mcc.ts';
 const API = 'https://api.monobank.ua';
 const MIN_INTERVAL_MS = 61_000;
 const MAX_WINDOW_S = 31 * 24 * 3600; // API limit: 31 days + 1 hour
+const IDLE_LOOKBACK_S = 7 * 24 * 3600; // well inside one window, so an idle card costs one request
 const PAGE_LIMIT = 500;
 
 export const CURRENCIES: Record<number, string> = {
@@ -158,7 +159,9 @@ export class MonobankConnector extends Connector {
 			const from = cursors[acc.id] ? cursors[acc.id]! - 3600 : now - historyDays * 86400;
 			const items = await this.statement(acc.id, from, now);
 			const latest = items.reduce((m, it) => Math.max(m, it.time), cursors[acc.id] ?? 0);
-			if (latest) this.pendingCursors[acc.id] = latest;
+			// Everything up to now was read. Without a floor an idle card reads back to its last
+			// operation, or its whole history, every pass, at one request a minute.
+			this.pendingCursors[acc.id] = Math.max(latest, now - IDLE_LOOKBACK_S);
 
 			out.push({
 				key: `${this.id}:${acc.id}`,

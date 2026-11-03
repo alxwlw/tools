@@ -77,7 +77,11 @@ bun src/cli.ts report Infra       # a top-level category per subcategory and mon
 - **Binance:** API Management → Create API → only _Enable Reading_. Earn is read with the same key.
 - **OKX:** API → Create → _Read_ only, set a passphrase.
 - **Kraken:** Settings → API → _Query Funds_ and _Query Ledger Entries_.
-- **WhiteBIT:** API keys → read-only.
+- **WhiteBIT:** API keys → read-only: _Wallet balance and history_, _Trade balance and order history_.
+- **Bybit:** API → System-generated → _Read-Only_, and tick _Positions_, _Trade_ (SPOT), _Account Transfer_ and
+  _Earn Products_. `Read-Only` alone opens no balances: the funding wallet wants _Account Transfer_, and
+  `wallet-balance` opened with _Positions_ and _Trade_ ticked together (which of them it needs isn't documented).
+  ccxt blames its account type check for any such refusal (`10005`); the check is not the cause.
 - **Monobank:** https://api.monobank.ua/ → "Отримати токен" (confirmed in the app).
 - **Zerion:** https://developers.zerion.io → create a key in the dashboard.
 

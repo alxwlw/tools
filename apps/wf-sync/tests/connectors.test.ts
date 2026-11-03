@@ -552,6 +552,47 @@ describe('monobank', () => {
 		expect(state.cursors.acc1).toBe(items[2]!.time);
 	});
 
+	test('an idle card costs one request on the next pass', async () => {
+		const old = now - 200 * 86400;
+		let requests: Record<string, number> = {};
+		const idle = mockServer((_req, url) => {
+			if (url.pathname === '/personal/client-info') {
+				return json({
+					accounts: ['empty', 'stale'].map((id) => ({
+						id,
+						balance: 0,
+						creditLimit: 0,
+						type: 'white',
+						currencyCode: 980,
+						maskedPan: [`444111******${id}`],
+						iban: id,
+					})),
+					jars: [],
+				});
+			}
+			const [, , , id, from, to] = url.pathname.split('/');
+			requests[id!] = (requests[id!] ?? 0) + 1;
+			const holdsTheOldOne = id === 'stale' && Number(from) <= old && old <= Number(to);
+			return json(holdsTheOldOne ? [{ ...items[0]!, id: 'old', time: old }] : []);
+		});
+		const c = new MonobankConnector(
+			'mono',
+			'monobank',
+			undefined,
+			{ token: 'tok', api_url: idle.url, min_interval_ms: 0, history_days: 308 },
+			ctx({}),
+		);
+
+		await c.fetch();
+		expect(requests.empty).toBeGreaterThan(1);
+		c.onSynced();
+
+		requests = {};
+		await c.fetch();
+		idle.stop();
+		expect(requests).toEqual({ empty: 1, stale: 1 });
+	});
+
 	test("same-second operations keep the API's order", async () => {
 		const t = now - 100;
 		const srv = mockServer((_req, url) => {

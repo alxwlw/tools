@@ -84,6 +84,15 @@ describe('spending report', () => {
 		expect(lines(table)[2]).toEqual(['GitHub', 'UAH', '168.50', '168.50']);
 	});
 
+	test("a charge in the card's own currency shows what left the card", async () => {
+		const table = await spendingReport(
+			source([charge('cat_infra_github', '2026-03-01', '1010', 'UAH', '-1000', 'UAH')]),
+			'Infra',
+			NOW,
+		);
+		expect(lines(table)[2]).toEqual(['GitHub', 'UAH', '1010.00', '1010.00']);
+	});
+
 	test('a charge filed on the parent itself gets a row under the parent name', async () => {
 		const table = await spendingReport(
 			source([charge('cat_infra', '2026-03-01', '10', 'USD')]),
