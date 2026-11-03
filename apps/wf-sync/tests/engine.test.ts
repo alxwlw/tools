@@ -8,7 +8,12 @@ import type { Config } from '../src/config.ts';
 import { Connector } from '../src/connectors/base.ts';
 import { SyncEngine } from '../src/engine.ts';
 import { createLogger } from '../src/log.ts';
-import { type AccountData, type CashTransaction, HoldingsSnapshot } from '../src/models.ts';
+import {
+	type AccountData,
+	type CashTransaction,
+	HoldingsSnapshot,
+	type SpendingRule,
+} from '../src/models.ts';
 import { State } from '../src/state.ts';
 import { WealthfolioClient } from '../src/wealthfolio.ts';
 import { ctx, json, mockServer } from './helpers.ts';
@@ -22,9 +27,12 @@ function fakeWealthfolio() {
 		activities: [] as any[],
 		quotes: [] as any[],
 		modes: [] as any[],
+		spending: { enabled: true, accountIds: ['enrolled-by-hand'] },
+		rules: [] as any[],
 	};
 	let n = 0;
 	let failNextBulk = false;
+	let failSpending = false;
 	const server = mockServer(async (req, url) => {
 		const p = url.pathname.replace('/api/v1', '');
 		if (p === '/auth/status') return json({ requiresPassword: true });
@@ -77,6 +85,13 @@ function fakeWealthfolio() {
 				meta: { totalRowCount: rows.length },
 			});
 		}
+		if (p.startsWith('/spending/') && failSpending) return json({ message: 'no such route' }, 404);
+		if (p === '/spending/settings' && req.method === 'GET') return json(db.spending);
+		if (p === '/spending/settings' && req.method === 'PUT') {
+			Object.assign(db.spending, body);
+			return json(db.spending);
+		}
+		if (p === '/spending/rules/upsert') return (db.rules.push(body), json(body));
 		if (p === '/market-data/quotes/latest') return json({});
 		if (p === '/market-data/sync') return new Response(null, { status: 200 });
 		if (p.startsWith('/market-data/quotes/'))
@@ -85,7 +100,12 @@ function fakeWealthfolio() {
 			return (db.modes.push({ id: p.split('/').pop(), ...(body as object) }), json({}));
 		return json({ error: `unhandled ${req.method} ${p}` }, 404);
 	});
-	return { ...server, db, failBulkOnce: () => (failNextBulk = true) };
+	return {
+		...server,
+		db,
+		failBulkOnce: () => (failNextBulk = true),
+		failSpending: (fail: boolean) => (failSpending = fail),
+	};
 }
 
 const llama = mockServer((_req, url) => {
@@ -115,6 +135,13 @@ class StaticConnector extends Connector {
 	}
 	override onSynced() {
 		this.synced++;
+	}
+}
+
+class CategorizingConnector extends StaticConnector {
+	rules: SpendingRule[] = [{ id: 'r1', name: 'One', pattern: 'x$', categoryId: 'cat_groceries' }];
+	override spendingRules() {
+		return this.rules;
 	}
 }
 
@@ -399,5 +426,114 @@ describe('engine', () => {
 			console.log = orig;
 		}
 		expect(wf.calls.length).toBe(before);
+	});
+
+	describe('spending reports', () => {
+		const card = (key: string): AccountData => ({
+			key,
+			name: key,
+			currency: 'UAH',
+			accountType: 'CASH',
+			transactions: [
+				{
+					id: `${key}-1`,
+					time: new Date('2026-01-10T10:00:00Z'),
+					amount: '-5',
+					currency: 'UAH',
+					balanceAfter: '95',
+				},
+			],
+		});
+		const jar = (key: string): AccountData => ({
+			key,
+			name: key,
+			currency: 'UAH',
+			accountType: 'CASH',
+			holdings: new HoldingsSnapshot(),
+		});
+		const accountId = (key: string) => wf.db.accounts.find((a) => a.providerAccountId === key).id;
+		const run = (c: Connector) => new SyncEngine(config, state, client, log).run([c]);
+		const connector = (id: string) => new CategorizingConnector(id, 'x', undefined, {}, ctx());
+
+		test('a card joins the reports before its operations arrive, a jar and others stay out', async () => {
+			const c = connector('cat1');
+			c.accounts = [card('cat1-card'), jar('cat1-jar')];
+			const plain = new StaticConnector('cat1-plain', 'x', undefined, {}, ctx());
+			plain.accounts = [card('cat1-plain-card')];
+			const from = wf.calls.length;
+			await run(c);
+			await run(plain);
+
+			expect(wf.db.spending.accountIds).toContain('enrolled-by-hand');
+			expect(wf.db.spending.accountIds).toContain(accountId('cat1-card'));
+			expect(wf.db.spending.accountIds).not.toContain(accountId('cat1-jar'));
+			expect(wf.db.spending.accountIds).not.toContain(accountId('cat1-plain-card'));
+
+			const paths = wf.calls.slice(from).map((x) => `${x.method} ${x.path}`);
+			const enrol = paths.indexOf('PUT /api/v1/spending/settings');
+			const firstImport = paths.indexOf('POST /api/v1/activities/bulk');
+			expect(enrol).toBeGreaterThan(-1);
+			expect(enrol).toBeLessThan(firstImport);
+		});
+
+		test('rules are seeded as low-priority regex rules, after the import', async () => {
+			const c = connector('cat2');
+			c.accounts = [card('cat2-card')];
+			const from = wf.calls.length;
+			await run(c);
+			const rule = wf.db.rules.at(-1);
+			expect(rule).toEqual({
+				id: 'r1',
+				name: 'One',
+				pattern: 'x$',
+				categoryId: 'cat_groceries',
+				matchType: 'regex',
+				taxonomyId: 'spending_categories',
+				activityType: 'WITHDRAWAL',
+				priority: -100,
+				isGlobal: true,
+			});
+			const paths = wf.calls.slice(from).map((x) => x.path);
+			expect(paths.indexOf('/api/v1/spending/rules/upsert')).toBeGreaterThan(
+				paths.indexOf('/api/v1/activities/bulk'),
+			);
+		});
+
+		test('later runs leave what you changed in the UI, until the rule table changes', async () => {
+			const c = connector('cat3');
+			c.accounts = [card('cat3-card')];
+			await run(c);
+			const rules = wf.db.rules.length;
+			wf.db.spending.accountIds = wf.db.spending.accountIds.filter(
+				(a) => a !== accountId('cat3-card'),
+			);
+
+			await run(c);
+			expect(wf.db.spending.accountIds).not.toContain(accountId('cat3-card'));
+			expect(wf.db.rules.length).toBe(rules);
+
+			c.rules = [{ id: 'r1', name: 'One', pattern: 'y$', categoryId: 'cat_travel' }];
+			await run(c);
+			expect(wf.db.rules.length).toBe(rules + 1);
+			expect(wf.db.rules.at(-1).pattern).toBe('y$');
+		});
+
+		test('a failure only warns: the balances still land, and the next run tries again', async () => {
+			const c = connector('cat4');
+			c.accounts = [card('cat4-card')];
+			wf.failSpending(true);
+			const failed = await run(c);
+			wf.failSpending(false);
+			expect(failed.failed).toEqual([]);
+			expect(failed.ok).toEqual(['cat4']);
+			expect(c.synced).toBe(1);
+			expect(wf.db.activities.some((a) => a.sourceRecordId === 'cat4-card-1')).toBe(true);
+			expect(wf.db.spending.accountIds).not.toContain(accountId('cat4-card'));
+			const rules = wf.db.rules.length;
+
+			await run(c);
+			expect(wf.db.spending.accountIds).toContain(accountId('cat4-card'));
+			expect(wf.db.rules.length).toBe(rules + 1);
+		});
 	});
 });

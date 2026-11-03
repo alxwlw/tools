@@ -15,4 +15,5 @@ export {
 	type CashTransaction,
 	HoldingsSnapshot,
 	type Position,
+	type SpendingRule,
 } from './models.ts';

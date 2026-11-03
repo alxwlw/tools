@@ -3,6 +3,7 @@
 import { HttpError, request } from './http.ts';
 import { arr, path, str } from './json.ts';
 import type { Logger } from './log.ts';
+import type { SpendingRule } from './models.ts';
 
 export interface WfAccount {
 	id: string;
@@ -145,6 +146,27 @@ export class WealthfolioClient {
 			true,
 			false,
 		);
+	}
+
+	// --- spending reports -------------------------------------------------------
+	spendingAccounts(): Promise<{ accountIds: string[] }> {
+		return this.call('GET', '/spending/settings');
+	}
+
+	setSpendingAccounts(accountIds: string[]): Promise<unknown> {
+		return this.call('PUT', '/spending/settings', { accountIds });
+	}
+
+	/** Below the 0 that the rule form starts from, so a rule written by hand wins. */
+	upsertSpendingRule(rule: SpendingRule): Promise<unknown> {
+		return this.call('POST', '/spending/rules/upsert', {
+			...rule,
+			matchType: 'regex',
+			taxonomyId: 'spending_categories',
+			activityType: 'WITHDRAWAL',
+			priority: -100,
+			isGlobal: true,
+		});
 	}
 
 	// --- assets -----------------------------------------------------------------

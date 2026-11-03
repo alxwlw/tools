@@ -84,5 +84,13 @@ export interface AccountData {
 	currentBalance?: Dec;
 }
 
+/** A Wealthfolio rule that sorts spending into a category when a regex matches the note. */
+export interface SpendingRule {
+	id: string;
+	name: string;
+	pattern: string;
+	categoryId: string;
+}
+
 export const trackingMode = (a: AccountData): 'HOLDINGS' | 'TRANSACTIONS' =>
 	a.transactions ? 'TRANSACTIONS' : 'HOLDINGS';
