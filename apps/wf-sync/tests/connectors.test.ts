@@ -1,8 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 
 import { resolveConnector } from '../src/connectors/base.ts';
+import { BitcoinConnector } from '../src/connectors/bitcoin.ts';
 import { ExchangeConnector } from '../src/connectors/exchanges.ts';
 import { MonobankConnector } from '../src/connectors/monobank.ts';
+import { TronConnector } from '../src/connectors/tron.ts';
 import { ZerionConnector } from '../src/connectors/zerion.ts';
 import { createLogger } from '../src/log.ts';
 import { PriceOracle } from '../src/pricing.ts';
@@ -283,6 +285,150 @@ describe('zerion', () => {
 
 	test('the connector is built in', async () => {
 		expect(await resolveConnector('zerion')).toBe(ZerionConnector);
+	});
+});
+
+// ---------------------------------------------------------------- TRON
+
+describe('tron', () => {
+	const address = 'TFakeAddress1111111111111111111111';
+	const USDT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+	let answer: { status: number; body: unknown };
+	const api = mockServer((_req, url) =>
+		url.pathname === `/v1/accounts/${address}`
+			? json(answer.body, answer.status)
+			: json({ success: false }, 404),
+	);
+	afterAll(() => api.stop());
+	const connector = (more: Record<string, unknown> = {}, name?: string) =>
+		new TronConnector(
+			'tr',
+			'tron',
+			name,
+			{ addresses: [address], api_url: api.url, ...more },
+			ctx(),
+		);
+
+	test('TRX with its staked part and listed tokens; airdropped tokens are ignored', async () => {
+		answer = {
+			status: 200,
+			body: {
+				success: true,
+				data: [
+					{
+						balance: 173036824,
+						frozenV2: [{ amount: 5000000 }, { type: 'ENERGY' }],
+						trc20: [{ [USDT]: '488216' }, { TSpamToken1111111111111111111111111: '9999999' }],
+					},
+				],
+			},
+		};
+		const [acc] = await connector({}, 'hot').fetch();
+		expect(acc).toMatchObject({
+			key: `tr:${address}`,
+			name: 'hot TFak…1111',
+			currency: 'USD',
+			accountType: 'CRYPTOCURRENCY',
+			group: 'Wallets',
+		});
+		expect(acc!.holdings!.positions).toMatchObject([
+			{ symbol: 'TRX', quantity: '178.036824', priceRef: 'coingecko:tron' },
+			{ symbol: 'USDT', quantity: '0.488216' },
+		]);
+	});
+
+	test('an address that was never activated is an empty wallet, not an error', async () => {
+		answer = { status: 200, body: { success: true, data: [] } };
+		const [acc] = await connector().fetch();
+		expect(acc!.name).toBe('TRON TFak…1111');
+		expect(acc!.holdings!.positions).toEqual([]);
+	});
+
+	test('an unsuccessful answer fails the connector instead of writing a zero snapshot', async () => {
+		answer = { status: 200, body: { success: false, error: 'busy' } };
+		await expect(connector().fetch()).rejects.toThrow('TronGrid');
+		answer = { status: 403, body: {} };
+		await expect(connector().fetch()).rejects.toThrow('HTTP 403');
+	});
+
+	test('an invalid address is rejected before any request', async () => {
+		api.calls.length = 0;
+		await expect(connector({ addresses: ['0x123'] }).fetch()).rejects.toThrow(
+			'invalid TRON address',
+		);
+		expect(api.calls).toEqual([]);
+	});
+
+	test('the connector is built in', async () => {
+		expect(await resolveConnector('tron')).toBe(TronConnector);
+	});
+});
+
+// ---------------------------------------------------------------- Bitcoin
+
+describe('bitcoin', () => {
+	const address = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+	const stats = (funded: number, spent: number) => ({
+		funded_txo_sum: funded,
+		spent_txo_sum: spent,
+		tx_count: 1,
+	});
+	let answer: { status: number; body: unknown };
+	const api = mockServer((_req, url) =>
+		url.pathname === `/address/${address}` ? json(answer.body, answer.status) : json({}, 404),
+	);
+	afterAll(() => api.stop());
+	const connector = (more: Record<string, unknown> = {}, name?: string) =>
+		new BitcoinConnector(
+			'btc',
+			'bitcoin',
+			name,
+			{ addresses: [address], api_url: api.url, ...more },
+			ctx(),
+		);
+
+	test('the balance is what came in minus what went out, a pending spend included', async () => {
+		answer = {
+			status: 200,
+			body: { chain_stats: stats(500000, 100000), mempool_stats: stats(0, 38887) },
+		};
+		const [acc] = await connector({}, 'cold').fetch();
+		expect(acc).toMatchObject({
+			key: `btc:${address}`,
+			name: 'cold bc1qar…5mdq',
+			currency: 'USD',
+			accountType: 'CRYPTOCURRENCY',
+			group: 'Wallets',
+		});
+		expect(acc!.holdings!.positions).toEqual([
+			{ symbol: 'BTC', quantity: '0.00361113', priceRef: 'coingecko:bitcoin' },
+		]);
+	});
+
+	test('an empty address has no position', async () => {
+		answer = { status: 200, body: { chain_stats: stats(5, 5), mempool_stats: stats(0, 0) } };
+		const [acc] = await connector().fetch();
+		expect(acc!.name).toBe('Bitcoin bc1qar…5mdq');
+		expect(acc!.holdings!.positions).toEqual([]);
+	});
+
+	test('an answer without stats fails the connector instead of writing a zero snapshot', async () => {
+		answer = { status: 200, body: { error: 'busy' } };
+		await expect(connector().fetch()).rejects.toThrow('no balance');
+		answer = { status: 403, body: {} };
+		await expect(connector().fetch()).rejects.toThrow('HTTP 403');
+	});
+
+	test('an invalid address is rejected before any request', async () => {
+		api.calls.length = 0;
+		await expect(connector({ addresses: ['0x123'] }).fetch()).rejects.toThrow(
+			'invalid Bitcoin address',
+		);
+		expect(api.calls).toEqual([]);
+	});
+
+	test('the connector is built in', async () => {
+		expect(await resolveConnector('bitcoin')).toBe(BitcoinConnector);
 	});
 });
 
