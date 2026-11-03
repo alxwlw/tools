@@ -7,14 +7,13 @@ savings plans stay current without manual entry. It talks to Wealthfolio through
 | Source                                                                                       | Becomes in Wealthfolio                                                               |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | Binance, OKX, Kraken, WhiteBIT (and any other [ccxt](https://github.com/ccxt/ccxt) exchange) | a **Holdings** account: a balance snapshot every run, Spot + Funding + Earn          |
-| EVM wallets (Ethereum, Arbitrum, Base, Optimism, Polygon, BSC)                               | a **Holdings** account: the native coin + listed tokens                              |
-| Solana wallets                                                                               | a **Holdings** account: SOL + every SPL / Token-2022 balance that can be priced      |
+| EVM and Solana wallets, through the [Zerion API](https://developers.zerion.io)               | a **Holdings** account per address: every token that has a price, on every chain     |
 | Monobank cards                                                                               | a **Transactions** cash account: each operation imported once, exact opening balance |
 | Monobank jars ("банки")                                                                      | a savings account with a balance snapshot                                            |
 | Cash and anything without an API                                                             | the `manual` connector: amounts from the config                                      |
 | Anything else                                                                                | your own plugin, one `.ts` file                                                      |
 
-Exchange keys are read-only; wallets need only a public address.
+Exchange keys are read-only. Wallets need a public address and a free Zerion API key.
 
 ## Why a service and not a Wealthfolio addon
 
@@ -77,6 +76,7 @@ bun src/cli.ts dry-run            # fetch and print, write nothing
 - **Kraken:** Settings → API → _Query Funds_ and _Query Ledger Entries_.
 - **WhiteBIT:** API keys → read-only.
 - **Monobank:** https://api.monobank.ua/ → "Отримати токен" (confirmed in the app).
+- **Zerion:** https://developers.zerion.io → create a key in the dashboard.
 
 Restrict keys to the server's IP wherever the exchange allows it.
 
@@ -99,8 +99,8 @@ Restrict keys to the server's IP wherever the exchange allows it.
 
 Coins are `CRYPTO` assets quoted in USD, and Wealthfolio prices the common ones itself (Yahoo `BTC-USD`).
 If its providers return no quote at all within 6 hours (an obscure token), wf-sync switches the asset to
-`MANUAL` and writes its own price every run: DefiLlama by contract or mint for wallets, public exchange
-tickers (no keys) otherwise. An asset that had quotes and only went stale is left alone and logged.
+`MANUAL` and writes its own price every run: Zerion's for wallets, public exchange tickers (no keys)
+otherwise. An asset that had quotes and only went stale is left alone and logged.
 Symbols in `pricing.manual_symbols` are priced by wf-sync from the start (WBT is not on Yahoo).
 
 ### Monobank
@@ -153,8 +153,8 @@ connectors:
 ```
 
 `import … from 'wf-sync'` works from any folder: wf-sync registers the module before loading plugins. It
-exports `Connector`, `HoldingsSnapshot`, decimal helpers (`add`, `fromUnits`, …), `requestJson` and
-`rpcBatch`. Return a snapshot (`holdings`: positions + cash) or operations (`transactions` +
+exports `Connector`, `HoldingsSnapshot`, decimal helpers (`add`, `fromUnits`, …) and
+`requestJson`. Return a snapshot (`holdings`: positions + cash) or operations (`transactions` +
 `currentBalance`); the engine does accounts, assets, prices, dedupe, opening balance and reconciliation.
 `this.stored(key, init)` is persistent per-connector state (cursors); `onSynced()` runs after a successful
 write.
@@ -163,10 +163,12 @@ write.
 
 - **Cost basis.** Exchange snapshots don't carry it, so per-position gains in Wealthfolio are not real
   P&L. Total value and its history are correct; history starts with the first run.
-- **EVM tokens.** RPC can't enumerate holdings without an indexer: the built-in stablecoins, WETH, WBTC,
-  ARB, OP and whatever is listed under `tokens` are read. That also keeps airdropped spam out.
-- **Public RPCs** (Solana, some EVM chains) are rate-limited; set your own free endpoint (Helius, Alchemy,
-  QuickNode). An RPC error fails the connector instead of writing a zero snapshot.
+- **Wallets depend on Zerion.** It sees the addresses you track. A run makes one request per address, and
+  the free plan allows 2000 a day. An API error fails the connector instead of writing a zero snapshot.
+- **What a wallet account leaves out.** Tokens with no price, and rent locked in Solana token accounts. Debt
+  isn't counted either, only logged as a warning, and Zerion has no protocol positions for Solana.
+- **Unverified tokens** that have a price show with part of their contract in the symbol
+  (`SOL-USDC-8HOQNE`), so a fake USDT can't count as cash. Their value is whatever Zerion reports.
 
 ## Development
 
@@ -174,7 +176,7 @@ write.
 pnpm exec moon run wf-sync:lint wf-sync:format wf-sync:typecheck wf-sync:test
 ```
 
-Tests run every connector and the engine against mocked APIs (exchanges, EVM/Solana RPC, Monobank,
+Tests run every connector and the engine against mocked APIs (exchanges, Zerion, Monobank,
 DefiLlama, Wealthfolio). The engine was also checked against a locally built Wealthfolio server.
 
 ```text
@@ -182,8 +184,8 @@ src/
   cli.ts            run / daemon / dry-run / check
   engine.ts         one sync pass
   wealthfolio.ts    Wealthfolio REST client
-  pricing.ts        prices: stablecoins → DefiLlama → exchange tickers
-  connectors/       binance/okx/kraken/whitebit (ccxt), evm, solana, monobank, manual
+  pricing.ts        prices: stablecoins → the source's own → DefiLlama → exchange tickers
+  connectors/       binance/okx/kraken/whitebit (ccxt), zerion, monobank, manual
   sdk.ts            the 'wf-sync' module plugins import
 plugins/            your connectors
 ```

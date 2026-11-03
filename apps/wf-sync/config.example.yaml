@@ -43,25 +43,13 @@ connectors:
     secret: ${WHITEBIT_SECRET}
     # wallets: [spot, main]
 
-  # --- on-chain wallets: public addresses only, no keys --------------------------------
-  - id: evm
-    type: evm
-    name: MetaMask
-    addresses:
+  # --- on-chain wallets: public addresses and a free key from https://developers.zerion.io ---
+  - id: wallets
+    type: zerion
+    api_key: ${ZERION_API_KEY}
+    addresses: # one Wealthfolio account each; EVM and Solana side by side
       - '0x0000000000000000000000000000000000000000'
-    chains: [ethereum, arbitrum, base, optimism, polygon, bsc]
-    # rpc: { ethereum: "https://eth-mainnet.g.alchemy.com/v2/KEY" }
-    # tokens:                         # beyond the built-in USDC/USDT/DAI/WETH/WBTC/ARB/OP
-    #   base:
-    #     - { address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", symbol: AERO }
-
-  - id: solana
-    type: solana
-    name: Phantom
-    address: '11111111111111111111111111111111'
-    # rpc: https://mainnet.helius-rpc.com/?api-key=KEY   # public RPC is rate-limited
-    # tokens: { "<mint>": "SYMBOL" }
-    # unknown_tokens: price           # keep unlisted mints DefiLlama can price ("skip" to ignore)
+      - '11111111111111111111111111111111'
 
   # --- banks -----------------------------------------------------------------------------
   - id: monobank

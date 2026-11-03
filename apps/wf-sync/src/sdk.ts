@@ -7,7 +7,6 @@
  */
 
 export { Connector, type ConnectorContext } from './connectors/base.ts';
-export { rpcBatch } from './connectors/evm.ts';
 export { abs, add, cmp, type Dec, fromUnits, isZero, neg, sub, toNumber } from './decimal.ts';
 export { HttpError, request, requestJson, type RequestOptions, sleep } from './http.ts';
 export {

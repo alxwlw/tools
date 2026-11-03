@@ -25,6 +25,8 @@ export interface Position {
 	priceRef?: string;
 	/** Exchange id whose public ticker is the most natural price source. */
 	priceExchange?: string;
+	/** USD price the source reports itself; no lookup is made for it. */
+	priceUsd?: number | undefined;
 }
 
 export class HoldingsSnapshot {
@@ -40,6 +42,7 @@ export class HoldingsSnapshot {
 		existing.quantity = add(existing.quantity, p.quantity);
 		existing.priceRef ??= p.priceRef;
 		existing.priceExchange ??= p.priceExchange;
+		existing.priceUsd ??= p.priceUsd;
 		existing.name ??= p.name;
 	}
 

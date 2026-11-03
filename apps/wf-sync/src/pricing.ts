@@ -2,14 +2,14 @@
  * USD prices for positions, used for the dust filter and for assets Wealthfolio
  * can't price itself (MANUAL quote mode).
  *
- * Order: USD stablecoins = 1 → DefiLlama by coin id / contract → public
- * exchange tickers (no API key) on the holding's own exchange, then others.
+ * Order: USD stablecoins = 1 → the source's own price → DefiLlama by coin id / contract
+ * → public exchange tickers (no API key) on the holding's own exchange, then others.
  */
 
 import ccxt, { type Exchange, type Ticker, type Tickers } from 'ccxt';
 
 import { requestJson } from './http.ts';
-import { errorMessage, num, obj, path, str } from './json.ts';
+import { errorMessage, num, obj, path } from './json.ts';
 import type { Logger } from './log.ts';
 import type { Position } from './models.ts';
 import { isUsdStable } from './symbols.ts';
@@ -17,8 +17,6 @@ import { isUsdStable } from './symbols.ts';
 export interface Price {
 	usd: number;
 	source: string;
-	/** Symbol reported by the source (DefiLlama), used for unlisted Solana mints. */
-	symbol?: string;
 	confidence?: number;
 }
 
@@ -45,12 +43,15 @@ export class PriceOracle {
 				out.set(p, { usd: 1, source: 'stable' });
 				continue;
 			}
+			if (p.priceUsd) {
+				out.set(p, { usd: p.priceUsd, source: 'connector' });
+				continue;
+			}
 			const llama = p.priceRef ? this.llamaCache.get(p.priceRef) : undefined;
 			if (llama && (llama.confidence ?? 1) >= 0.9) {
 				out.set(p, llama);
 				continue;
 			}
-			if (p.symbol.startsWith('SPL:')) continue; // unlisted mint: only DefiLlama can identify it
 			const fromEx = await this.fromExchanges(p.symbol, p.priceExchange);
 			if (fromEx) out.set(p, fromEx);
 		}
@@ -76,7 +77,6 @@ export class PriceOracle {
 							: {
 									usd,
 									source: 'defillama',
-									symbol: str(path(c, 'symbol')),
 									confidence: num(path(c, 'confidence')),
 								},
 					);

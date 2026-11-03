@@ -112,8 +112,7 @@ const BUILTIN: Record<string, () => Promise<ConnectorClass>> = {
 	kraken: async () => (await import('./exchanges.ts')).ExchangeConnector,
 	whitebit: async () => (await import('./exchanges.ts')).ExchangeConnector,
 	ccxt: async () => (await import('./exchanges.ts')).ExchangeConnector,
-	evm: async () => (await import('./evm.ts')).EvmConnector,
-	solana: async () => (await import('./solana.ts')).SolanaConnector,
+	zerion: async () => (await import('./zerion.ts')).ZerionConnector,
 	monobank: async () => (await import('./monobank.ts')).MonobankConnector,
 	manual: async () => (await import('./manual.ts')).ManualConnector,
 };

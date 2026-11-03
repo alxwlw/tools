@@ -94,7 +94,6 @@ const llama = mockServer((_req, url) => {
 	for (const id of ids) {
 		if (id === 'coingecko:bitcoin') coins[id] = { price: 100000, symbol: 'BTC', confidence: 0.99 };
 		if (id === 'solana:MintJTO') coins[id] = { price: 2, symbol: 'JTO', confidence: 0.99 };
-		if (id === 'solana:MintScam') coins[id] = { price: 5, symbol: 'SCAM', confidence: 0.3 };
 	}
 	return json({ coins });
 });
@@ -150,7 +149,7 @@ describe('engine', () => {
 		delete process.env.WF_SYNC_LLAMA_URL;
 	});
 
-	test('holdings: stables → cash, dust/scam dropped, mints resolved, one asset per symbol', async () => {
+	test('holdings: stables → cash, dust dropped, one asset per symbol', async () => {
 		const a = new StaticConnector('ex', 'x', undefined, {}, ctx(state.connector('ex')));
 		const h1 = new HoldingsSnapshot();
 		h1.addPosition({ symbol: 'BTC', quantity: '0.5', priceRef: 'coingecko:bitcoin' });
@@ -159,8 +158,7 @@ describe('engine', () => {
 		h1.addCash('EUR', '50');
 		const h2 = new HoldingsSnapshot();
 		h2.addPosition({ symbol: 'BTC', quantity: '0.1', priceRef: 'coingecko:bitcoin' });
-		h2.addPosition({ symbol: 'SPL:MintJTO', quantity: '10', priceRef: 'solana:MintJTO' });
-		h2.addPosition({ symbol: 'SPL:MintScam', quantity: '1000', priceRef: 'solana:MintScam' });
+		h2.addPosition({ symbol: 'JTO', quantity: '10', priceRef: 'solana:MintJTO' });
 		a.accounts = [
 			{ key: 'ex', name: 'Exchange', currency: 'USD', accountType: 'CRYPTOCURRENCY', holdings: h1 },
 			{
