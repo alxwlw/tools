@@ -192,7 +192,7 @@ export class SyncEngine {
 	// ---------------------------------------------------------------------------
 	// normalization
 
-	/** Stablecoins → USD cash (optional), resolve unlisted mints, drop dust and unpriceable tokens. */
+	/** Stablecoins → USD cash (optional), drop dust. */
 	private normalize(
 		a: AccountData,
 		prices: Map<Position, Price>,
@@ -204,15 +204,7 @@ export class SyncEngine {
 
 		for (const p of src.positions) {
 			const price = prices.get(p);
-			let symbol = p.symbol.toUpperCase();
-
-			if (symbol.startsWith('SPL:')) {
-				if (!price?.symbol) {
-					this.log.debug(`${a.name}: skipping unpriced token ${p.symbol}`);
-					continue;
-				}
-				symbol = price.symbol.toUpperCase();
-			}
+			const symbol = p.symbol.toUpperCase();
 			if (this.config.stablecoinsAsCash && isUsdStable(symbol)) {
 				out.addCash('USD', p.quantity);
 				continue;

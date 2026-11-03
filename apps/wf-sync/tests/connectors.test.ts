@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 
 import { resolveConnector } from '../src/connectors/base.ts';
-import { EvmConnector } from '../src/connectors/evm.ts';
 import { ExchangeConnector } from '../src/connectors/exchanges.ts';
 import { MonobankConnector } from '../src/connectors/monobank.ts';
-import { SolanaConnector } from '../src/connectors/solana.ts';
+import { ZerionConnector } from '../src/connectors/zerion.ts';
+import { createLogger } from '../src/log.ts';
+import { PriceOracle } from '../src/pricing.ts';
 import { ctx, json, mockServer } from './helpers.ts';
 
 // ---------------------------------------------------------------- exchanges
@@ -107,195 +108,191 @@ describe('exchanges', () => {
 	});
 });
 
-// ---------------------------------------------------------------- EVM
+// ---------------------------------------------------------------- Zerion
 
-describe('evm', () => {
-	const addr = '0x1111111111111111111111111111111111111111';
-	const rpc = mockServer(async (req) => {
-		const batch = (await req.json()) as any[];
-		return json(
-			batch.map((c) => {
-				if (c.method === 'eth_getBalance')
-					return { jsonrpc: '2.0', id: c.id, result: '0xde0b6b3a7640000' }; // 1 ETH
-				const { to, data } = c.params[0];
-				if (data.startsWith('0x313ce567')) return { jsonrpc: '2.0', id: c.id, result: '0x12' }; // 18
-				if (to.toLowerCase() === '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48')
-					return {
-						jsonrpc: '2.0',
-						id: c.id,
-						result: '0x' + 2_500_000n.toString(16).padStart(64, '0'),
-					}; // 2.5 USDC
-				if (to === '0x00000000000000000000000000000000000000aa')
-					return {
-						jsonrpc: '2.0',
-						id: c.id,
-						result: '0x' + (3n * 10n ** 18n).toString(16).padStart(64, '0'),
-					};
-				return { jsonrpc: '2.0', id: c.id, result: '0x' + '0'.repeat(64) };
-			}),
-		);
-	});
-	afterAll(() => rpc.stop());
+describe('zerion', () => {
+	const evm = '0xAbCdEf0123456789aBcDeF0123456789abCDef01';
+	const sol = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
-	test('native + default + custom tokens, merged per address', async () => {
-		const c = new EvmConnector(
-			'evm',
-			'evm',
-			undefined,
-			{
-				address: addr,
-				chains: ['ethereum', 'base'],
-				rpc: { ethereum: rpc.url, base: rpc.url },
-				tokens: {
-					base: [{ address: '0x00000000000000000000000000000000000000aa', symbol: 'aero' }],
-				},
+	// Fields as the live API returns them.
+	const position = (
+		chain: string,
+		symbol: string,
+		quantity: string,
+		price: number | null,
+		more: { type?: string; name?: string; verified?: boolean; contract?: string } = {},
+	) => ({
+		type: 'positions',
+		attributes: {
+			name: more.name ?? 'Asset',
+			position_type: more.type ?? 'wallet',
+			quantity: { numeric: quantity },
+			price,
+			fungible_info: {
+				symbol,
+				flags: { verified: more.verified ?? true },
+				implementations: [
+					{ chain_id: 'other-chain', address: '0xnotthisone' },
+					{ chain_id: chain, address: more.contract ?? null },
+				],
 			},
+		},
+		relationships: { chain: { data: { type: 'chains', id: chain } } },
+	});
+
+	const wallets: Record<string, unknown[]> = {};
+	const nextPage: Record<string, string> = {};
+	const api = mockServer((req, url) => {
+		if (req.headers.get('authorization') !== `Basic ${btoa('key:')}`)
+			return json({ errors: [{ title: 'Unauthorized' }] }, 401);
+		const address = url.pathname.split('/')[2] ?? '';
+		// The live API's answer for Solana.
+		if (address === sol && url.searchParams.get('filter[positions]') === 'no_filter')
+			return json({ errors: [{ title: 'Malformed parameter was sent' }] }, 400);
+		if (url.searchParams.get('page') === '2') return json({ data: wallets[`${address}:2`] });
+		return json({ data: wallets[address] ?? [], links: { next: nextPage[address] } });
+	});
+	afterAll(() => api.stop());
+
+	const connector = (address: string, more: Record<string, unknown> = {}, name?: string) =>
+		new ZerionConnector(
+			'wallets',
+			'zerion',
+			name,
+			{ api_key: 'key', addresses: [address], api_url: api.url, ...more },
 			ctx(),
 		);
-		const [acc] = await c.fetch();
-		const pos = Object.fromEntries(acc!.holdings!.positions.map((p) => [p.symbol, p.quantity]));
-		expect(pos).toEqual({ ETH: '2', USDC: '2.5', AERO: '3' });
-		expect(acc!.key).toBe(`evm:${addr}`);
-		expect(acc!.holdings!.positions.find((p) => p.symbol === 'AERO')!.priceRef).toBe(
-			'base:0x00000000000000000000000000000000000000aa',
-		);
-	});
+	const positions = async (address: string) => {
+		const [acc] = await connector(address).fetch();
+		return acc!.holdings!.positions;
+	};
 
-	test('an RPC error fails the connector instead of reading as zero', async () => {
-		const bad = mockServer(async (req) => {
-			const batch = (await req.json()) as any[];
-			return json(
-				batch.map((c) => ({
-					jsonrpc: '2.0',
-					id: c.id,
-					error: { code: -32005, message: 'rate limited' },
-				})),
-			);
+	test('EVM: the same coin adds up across chains, wrapped coins collapse into it', async () => {
+		wallets[evm] = [
+			position('ethereum', 'ETH', '0.5', 2000),
+			position('base', 'ETH', '0.25', 2000),
+			position('base', 'WETH', '0.25', 2000, { contract: '0x4200' }),
+			position('ethereum', 'WBTC', '0.1', 60000, { contract: '0x2260' }),
+		];
+		const [acc] = await connector(evm).fetch();
+		expect(acc).toMatchObject({
+			key: `wallets:${evm.toLowerCase()}`,
+			name: 'EVM 0xAbCd…ef01',
+			currency: 'USD',
+			accountType: 'CRYPTOCURRENCY',
+			group: 'Wallets',
 		});
-		const c = new EvmConnector(
-			'evm',
-			'evm',
-			undefined,
-			{ address: addr, chains: ['ethereum'], rpc: { ethereum: bad.url } },
-			ctx(),
-		);
-		await expect(c.fetch()).rejects.toThrow(/rate limited/);
-		bad.stop();
+		expect(acc!.holdings!.positions).toMatchObject([
+			{ symbol: 'ETH', quantity: '1', priceUsd: 2000 },
+			{ symbol: 'BTC', quantity: '0.1', priceUsd: 60000 },
+		]);
 	});
 
-	test('split_by_chain keeps emitting a chain that went to zero', async () => {
-		let empty = false;
-		const srv = mockServer(async (req) => {
-			const batch = (await req.json()) as any[];
-			return json(
-				batch.map((c) => ({
-					jsonrpc: '2.0',
-					id: c.id,
-					result:
-						c.method === 'eth_getBalance'
-							? empty
-								? '0x0'
-								: '0xde0b6b3a7640000'
-							: '0x' + '0'.repeat(64),
-				})),
-			);
-		});
-		const state: Record<string, any> = {};
-		const mk = () =>
-			new EvmConnector(
-				'evm',
-				'evm',
-				undefined,
-				{ address: addr, chains: ['base'], rpc: { base: srv.url }, split_by_chain: true },
-				ctx(state),
-			);
-		expect((await mk().fetch()).map((a) => a.holdings!.positions.length)).toEqual([1]);
-		empty = true;
-		const again = await mk().fetch();
-		expect(again).toHaveLength(1);
-		expect(again[0]!.holdings!.positions).toEqual([]);
-		srv.stop();
+	test('EVM asks for protocol positions too, and leaves trash out', async () => {
+		wallets[evm] = [];
+		api.calls.length = 0;
+		await connector(evm).fetch();
+		const params = new URL(`http://x${api.calls[0]!.path}`).searchParams;
+		expect(params.get('filter[positions]')).toBe('no_filter');
+		expect(params.get('filter[trash]')).toBe('only_non_trash');
+		expect(params.get('currency')).toBe('usd');
 	});
 
-	test('rejects bad address', async () => {
-		const c = new EvmConnector('evm', 'evm', undefined, { address: '0x123' }, ctx());
-		await expect(c.fetch()).rejects.toThrow(/invalid EVM address/);
+	test("Solana: the address keeps its case, the request is one the API accepts, rent isn't counted", async () => {
+		wallets[sol] = [
+			position('solana', 'SOL', '0.5', 90),
+			position('solana', 'SOL', '0.05', 90, { type: 'locked', name: 'Rent' }),
+		];
+		const [acc] = await connector(sol, {}, 'Phantom').fetch();
+		expect(acc).toMatchObject({ key: `wallets:${sol}`, name: 'Phantom 9WzD…AWWM' });
+		expect(acc!.holdings!.positions).toMatchObject([{ symbol: 'SOL', quantity: '0.5' }]);
+	});
+
+	test('an unverified token without a price is dropped', async () => {
+		wallets[evm] = [
+			position('ethereum', 'ETH', '1', 2000),
+			position('base', 'DOGE', '100000', null, { verified: false, contract: '0xdead' }),
+		];
+		expect((await positions(evm)).map((p) => p.symbol)).toEqual(['ETH']);
+	});
+
+	test('a priced unverified token keeps its own symbol: a fake USDT is not cash, a fake ETH adds nothing to ETH', async () => {
+		wallets[evm] = [
+			position('ethereum', 'ETH', '1', 2000),
+			position('base', 'ETH', '500', 0.01, { verified: false, contract: '0xfake0123' }),
+			position('base', 'USDT', '1000', 0.01, { verified: false, contract: '0xbad00123' }),
+		];
+		expect(await positions(evm)).toMatchObject([
+			{ symbol: 'ETH', quantity: '1', priceUsd: 2000 },
+			{ symbol: 'ETH-fake01', quantity: '500', name: 'ETH', priceUsd: 0.01 },
+			{ symbol: 'USDT-bad001', quantity: '1000', name: 'USDT', priceUsd: 0.01 },
+		]);
+	});
+
+	test('an unverified Solana LP token keeps its value, with the mint in its symbol', async () => {
+		wallets[sol] = [
+			position('solana', 'SOL-USDC', '0.11', 259, { verified: false, contract: '8HoQnePLq' }),
+		];
+		expect(await positions(sol)).toMatchObject([
+			{ symbol: 'SOL-USDC-8HoQne', name: 'SOL-USDC', priceUsd: 259 },
+		]);
+	});
+
+	test('a verified coin without a price stays for the engine to price', async () => {
+		wallets[evm] = [position('ethereum', 'AAA', '1', null), position('base', 'AAA', '1', 5)];
+		expect(await positions(evm)).toMatchObject([{ symbol: 'AAA', quantity: '2', priceUsd: 5 }]);
+	});
+
+	test('staked and deposited coins count, debt does not', async () => {
+		wallets[evm] = [
+			position('ethereum', 'ETH', '1', 2000),
+			position('ethereum', 'ETH', '2', 2000, { type: 'staked' }),
+			position('ethereum', 'USDC', '100', 1, { type: 'deposit' }),
+			position('ethereum', 'DAI', '50', 1, { type: 'loan' }),
+		];
+		expect(await positions(evm)).toMatchObject([
+			{ symbol: 'ETH', quantity: '3' },
+			{ symbol: 'USDC', quantity: '100' },
+		]);
+	});
+
+	test('zero balances are skipped', async () => {
+		wallets[evm] = [position('ethereum', 'ETH', '0.000', 2000)];
+		expect(await positions(evm)).toEqual([]);
+	});
+
+	test('follows links.next when the API paginates', async () => {
+		wallets[evm] = [position('ethereum', 'ETH', '1', 2000)];
+		wallets[`${evm}:2`] = [position('ethereum', 'BNB', '1', 600)];
+		nextPage[evm] = `${api.url}/wallets/${evm}/positions/?page=2`;
+		const symbols = (await positions(evm)).map((p) => p.symbol);
+		delete nextPage[evm];
+		expect(symbols).toEqual(['ETH', 'BNB']);
+	});
+
+	test('an API error fails the connector instead of writing an empty snapshot', async () => {
+		wallets[evm] = [position('ethereum', 'ETH', '1', 2000)];
+		await expect(connector(evm, { api_key: 'wrong' }).fetch()).rejects.toThrow('HTTP 401');
+	});
+
+	test('an address of neither kind is rejected before any request', async () => {
+		api.calls.length = 0;
+		await expect(connector('0x123').fetch()).rejects.toThrow('invalid wallet address');
+		expect(api.calls).toEqual([]);
+	});
+
+	test('the connector is built in', async () => {
+		expect(await resolveConnector('zerion')).toBe(ZerionConnector);
 	});
 });
 
-// ---------------------------------------------------------------- Solana
-
-describe('solana', () => {
-	const owner = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
-	const rpc = mockServer(async (req) => {
-		const batch = (await req.json()) as any[];
-		return json(
-			batch.map((c) => {
-				if (c.method === 'getBalance')
-					return { jsonrpc: '2.0', id: c.id, result: { value: 2_500_000_000 } };
-				const pid = c.params[1].programId;
-				if (
-					![
-						'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-						'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-					].includes(pid)
-				) {
-					return {
-						jsonrpc: '2.0',
-						id: c.id,
-						error: { code: -32602, message: 'Invalid param: could not find program' },
-					};
-				}
-				const legacy = pid.startsWith('Tokenkeg');
-				const tok = (mint: string, amount: string, decimals: number) => ({
-					account: { data: { parsed: { info: { mint, tokenAmount: { amount, decimals } } } } },
-				});
-				return {
-					jsonrpc: '2.0',
-					id: c.id,
-					result: {
-						value: legacy
-							? [
-									tok('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', '1000000', 6),
-									tok('UnknownMint1111111111111111111111111111111', '5', 0),
-									tok('ZeroMint11111111111111111111111111111111111', '0', 6),
-								]
-							: [],
-					},
-				};
-			}),
-		);
-	});
-	afterAll(() => rpc.stop());
-
-	test('SOL + known + unknown mints', async () => {
-		const c = new SolanaConnector(
-			'sol',
-			'solana',
-			'Phantom',
-			{ address: owner, rpc: rpc.url },
-			ctx(),
-		);
-		const [acc] = await c.fetch();
-		const pos = Object.fromEntries(acc!.holdings!.positions.map((p) => [p.symbol, p.quantity]));
-		expect(pos).toEqual({
-			SOL: '2.5',
-			USDC: '1',
-			'SPL:UnknownMint1111111111111111111111111111111': '5',
-		});
-		expect(acc!.name).toBe('Phantom 9WzD…AWWM');
-	});
-
-	test('unknown_tokens: skip', async () => {
-		const c = new SolanaConnector(
-			'sol',
-			'solana',
-			undefined,
-			{ address: owner, rpc: rpc.url, unknown_tokens: 'skip' },
-			ctx(),
-		);
-		const [acc] = await c.fetch();
-		expect(acc!.holdings!.positions.map((p) => p.symbol)).toEqual(['SOL', 'USDC']);
+describe('prices', () => {
+	test("a connector's own price is used without a lookup, stablecoins stay at 1", async () => {
+		const token = { symbol: 'SOL-USDC-8HOQNE', quantity: '1', priceUsd: 259 };
+		const stable = { symbol: 'USDC', quantity: '1', priceUsd: 0.9993 };
+		const prices = await new PriceOracle([], createLogger('test')).priceAll([token, stable]);
+		expect(prices.get(token)?.usd).toBe(259);
+		expect(prices.get(stable)?.usd).toBe(1);
 	});
 });
 
