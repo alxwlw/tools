@@ -39,6 +39,23 @@ Wealthfolio is on http://localhost:8088. Already running one? Drop the `wealthfo
 A fresh Wealthfolio whose onboarding was skipped has no base currency, and then values nothing; wf-sync
 sets it to `base_currency` from the config (USD by default). Change it in Wealthfolio settings at any time.
 
+## On Dokploy
+
+[`deploy/`](deploy) runs the same two services as a Dokploy compose app, for a host with Docker, Tailscale
+and read access to 1Password. The UI stays off the internet: Wealthfolio listens on `127.0.0.1:8088` and
+`tailscale serve` publishes it to the tailnet on port 8445.
+
+1. In Dokploy, create an API key. Where `op` can write, run `deploy/op-init.sh`: it creates the 1Password
+   item with a generated password and encryption key. **Without `WF_SECRET_KEY` neither the database nor
+   its backups can be opened.**
+2. Write `~/.config/wf-sync/config.yaml` from `config.example.yaml`. It holds no secrets, only `${NAME}`.
+3. From `apps/wf-sync/deploy`, run `dokploy-rollout.sh`. It finds or creates the app, replaces its env and
+   config, deploys and runs `check`. Run it again after any change to the item or the config.
+
+To switch a connector on, add its variables to the 1Password item (one field per variable, named as in
+`docker-compose.dokploy.yml`), add the connector to `config.yaml`, and run the rollout. A `${NAME}` that
+isn't set stops the whole config from loading, not only that connector.
+
 ## Without Docker
 
 ```bash
