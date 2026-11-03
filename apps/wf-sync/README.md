@@ -49,7 +49,8 @@ and read access to 1Password. The UI stays off the internet: Wealthfolio listens
    item with a generated password and encryption key. **Without `WF_SECRET_KEY` neither the database nor
    its backups can be opened.**
 2. Write `~/.config/wf-sync/config.yaml` from `config.example.yaml`. It holds no secrets, only `${NAME}`.
-3. From `apps/wf-sync/deploy`, run `dokploy-rollout.sh`. It finds or creates the app, replaces its env and
+3. Publish the UI once: `sudo tailscale serve --bg --https=8445 http://127.0.0.1:8088`.
+4. From `apps/wf-sync/deploy`, run `dokploy-rollout.sh`. It finds or creates the app, replaces its env and
    config, deploys and runs `check`. Run it again after any change to the item or the config.
 
 To switch a connector on, add its variables to the 1Password item (one field per variable, named as in
