@@ -67,6 +67,7 @@ bun src/cli.ts check
 bun src/cli.ts run                # one pass; exit code 2 if a connector failed
 bun src/cli.ts daemon             # a pass every interval_minutes
 bun src/cli.ts dry-run            # fetch and print, write nothing
+bun src/cli.ts report Infra       # a top-level category per subcategory and month, as charged
 ```
 
 `-v` turns on debug logging; the config path is `-c path` or `WF_SYNC_CONFIG` (default `config.yaml`).
@@ -124,9 +125,11 @@ Symbols in `pricing.manual_symbols` are priced by wf-sync from the start (WBT is
   from, so yours wins. A card you take out stays out, and a rule you edit stays edited until the table in
   `connectors/mcc.ts` changes. Transfers, cash and other money moves stay `Uncategorized`: the code says
   nothing about what the money bought. `categories: false` turns all of it off.
-- **One product over time.** Add a top-level category and a rule on the merchant's name. `What changed` →
-  `Category trends` draws a card per top-level category, so a subcategory gets no trend of its own. Rules
-  apply to new operations by themselves; for existing ones press rerun on the rules page.
+- **Spending per vendor.** Add a top-level category with a subcategory per vendor, and a rule on each name.
+  Wealthfolio shows a subcategory's sum for any period, but a trend and the change against the prior period
+  only for the top level. `wf-sync report <category>` prints the rest: a vendor per row, a month per column, in
+  the currency charged. Rules apply to new operations by themselves; for existing ones press rerun on the
+  rules page.
 - **Amounts in the reports are approximate.** They're in the base currency, at one rate for the whole period,
   so a dollar charge on a hryvnia card won't match its dollar price. Refunds count as income.
 

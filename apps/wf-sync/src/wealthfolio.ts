@@ -169,6 +169,23 @@ export class WealthfolioClient {
 		});
 	}
 
+	async spendingCategories(): Promise<{ id: string; name: string; parentId?: string | null }[]> {
+		const res = await this.call<{
+			categories: { id: string; name: string; parentId?: string | null }[];
+		}>('GET', '/taxonomies/spending_categories');
+		return res.categories;
+	}
+
+	searchCashActivities(request: {
+		categoryIds: string[];
+		activityTypes: string[];
+		startDate: string;
+		offset: number;
+		limit: number;
+	}): Promise<{ items: unknown[] }> {
+		return this.call('POST', '/spending/cash-activities/search', request);
+	}
+
 	// --- assets -----------------------------------------------------------------
 	listAssets(): Promise<WfAsset[]> {
 		return this.call('GET', '/assets');
