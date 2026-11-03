@@ -1,0 +1,55 @@
+# Wealthfolio + wf-sync as a Dokploy compose app (source type raw). dokploy-rollout.sh uploads this
+# file, the env and config.yaml; Dokploy keeps config.yaml in ../files/, next to this file's code/.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: '3'
+
+services:
+  wealthfolio:
+    image: wealthfolio/wealthfolio:3.12.0@sha256:5790528fcd9795b571176cad78bcca09e3fa5875ec20968356586939e154c3cb
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - '127.0.0.1:8088:8088' # the tailnet reaches it through `tailscale serve`, the internet doesn't
+    environment:
+      WF_LISTEN_ADDR: 0.0.0.0:8088
+      WF_DB_PATH: /data/wealthfolio.db
+      # Volume backups in Dokploy are plain tar files, so the database encrypts itself with WF_SECRET_KEY.
+      # It has to be on from the first start: this flag doesn't convert an existing database.
+      WF_DB_REQUIRE_ENCRYPTION: '1'
+      WF_SECRET_KEY: ${WF_SECRET_KEY}
+      WF_AUTH_PASSWORD_HASH: ${WF_AUTH_PASSWORD_HASH}
+      WF_CORS_ALLOW_ORIGINS: ${WF_CORS_ALLOW_ORIGINS}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - wealthfolio-data:/data
+
+  wf-sync:
+    image: ghcr.io/alxwlw/wf-sync:main@sha256:4cc76cf88353cd880824b92ca15fc367e6f2373a193c53f8780d40579d3efb94
+    restart: unless-stopped
+    logging: *logging
+    depends_on: [wealthfolio]
+    # A list, not env_file: the sync has no use for WF_SECRET_KEY.
+    environment:
+      WF_PASSWORD: ${WF_PASSWORD}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_SECRET: ${BINANCE_SECRET:-}
+      OKX_API_KEY: ${OKX_API_KEY:-}
+      OKX_SECRET: ${OKX_SECRET:-}
+      OKX_PASSPHRASE: ${OKX_PASSPHRASE:-}
+      KRAKEN_API_KEY: ${KRAKEN_API_KEY:-}
+      KRAKEN_SECRET: ${KRAKEN_SECRET:-}
+      WHITEBIT_API_KEY: ${WHITEBIT_API_KEY:-}
+      WHITEBIT_SECRET: ${WHITEBIT_SECRET:-}
+      MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ../files/config.yaml:/app/config.yaml:ro
+      - wf-sync-data:/app/data
+
+volumes:
+  wealthfolio-data:
+  wf-sync-data:
