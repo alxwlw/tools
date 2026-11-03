@@ -161,10 +161,23 @@ done
 # leaves the service unchanged doesn't recreate the container: only a restart applies it.
 sync_container=$(docker ps -qf "label=com.docker.compose.project=$app_name" -f 'label=com.docker.compose.service=wf-sync')
 [ -n "$sync_container" ] || die 'the wf-sync container is not running'
+restarted=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker restart "$sync_container" >/dev/null
 
-echo 'wf-sync: checking Wealthfolio and every connector'
-docker exec "$sync_container" bun src/cli.ts check || die 'check failed (see above); the app is deployed'
+# A restart starts a pass by itself. Don't run `check` next to it: the two share the sources'
+# rate limits and it fails on 429. A first Monobank import takes minutes, hence the long wait.
+echo 'wf-sync: waiting for the first pass'
+result=""
+for _ in $(seq 1 120); do
+	result=$(docker logs --since "$restarted" "$sync_container" 2>&1 | grep -F 'Done: ' | tail -1 || true)
+	[ -n "$result" ] && break
+	sleep 5
+done
+[ -n "$result" ] || die 'no finished pass after 10 minutes; see the logs of the wf-sync container'
+echo "$result"
+if docker logs --since "$restarted" "$sync_container" 2>&1 | grep -F ' ERROR '; then
+	die 'a connector failed (see above); the app is deployed'
+fi
 
 echo
 echo "Wealthfolio: $origin  (password: $OP_ITEM/WF_PASSWORD)"
