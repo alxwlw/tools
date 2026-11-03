@@ -90,10 +90,12 @@ if [ -z "$compose_id" ]; then
 fi
 [ -n "$compose_id" ] && [ "$compose_id" != null ] || die 'no composeId from Dokploy'
 
-echo 'Tailnet: publishing the UI'
+echo 'Tailnet: checking the UI is published'
 host=$(tailscale status --json | jq -r '.Self.DNSName | rtrimstr(".")')
 origin="https://$host:$UI_PORT"
-tailscale serve --bg --https="$UI_PORT" http://127.0.0.1:8088 >/dev/null
+# Changing the serve config takes root or the Tailscale operator, and it survives restarts: a one-time step.
+tailscale serve status --json | jq -e --arg web "$host:$UI_PORT" '.Web[$web].Handlers["/"].Proxy == "http://127.0.0.1:8088"' >/dev/null ||
+	die "publish the UI once, then run this again: sudo tailscale serve --bg --https=$UI_PORT http://127.0.0.1:8088"
 
 echo 'Env: building'
 # A new salt on every run, so a rollout also recreates the wealthfolio container: seconds, and the sessions survive.
