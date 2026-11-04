@@ -117,8 +117,11 @@ Symbols in `pricing.manual_symbols` are priced by wf-sync from the start (WBT is
 
 ### Monobank
 
-- A card is a cash account: spending is `WITHDRAWAL`, income `DEPOSIT`, moves between your own cards and
-  into jars `TRANSFER_OUT` / `TRANSFER_IN`, so spending analytics count them as savings, not expenses.
+- A card is a cash account: spending is `WITHDRAWAL`, income `DEPOSIT`. A move between your own cards is
+  `TRANSFER_OUT` and `TRANSFER_IN` in one group, so spending analytics ignore it. The bank doesn't mark these:
+  they are recognized as two transfer lines with the same amount on two cards within a minute, seen in the same
+  pass, in the same currency. A move into a jar has one leg here and counts as savings. Already imported
+  operations keep their type.
 - Balances are own funds: the credit limit is subtracted.
 - The opening balance comes from the `balance` field of the earliest operation: a positive one is a
   `CREDIT` (neither income nor spending), a negative one a `TRANSFER_OUT`.
