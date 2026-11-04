@@ -552,6 +552,93 @@ describe('monobank', () => {
 		expect(state.cursors.acc1).toBe(items[2]!.time);
 	});
 
+	describe('transfers between own cards', () => {
+		// The last second of a minute, so the two legs of a pair fall in different minutes.
+		const t = Math.floor(now / 60) * 60 - 601;
+		const op = (id: string, time: number, amount: number, description: string, mcc = 4829) => ({
+			...items[0]!,
+			id,
+			time,
+			amount,
+			operationAmount: amount,
+			description,
+			mcc,
+		});
+		const fetchCards = async (statements: Record<string, ReturnType<typeof op>[]>) => {
+			const bank = mockServer((_req, url) => {
+				if (url.pathname === '/personal/client-info') {
+					return json({
+						accounts: Object.keys(statements).map((id) => ({
+							id,
+							balance: 0,
+							creditLimit: 0,
+							type: 'white',
+							currencyCode: 980,
+							maskedPan: [`444111******${id}`],
+							iban: id,
+						})),
+						jars: [],
+					});
+				}
+				const [, , , id] = url.pathname.split('/');
+				return json([...(statements[id!] ?? [])].reverse());
+			});
+			const c = new MonobankConnector(
+				'mono',
+				'monobank',
+				undefined,
+				{ token: 'tok', api_url: bank.url, min_interval_ms: 0 },
+				ctx({}),
+			);
+			const accs = await c.fetch();
+			bank.stop();
+			return Object.fromEntries(
+				accs.flatMap((a) => a.transactions!).map((tx) => [tx.id, tx.metadata!]),
+			);
+		};
+
+		test('the two legs become one internal transfer', async () => {
+			const tx = await fetchCards({
+				white: [op('out', t, -50000, 'Переказ на картку')],
+				black: [op('in', t + 1, 50000, 'З Білої картки')],
+			});
+			expect(tx.out!.transfer).toBe(true);
+			expect(tx.in!.transfer).toBe(true);
+			expect(tx.out!.transferGroup).toBe(tx.in!.transferGroup);
+		});
+
+		test('what only looks like a pair stays as it is', async () => {
+			const tx = await fetchCards({
+				white: [
+					op('purchase', t, -70000, 'Shop', 5411),
+					op('friend', t + 2, -90000, 'Друг'),
+					op('earlier', t - 3000, -30000, 'Друг'),
+					op('reversal-out', t + 4, -40000, 'Друг'),
+					op('reversal-in', t + 5, 40000, 'Скасування'),
+					op('bought', t - 6000, -11000, 'Shop', 5411),
+					op('sent', t - 9000, -22000, 'Друг'),
+					op('sent-more', t - 12000, -33000, 'Друг'),
+				],
+				black: [
+					op('refund', t, 70000, 'Shop', 5411),
+					op('later', t - 3000 + 300, 30000, 'Від друга'),
+					op('same-sum-from-friend', t - 6000, 11000, 'Від друга'),
+					op('same-sum-refund', t - 9000, 22000, 'Shop', 5411),
+					op('other-sum', t - 12000, 34000, 'Від друга'),
+				],
+			});
+			for (const id of Object.keys(tx)) expect(tx[id]!.transfer).toBeUndefined();
+		});
+
+		test('one incoming leg pairs with one outgoing leg', async () => {
+			const tx = await fetchCards({
+				white: [op('first', t, -50000, 'Друг'), op('second', t, -50000, 'Друг')],
+				black: [op('in', t, 50000, 'З Білої картки')],
+			});
+			expect(['first', 'second'].filter((id) => tx[id]!.transfer)).toHaveLength(1);
+		});
+	});
+
 	test('an idle card costs one request on the next pass', async () => {
 		const old = now - 200 * 86400;
 		let requests: Record<string, number> = {};
@@ -700,6 +787,13 @@ describe('mcc rules', () => {
 		expect(of(5734)).toEqual(['cat_bills_software']);
 		expect(of(3000)).toEqual(['cat_travel']);
 		expect(of(3999)).toEqual(['cat_travel']);
+		expect(of(5262)).toEqual(['cat_shopping_online']);
+		expect(of(4215)).toEqual(['cat_shopping_online']);
+		expect(of(5137)).toEqual(['cat_shopping_clothing']);
+		expect(of(2741)).toEqual(['cat_bills_subscriptions']);
+		expect(of(5192)).toEqual(['cat_bills_subscriptions']);
+		expect(of(7277)).toEqual(['cat_other_expense']);
+		expect(of(8999)).toEqual(['cat_other_expense']);
 	});
 
 	test('money moves stay uncategorized: they say nothing about what was bought', () => {

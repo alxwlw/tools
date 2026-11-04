@@ -33,6 +33,8 @@ const MIN_INTERVAL_MS = 61_000;
 const MAX_WINDOW_S = 31 * 24 * 3600; // API limit: 31 days + 1 hour
 const IDLE_LOOKBACK_S = 7 * 24 * 3600; // well inside one window, so an idle card costs one request
 const PAGE_LIMIT = 500;
+const TRANSFER_MCC = 4829;
+const PAIR_WINDOW_S = 60; // the two legs of a move between own cards land a second apart at most
 
 export const CURRENCIES: Record<number, string> = {
 	980: 'UAH',
@@ -154,6 +156,7 @@ export class MonobankConnector extends Connector {
 		const historyDays = this.optional<number>('history_days', 31);
 		const now = Math.floor(Date.now() / 1000);
 
+		const cards: { acc: MonoAccount; currency: string; items: MonoStatementItem[] }[] = [];
 		for (const acc of accounts) {
 			const currency = CURRENCIES[acc.currencyCode] ?? String(acc.currencyCode);
 			const from = cursors[acc.id] ? cursors[acc.id]! - 3600 : now - historyDays * 86400;
@@ -162,14 +165,18 @@ export class MonobankConnector extends Connector {
 			// Everything up to now was read. Without a floor an idle card reads back to its last
 			// operation, or its whole history, every pass, at one request a minute.
 			this.pendingCursors[acc.id] = Math.max(latest, now - IDLE_LOOKBACK_S);
+			cards.push({ acc, currency, items });
+		}
 
+		const pairs = pairOwnTransfers(cards.map((c) => c.items));
+		for (const { acc, currency, items } of cards) {
 			out.push({
 				key: `${this.id}:${acc.id}`,
 				name: this.displayName('Monobank') + ' ' + accountLabel(acc, currency),
 				currency,
 				accountType: 'CASH',
 				group: 'Banks',
-				transactions: items.map((it) => this.toTransaction(it, acc, currency)),
+				transactions: items.map((it) => this.toTransaction(it, acc, currency, pairs.get(it.id))),
 				currentBalance: fromUnits(acc.balance - acc.creditLimit, 2),
 			});
 		}
@@ -222,9 +229,12 @@ export class MonobankConnector extends Connector {
 		it: MonoStatementItem,
 		acc: MonoAccount,
 		currency: string,
+		pairGroup?: string,
 	): CashTransaction {
 		const isOwnTransfer =
-			(it.counterIban && this.ownIbans.has(it.counterIban)) || JAR_RE.test(it.description);
+			pairGroup ||
+			(it.counterIban && this.ownIbans.has(it.counterIban)) ||
+			JAR_RE.test(it.description);
 		const note = [it.description, it.comment].filter(Boolean).join(' — ');
 		return {
 			id: it.id,
@@ -245,7 +255,8 @@ export class MonobankConnector extends Connector {
 				...(isOwnTransfer
 					? {
 							transfer: true,
-							transferGroup: `monobank:${Math.floor(it.time / 60)}:${Math.abs(it.amount)}`,
+							transferGroup:
+								pairGroup ?? `monobank:${Math.floor(it.time / 60)}:${Math.abs(it.amount)}`,
 						}
 					: {}),
 			},
@@ -260,6 +271,34 @@ export class MonobankConnector extends Connector {
 		);
 		this.pendingCursors = {};
 	}
+}
+
+/**
+ * Moves between own cards, as a map of statement line to transfer group. The bank sends no
+ * counterIban for them: only two transfer lines with the same amount on two cards give them away.
+ */
+function pairOwnTransfers(statements: MonoStatementItem[][]): Map<string, string> {
+	const groups = new Map<string, string>();
+	statements.forEach((items, card) => {
+		for (const out of items) {
+			if (out.amount >= 0 || out.mcc !== TRANSFER_MCC) continue;
+			const leg = statements
+				.filter((_, other) => other !== card)
+				.flat()
+				.find(
+					(it) =>
+						it.mcc === TRANSFER_MCC &&
+						it.amount === -out.amount &&
+						it.currencyCode === out.currencyCode &&
+						Math.abs(it.time - out.time) <= PAIR_WINDOW_S &&
+						!groups.has(it.id),
+				);
+			if (!leg) continue;
+			groups.set(out.id, `monobank:${out.id}`);
+			groups.set(leg.id, `monobank:${out.id}`);
+		}
+	});
+	return groups;
 }
 
 export function matchesAccount(a: MonoAccount, filter: string): boolean {
