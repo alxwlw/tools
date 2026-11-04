@@ -82,6 +82,10 @@ bun src/cli.ts report Infra       # a top-level category per subcategory and mon
   _Earn Products_. `Read-Only` alone opens no balances: the funding wallet wants _Account Transfer_, and
   `wallet-balance` opened with _Positions_ and _Trade_ ticked together (which of them it needs isn't documented).
   ccxt blames its account type check for any such refusal (`10005`); the check is not the cause.
+- **Gate:** `type: ccxt`, `exchange: gate`. API v4 key, read-only, with _Spot Trading_, _Perpetual Futures_, _Earn_,
+  _Wallets_, _Account_ and _Margin Trading (Unified Account)_. Name only the wallets you have: without a futures
+  account `swap` fails the whole connector (`USER_NOT_FOUND`). Earn isn't read. Add `gate` to `pricing.exchanges`:
+  the other exchanges don't list its coins, such as `GT`.
 - **Monobank:** https://api.monobank.ua/ → "Отримати токен" (confirmed in the app).
 - **Zerion:** https://developers.zerion.io → create a key in the dashboard.
 
