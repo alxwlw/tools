@@ -2,7 +2,7 @@
 	"name": "tools",
 	"private": true,
 	"type": "module",
-	"packageManager": "pnpm@12.14.0",
+	"packageManager": "pnpm@12.16.1",
 	"devDependencies": {
 		"@alxwlw/oxlint-config": "catalog:dev",
 		"@alxwlw/stack": "catalog:dev",
