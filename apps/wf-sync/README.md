@@ -86,6 +86,7 @@ bun src/cli.ts report Infra       # a top-level category per subcategory and mon
   _Wallets_, _Account_ and _Margin Trading (Unified Account)_. Name only the wallets you have: without a futures
   account `swap` fails the whole connector (`USER_NOT_FOUND`). Earn isn't read. Add `gate` to `pricing.exchanges`:
   the other exchanges don't list its coins, such as `GT`.
+- **HTX:** `type: ccxt`, `exchange: htx`. API key with the read-only permission alone.
 - **Monobank:** https://api.monobank.ua/ → "Отримати токен" (confirmed in the app).
 - **Zerion:** https://developers.zerion.io → create a key in the dashboard.
 

@@ -48,6 +48,8 @@ services:
       BYBIT_SECRET: ${BYBIT_SECRET:-}
       GATE_API_KEY: ${GATE_API_KEY:-}
       GATE_SECRET: ${GATE_SECRET:-}
+      HTX_API_KEY: ${HTX_API_KEY:-}
+      HTX_SECRET: ${HTX_SECRET:-}
       ZERION_API_KEY: ${ZERION_API_KEY:-}
       MONOBANK_TOKEN: ${MONOBANK_TOKEN:-}
       TZ: ${TZ:-UTC}
