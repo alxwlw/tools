@@ -68,8 +68,16 @@ export interface SnapshotJson {
 		labels: string[];
 		createdAt: string;
 		updatedAt: string;
+		/**
+		 * Open items in "blocks" outside a cycle only; 0 = can start now. Null for an open item
+		 * outside any "blocks" relation too: a consumer may treat it as "can start now".
+		 */
+		wave: number | null;
+		inCycle: boolean;
 	}[];
 	edges: Edge[];
+	/** Strongly connected components of open "blocks" of size >= 2, and self-loops (item ids). */
+	cycles: string[][];
 	rejected: {
 		relations: { fromId: string; toId: string }[];
 		labels: { itemId: string; label: string }[];

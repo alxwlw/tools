@@ -299,6 +299,8 @@ export function buildSnapshot(
 			if (nodes.has(id)) moduleNames.set(id, [...(moduleNames.get(id) ?? []), m.name]);
 		}
 	}
+	const { wave, cycles } = computeWaves(copy, nodes);
+	const cycleIds = new Set(cycles.flat());
 	const items: SnapshotJson['items'] = [...nodes.values()].toSorted(byKey).map((n) => ({
 		id: n.row.id,
 		key: n.key,
@@ -312,6 +314,8 @@ export function buildSnapshot(
 		labels: n.labels,
 		createdAt: n.row.createdAt,
 		updatedAt: n.row.updatedAt,
+		wave: wave.get(n.row.id) ?? null,
+		inCycle: cycleIds.has(n.row.id),
 	}));
 	return {
 		generatedAt: o.now.toISOString(),
@@ -322,6 +326,7 @@ export function buildSnapshot(
 		labels: copy.labels.toSorted((a, b) => compareText(a.name, b.name) || compareText(a.id, b.id)),
 		items,
 		edges: collectEdges(copy, nodes, new Set(nodes.keys())),
+		cycles,
 		rejected: o.rejected,
 	};
 }

@@ -531,6 +531,8 @@ describe('buildSnapshot', () => {
 			labels: ['bug', 'код:x'],
 			createdAt: '2026-01-01T00:00:00.000Z',
 			updatedAt: '2026-01-02T00:00:00.000Z',
+			wave: 0,
+			inCycle: false,
 		});
 		expect(s.items[1]).toMatchObject({
 			stateGroup: 'completed',
@@ -543,6 +545,64 @@ describe('buildSnapshot', () => {
 			'ABC-1 blocks ABC-3',
 			'ABC-3 relates XYZ-1',
 		]);
+		expect(s.cycles).toEqual([]);
+	});
+
+	test('волны и циклы — как в графе', () => {
+		const spec: CopySpec = {
+			tasks: [
+				task('ABC-1'),
+				task('ABC-2'),
+				task('ABC-3'), // chain
+				task('ABC-4'),
+				task('ABC-5'),
+				task('ABC-6'), // cycle 4⇄5, 6 below it
+				task('ABC-7'), // self-loop
+				task('ABC-8', { closed: true }),
+				task('ABC-9'), // closed blocker
+				task('ABC-10'), // no relations
+				task('XYZ-1'), // relates only
+			],
+			edges: [
+				['ABC-1', 'blocks', 'ABC-2'],
+				['ABC-2', 'blocks', 'ABC-3'],
+				['ABC-4', 'blocks', 'ABC-5'],
+				['ABC-5', 'blocks', 'ABC-4'],
+				['ABC-5', 'blocks', 'ABC-6'],
+				['ABC-7', 'blocks', 'ABC-7'],
+				['ABC-8', 'blocks', 'ABC-9'],
+				['ABC-10', 'relates', 'XYZ-1'],
+			],
+		};
+		const s = buildSnapshot(copyOf(spec), {
+			workspaceSlug: 'example-ws',
+			lastRun: null,
+			rejected: { relations: [], labels: [] },
+			now,
+		});
+		expect(s.items.map((i) => [i.key, i.wave, i.inCycle])).toEqual([
+			['ABC-1', 0, false],
+			['ABC-2', 1, false],
+			['ABC-3', 2, false],
+			['ABC-4', null, true],
+			['ABC-5', null, true],
+			['ABC-6', 1, false],
+			['ABC-7', null, true],
+			['ABC-8', null, false],
+			['ABC-9', 0, false],
+			['ABC-10', null, false],
+			['XYZ-1', null, false],
+		]);
+		expect(s.cycles.map(keys)).toEqual([['ABC-4', 'ABC-5'], ['ABC-7']]);
+
+		const g = graphOf(spec);
+		expect(s.cycles).toEqual(g.cycles);
+		const byId = new Map(s.items.map((i) => [i.id, i]));
+		expect(g.items.length).toBeGreaterThan(0);
+		for (const gi of g.items) {
+			const si = byId.get(gi.id)!;
+			expect([si.wave, si.inCycle]).toEqual([gi.wave, gi.inCycle]);
+		}
 	});
 
 	test('метки снимка по имени, затем по id; родитель-призрак отброшен', () => {
