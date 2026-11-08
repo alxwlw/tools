@@ -18,7 +18,8 @@ What it does:
   are flagged as not parallel.
 - **A block for Plane.** `plane-block.html` is a small file to paste into an HTML block of a Plane page; it loads
   the graph from this service.
-- **Agent endpoints.** `snapshot.json` is the whole copy; `agent-runs` takes the list of relations and labels an
+- **Agent endpoints.** `snapshot.json` is the whole copy, with `wave` and `inCycle` on each item and `cycles`
+  computed the same way as in the graph; `agent-runs` takes the list of relations and labels an
   agent has just added. The service confirms each one once it sees it in Plane, and reports the ones that
   disappeared afterwards under `rejected`.
 
@@ -33,7 +34,7 @@ What it does:
 | `GET /t/<tenant>/graph.json?k=<key>`       | The graph data (`Cache-Control: no-store`, CORS `*`)                             |
 | `GET /t/<tenant>/plane-block.html?k=<key>` | The file for a Plane HTML block, sent as an attachment                           |
 | `GET /assets/graph.js`                     | The bundled front end, no key                                                    |
-| `GET /t/<tenant>/snapshot.json`            | The whole copy; `Authorization: Bearer <agent key>`                              |
+| `GET /t/<tenant>/snapshot.json`            | The whole copy plus waves and cycles; `Authorization: Bearer <agent key>`        |
 | `POST /t/<tenant>/agent-runs`              | A run of the agent, a JSON body up to 1 MiB; `Authorization: Bearer <agent key>` |
 | `GET /healthz`                             | `ok`                                                                             |
 
