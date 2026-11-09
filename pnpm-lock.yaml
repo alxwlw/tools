@@ -274,8 +274,8 @@ importers:
   apps/wf-sync:
     dependencies:
       ccxt:
-        specifier: 4.5.91
-        version: 4.5.91
+        specifier: 4.5.92
+        version: 4.5.92
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -757,8 +757,8 @@ packages:
   bun-types@1.4.4:
     resolution: {integrity: sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ==}
 
-  ccxt@4.5.91:
-    resolution: {integrity: sha512-Eop+C3x7u8jDCJJxiFJZ8j5IlSShi+f8OUecZCNTEeFuqlvNhiKjoel2pq5wDhtDoi7bfR3tXwzsN0/XU6wF8A==}
+  ccxt@4.5.92:
+    resolution: {integrity: sha512-YgEQ83nd6RzDHaUIHP6c/chZwnVTMV6iFZ/S9EjDYaqpADW4ErDTfYKkUjQQX9XBxYPBE6WiM3KbAy1M+QTNaQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       protobufjs: ^7.5.3
@@ -1150,7 +1150,7 @@ snapshots:
       '@types/node': 26.6.5
       undici-types: 8.9.0
 
-  ccxt@4.5.91:
+  ccxt@4.5.92:
     dependencies:
       '@noble/curves': 2.2.0
       '@noble/hashes': 2.2.0
