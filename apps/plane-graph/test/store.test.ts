@@ -421,3 +421,149 @@ describe('Store: файл', () => {
 		probe.close();
 	});
 });
+
+describe('Store: переименование метки', () => {
+	const T1 = '2026-02-02T00:00:00Z';
+	const T2 = '2026-02-03T00:00:00Z';
+	const labelWeb = (abc: string) => [
+		{ id: 'label:ABC:код:web', projectId: 'project:ABC', name: abc },
+		{ id: 'label:XYZ:код:web', projectId: 'project:XYZ', name: 'код:web' },
+	];
+	const twoProjects = (abcName: string, over: Partial<CopyData> = {}): CopyData => ({
+		projects: [
+			{ id: 'project:ABC', identifier: 'ABC', name: 'Alpha' },
+			{ id: 'project:XYZ', identifier: 'XYZ', name: 'Xi' },
+		],
+		states: [],
+		labels: labelWeb(abcName),
+		modules: [],
+		items: [
+			item('item:ABC-1', { projectId: 'project:ABC', labelIds: ['label:ABC:код:web'] }),
+			item('item:XYZ-1', { projectId: 'project:XYZ', labelIds: ['label:XYZ:код:web'] }),
+		],
+		edges: [],
+		...over,
+	});
+	const labelsOf = (store: Store) =>
+		store
+			.marks('acme')
+			.flatMap((m) =>
+				m.kind === 'label'
+					? [
+							{
+								itemId: m.itemId,
+								label: m.label,
+								confirmedAt: m.confirmedAt,
+								rejectedAt: m.rejectedAt,
+							},
+						]
+					: [],
+			)
+			.sort((a, b) => a.itemId.localeCompare(b.itemId));
+	function seeded(): Store {
+		const store = new Store(':memory:');
+		store.replaceCopy('acme', twoProjects('код:web'), '2026-03-01T00:00:00Z');
+		store.putRun(
+			'acme',
+			run({
+				relationsAdded: [],
+				labelsAdded: [
+					{ itemId: 'item:ABC-1', label: 'код:web' },
+					{ itemId: 'item:XYZ-1', label: 'код:web' },
+				],
+			}),
+			'2026-02-01T01:00:00Z',
+		);
+		for (const itemId of ['item:ABC-1', 'item:XYZ-1']) {
+			store.setMark('acme', { kind: 'label', itemId, label: 'код:web' }, { confirmedAt: T1 });
+		}
+		return store;
+	}
+	const moved = [
+		{ itemId: 'item:ABC-1', label: 'код:app', confirmedAt: T1, rejectedAt: null },
+		{ itemId: 'item:XYZ-1', label: 'код:web', confirmedAt: T1, rejectedAt: null },
+	];
+	const renamed = [
+		{
+			projectId: 'project:ABC',
+			labelId: 'label:ABC:код:web',
+			from: 'код:web',
+			to: 'код:app',
+			marks: 1,
+		},
+	];
+
+	test('переименованная метка уносит пометки своего проекта', () => {
+		const store = seeded();
+		const renames = store.replaceCopy('acme', twoProjects('код:app'), '2026-03-02T00:00:00Z');
+		expect(renames).toEqual(renamed);
+		expect(labelsOf(store)).toEqual(moved);
+	});
+
+	test('replaceProjectLabels переносит пометки так же', () => {
+		const store = seeded();
+		const renames = store.replaceProjectLabels('acme', 'project:ABC', [
+			{ id: 'label:ABC:код:web', projectId: 'project:ABC', name: 'код:app' },
+		]);
+		expect(renames).toEqual(renamed);
+		expect(labelsOf(store)).toEqual(moved);
+	});
+
+	test('пометка с новым именем уже есть — после переноса она одна', () => {
+		const store = seeded();
+		store.putRun(
+			'acme',
+			run({
+				runId: 'r2',
+				relationsAdded: [],
+				labelsAdded: [{ itemId: 'item:ABC-1', label: 'код:app' }],
+			}),
+			'2026-02-02T01:00:00Z',
+		);
+		store.setMark(
+			'acme',
+			{ kind: 'label', itemId: 'item:ABC-1', label: 'код:app' },
+			{ confirmedAt: T2 },
+		);
+		const renames = store.replaceCopy('acme', twoProjects('код:app'), '2026-03-02T00:00:00Z');
+		expect(renames[0]?.marks).toBe(1);
+		expect(labelsOf(store).filter((m) => m.itemId === 'item:ABC-1')).toEqual([
+			{ itemId: 'item:ABC-1', label: 'код:app', confirmedAt: T2, rejectedAt: null },
+		]);
+	});
+
+	test('новая, удалённая и прежняя метка — не переименование', () => {
+		const store = seeded();
+		const renames = store.replaceCopy(
+			'acme',
+			twoProjects('код:web', {
+				labels: [
+					{ id: 'label:ABC:код:db', projectId: 'project:ABC', name: 'код:db' },
+					{ id: 'label:XYZ:код:web', projectId: 'project:XYZ', name: 'код:web' },
+				],
+			}),
+			'2026-03-02T00:00:00Z',
+		);
+		expect(renames).toEqual([]);
+		expect(store.marks('acme').map((m) => m.kind === 'label' && m.label)).toEqual([
+			'код:web',
+			'код:web',
+		]);
+	});
+
+	test('метка с тем же id в другом проекте — не переименование', () => {
+		const store = seeded();
+		const renames = store.replaceCopy(
+			'acme',
+			twoProjects('код:web', {
+				labels: [
+					{ id: 'label:ABC:код:web', projectId: 'project:XYZ', name: 'код:app' },
+					{ id: 'label:XYZ:код:web', projectId: 'project:XYZ', name: 'код:web' },
+				],
+			}),
+			'2026-03-02T00:00:00Z',
+		);
+		expect(renames).toEqual([]);
+		expect(labelsOf(store).map((m) => m.label)).toEqual(['код:web', 'код:web']);
+	});
+});

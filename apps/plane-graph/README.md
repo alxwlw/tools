@@ -21,7 +21,8 @@ What it does:
 - **Agent endpoints.** `snapshot.json` is the whole copy, with `wave` and `inCycle` on each item and `cycles`
   computed the same way as in the graph; `agent-runs` takes the list of relations and labels an
   agent has just added. The service confirms each one once it sees it in Plane, and reports the ones that
-  disappeared afterwards under `rejected`.
+  disappeared afterwards under `rejected`. A label renamed in Plane keeps its marks: the next sync moves them to the
+  new name, so a rename is not reported as rejected.
 
 ## Routes
 
