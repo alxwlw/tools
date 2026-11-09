@@ -14,7 +14,7 @@
 		"check": "bun src/cli.ts check"
 	},
 	"dependencies": {
-		"ccxt": "4.5.91",
+		"ccxt": "4.5.92",
 		"yaml": "2.9.1"
 	},
 	"devDependencies": {
