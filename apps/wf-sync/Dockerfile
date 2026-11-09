@@ -1,7 +1,7 @@
 # wf-sync — exchanges, wallets and Monobank → Wealthfolio.
 # Build context: apps/wf-sync. Unlike the other tools it has runtime dependencies (ccxt, yaml),
 # pinned exactly in package.json; the dev-only catalog entries are dropped before install.
-FROM oven/bun:1.4.2-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 COPY package.json ./
