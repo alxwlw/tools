@@ -1,7 +1,7 @@
 # plane-graph — read-only copy of Plane work items and relations, an order graph and agent endpoints.
 # Build context: the repository root (docker build -f apps/plane-graph/Dockerfile .): the image carries
 # packages/plane-app as its only dependency, copied as source. Nothing is installed.
-FROM oven/bun:1.4.2-alpine
+FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 COPY apps/plane-graph/tsconfig.json ./
