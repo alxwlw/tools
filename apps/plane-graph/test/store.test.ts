@@ -566,4 +566,80 @@ describe('Store: переименование метки', () => {
 		expect(renames).toEqual([]);
 		expect(labelsOf(store).map((m) => m.label)).toEqual(['код:web', 'код:web']);
 	});
+
+	describe('цепочка и обмен имён в одном проекте', () => {
+		const pair = (a: string, b: string): CopyData =>
+			twoProjects('код:web', {
+				labels: [
+					{ id: 'label:ABC:a', projectId: 'project:ABC', name: a },
+					{ id: 'label:ABC:b', projectId: 'project:ABC', name: b },
+				],
+				items: [
+					item('i1', { projectId: 'project:ABC', labelIds: ['label:ABC:a'] }),
+					item('i2', { projectId: 'project:ABC', labelIds: ['label:ABC:b'] }),
+				],
+			});
+		function pairSeeded(a: string, b: string): Store {
+			const store = new Store(':memory:');
+			store.replaceCopy('acme', pair(a, b), '2026-03-01T00:00:00Z');
+			store.putRun(
+				'acme',
+				run({
+					relationsAdded: [],
+					labelsAdded: [
+						{ itemId: 'i1', label: a },
+						{ itemId: 'i2', label: b },
+					],
+				}),
+				'2026-02-01T01:00:00Z',
+			);
+			return store;
+		}
+
+		test('одно имя уходит, а другое его занимает: пометки не склеиваются', () => {
+			const store = pairSeeded('x', 'y');
+			const renames = store.replaceCopy('acme', pair('y', 'z'), '2026-03-02T00:00:00Z');
+			expect(renames.map((r) => [r.from, r.to, r.marks])).toEqual([
+				['x', 'y', 1],
+				['y', 'z', 1],
+			]);
+			expect(labelsOf(store).map((m) => [m.itemId, m.label])).toEqual([
+				['i1', 'y'],
+				['i2', 'z'],
+			]);
+		});
+
+		test('обмен именами: каждая пометка идёт за своей меткой', () => {
+			const store = pairSeeded('x', 'y');
+			const renames = store.replaceCopy('acme', pair('y', 'x'), '2026-03-02T00:00:00Z');
+			expect(renames.map((r) => [r.from, r.to, r.marks])).toEqual([
+				['x', 'y', 1],
+				['y', 'x', 1],
+			]);
+			expect(labelsOf(store).map((m) => [m.itemId, m.label])).toEqual([
+				['i1', 'y'],
+				['i2', 'x'],
+			]);
+		});
+
+		test('на одной задаче обе пометки цепочки: каждая доезжает до своего имени', () => {
+			const store = pairSeeded('x', 'y');
+			store.putRun(
+				'acme',
+				run({
+					runId: 'r2',
+					relationsAdded: [],
+					labelsAdded: [{ itemId: 'i1', label: 'y' }],
+				}),
+				'2026-02-02T01:00:00Z',
+			);
+			const renames = store.replaceCopy('acme', pair('y', 'z'), '2026-03-02T00:00:00Z');
+			expect(renames.map((r) => r.marks)).toEqual([1, 2]);
+			expect(labelsOf(store).map((m) => [m.itemId, m.label])).toEqual([
+				['i1', 'y'],
+				['i1', 'z'],
+				['i2', 'z'],
+			]);
+		});
+	});
 });

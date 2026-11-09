@@ -283,20 +283,41 @@ export class Store {
 		const renames: LabelRename[] = [];
 		const scope = `item_id IN (SELECT id FROM items WHERE tenant = ? AND project_id = ?)
 			AND tenant = ? AND kind = 'label' AND label = ?`;
+		// Phase 1: collect every rename's marks before any write, so no rename sees another's output.
+		const moves: { to: string; rowids: number[] }[] = [];
 		for (const l of now) {
 			const old = before.get(l.id);
 			if (old === undefined || old.projectId !== l.project_id || old.name === l.name) continue;
-			const args = [tenant, l.project_id, tenant, old.name] as const;
-			const marks =
-				this.#db
-					.query<{ n: number }, [string, string, string, string]>(
-						`SELECT count(*) AS n FROM marks WHERE ${scope}`,
-					)
-					.get(...args)?.n ?? 0;
-			this.#db.query(`UPDATE OR IGNORE marks SET label = ? WHERE ${scope}`).run(l.name, ...args);
-			this.#db.query(`DELETE FROM marks WHERE ${scope}`).run(...args);
-			renames.push({ projectId: l.project_id, labelId: l.id, from: old.name, to: l.name, marks });
+			const rowids = this.#db
+				.query<{ rowid: number }, [string, string, string, string]>(
+					`SELECT rowid FROM marks WHERE ${scope}`,
+				)
+				.all(tenant, l.project_id, tenant, old.name)
+				.map((r) => r.rowid);
+			moves.push({ to: l.name, rowids });
+			renames.push({
+				projectId: l.project_id,
+				labelId: l.id,
+				from: old.name,
+				to: l.name,
+				marks: rowids.length,
+			});
 		}
+		// Phase 2: park the collected rows on names nothing else uses, then move them to their final names.
+		const ids = JSON.stringify(moves.flatMap((m) => m.rowids));
+		const parked = `rowid IN (SELECT value FROM json_each(?)) AND tenant = ?`;
+		this.#db.query(`UPDATE marks SET label = char(0) || rowid WHERE ${parked}`).run(ids, tenant);
+		for (const m of moves) {
+			// a mark the item already has under the new name wins; the moved duplicate is deleted below
+			this.#db
+				.query(
+					`UPDATE OR IGNORE marks SET label = ? WHERE rowid IN (SELECT value FROM json_each(?))`,
+				)
+				.run(m.to, JSON.stringify(m.rowids));
+		}
+		this.#db
+			.query(`DELETE FROM marks WHERE ${parked} AND label = char(0) || rowid`)
+			.run(ids, tenant);
 		return renames;
 	}
 
