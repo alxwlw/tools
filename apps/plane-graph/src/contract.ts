@@ -113,6 +113,14 @@ export interface LabelRow {
 	projectId: string;
 	name: string;
 }
+/** A label whose name changed in Plane; `marks` = agent marks of the old name on the project's items before the move. */
+export interface LabelRename {
+	projectId: string;
+	labelId: string;
+	from: string;
+	to: string;
+	marks: number;
+}
 export interface ModuleRow {
 	id: string;
 	projectId: string;

@@ -465,6 +465,36 @@ describe('метки агента', () => {
 		expect(store.rejected(TENANT).labels).toEqual([{ itemId: b, label: 'код:web' }]);
 	});
 
+	test('метка, переименованная в Plane, не отвергает пометку агента', async () => {
+		const { deps, store, plane, queue, refresh, logs } = setup({
+			tasks: [{ key: 'ABC-2', labels: ['код:web'] }],
+		});
+		await reconcile(deps);
+		await acceptRun(
+			deps,
+			run({ labelsAdded: [{ itemId: idOf('ABC-2'), label: 'код:web' }] }),
+			refresh,
+		);
+		await queue.idle();
+		expect(store.marks(TENANT).map((m) => m.confirmedAt)).toEqual([NOW.toISOString()]);
+
+		plane.labels.find((l) => l.id === 'label:ABC:код:web')!.name = 'код:app';
+		await reconcile(deps);
+		expect(store.rejected(TENANT).labels).toEqual([]);
+		expect(store.marks(TENANT).map((m) => m.kind === 'label' && [m.label, m.confirmedAt])).toEqual([
+			['код:app', NOW.toISOString()],
+		]);
+		expect(logs.filter((l) => l.event === 'label.renamed')).toEqual([
+			{
+				event: 'label.renamed',
+				tenant: TENANT,
+				projectId: 'project:ABC',
+				labelId: 'label:ABC:код:web',
+				marks: 1,
+			},
+		]);
+	});
+
 	test('известная метка не добавляет запрос меток', async () => {
 		const { deps, plane } = setup();
 		await reconcile(deps);

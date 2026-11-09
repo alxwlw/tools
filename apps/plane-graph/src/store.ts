@@ -8,6 +8,7 @@ import type {
 	CopyView,
 	Edge,
 	ItemRow,
+	LabelRename,
 	LabelRow,
 	MarkKey,
 	RunSummary,
@@ -190,8 +191,13 @@ export class Store {
 	}
 
 	/** Replaces one project's labels in the copy (an agent-made label the copy did not know yet). */
-	replaceProjectLabels(tenant: string, projectId: string, labels: readonly LabelRow[]): void {
-		this.#db.transaction(() => {
+	replaceProjectLabels(
+		tenant: string,
+		projectId: string,
+		labels: readonly LabelRow[],
+	): LabelRename[] {
+		return this.#db.transaction((): LabelRename[] => {
+			const before = this.#labelsBefore(tenant, projectId);
 			this.#db
 				.query('DELETE FROM labels WHERE tenant = ? AND project_id = ?')
 				.run(tenant, projectId);
@@ -200,12 +206,17 @@ export class Store {
 					.query('INSERT INTO labels (tenant, id, project_id, name) VALUES (?, ?, ?, ?)')
 					.run(tenant, l.id, l.projectId, l.name);
 			}
+			return this.#followRenames(tenant, before);
 		})();
 	}
 
-	/** Replaces the tenant's whole copy in one transaction; a throw (duplicate id, bad edge type) keeps the old one. */
-	replaceCopy(tenant: string, copy: CopyData, syncedAt: string): void {
-		this.#db.transaction(() => {
+	/**
+	 * Replaces the tenant's whole copy in one transaction; a throw (duplicate id, bad edge type) keeps the old one.
+	 * Agent label marks follow a renamed label; the renames are returned.
+	 */
+	replaceCopy(tenant: string, copy: CopyData, syncedAt: string): LabelRename[] {
+		return this.#db.transaction((): LabelRename[] => {
+			const before = this.#labelsBefore(tenant);
 			for (const table of ['projects', 'states', 'labels', 'modules', 'items', 'edges']) {
 				this.#db.query(`DELETE FROM ${table} WHERE tenant = ?`).run(tenant);
 			}
@@ -239,7 +250,75 @@ export class Store {
 					ON CONFLICT (tenant) DO UPDATE SET synced_at = excluded.synced_at`,
 				)
 				.run(tenant, syncedAt);
+			return this.#followRenames(tenant, before);
 		})();
+	}
+
+	#labelsBefore(
+		tenant: string,
+		projectId?: string,
+	): Map<string, { projectId: string; name: string }> {
+		const rows = this.#db
+			.query<{ id: string; project_id: string; name: string }, [string]>(
+				'SELECT id, project_id, name FROM labels WHERE tenant = ?',
+			)
+			.all(tenant);
+		return new Map(
+			rows
+				.filter((r) => projectId === undefined || r.project_id === projectId)
+				.map((r) => [r.id, { projectId: r.project_id, name: r.name }]),
+		);
+	}
+
+	/** Moves label marks of every label that kept its id and project but changed its name. */
+	#followRenames(
+		tenant: string,
+		before: ReadonlyMap<string, { projectId: string; name: string }>,
+	): LabelRename[] {
+		const now = this.#db
+			.query<{ id: string; project_id: string; name: string }, [string]>(
+				'SELECT id, project_id, name FROM labels WHERE tenant = ? ORDER BY project_id, id',
+			)
+			.all(tenant);
+		const renames: LabelRename[] = [];
+		const scope = `item_id IN (SELECT id FROM items WHERE tenant = ? AND project_id = ?)
+			AND tenant = ? AND kind = 'label' AND label = ?`;
+		// Phase 1: collect every rename's marks before any write, so no rename sees another's output.
+		const moves: { to: string; rowids: number[] }[] = [];
+		for (const l of now) {
+			const old = before.get(l.id);
+			if (old === undefined || old.projectId !== l.project_id || old.name === l.name) continue;
+			const rowids = this.#db
+				.query<{ rowid: number }, [string, string, string, string]>(
+					`SELECT rowid FROM marks WHERE ${scope}`,
+				)
+				.all(tenant, l.project_id, tenant, old.name)
+				.map((r) => r.rowid);
+			moves.push({ to: l.name, rowids });
+			renames.push({
+				projectId: l.project_id,
+				labelId: l.id,
+				from: old.name,
+				to: l.name,
+				marks: rowids.length,
+			});
+		}
+		// Phase 2: park the collected rows on names nothing else uses, then move them to their final names.
+		const ids = JSON.stringify(moves.flatMap((m) => m.rowids));
+		const parked = `rowid IN (SELECT value FROM json_each(?)) AND tenant = ?`;
+		this.#db.query(`UPDATE marks SET label = char(0) || rowid WHERE ${parked}`).run(ids, tenant);
+		for (const m of moves) {
+			// a mark the item already has under the new name wins; the moved duplicate is deleted below
+			this.#db
+				.query(
+					`UPDATE OR IGNORE marks SET label = ? WHERE rowid IN (SELECT value FROM json_each(?))`,
+				)
+				.run(m.to, JSON.stringify(m.rowids));
+		}
+		this.#db
+			.query(`DELETE FROM marks WHERE ${parked} AND label = char(0) || rowid`)
+			.run(ids, tenant);
+		return renames;
 	}
 
 	#insertItem(tenant: string, i: ItemRow): void {

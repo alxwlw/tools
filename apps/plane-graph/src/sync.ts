@@ -1,5 +1,5 @@
 // Sync layer: Plane reader -> SQLite store. Reconcile, webhook-driven refreshes, agent mark checks.
-import type { AgentRunIn, CopyData, Edge, ItemRow, MarkKey } from './contract.ts';
+import type { AgentRunIn, CopyData, Edge, ItemRow, LabelRename, MarkKey } from './contract.ts';
 import type { Log } from './log.ts';
 import type { PlaneReader } from './plane/client.ts';
 import type { PlaneEvent } from './plane/webhook.ts';
@@ -54,7 +54,7 @@ export async function reconcile(d: SyncDeps): Promise<boolean> {
 			}
 		}
 		data.edges = [...edges.values()];
-		d.store.replaceCopy(d.tenant, data, d.now().toISOString());
+		logRenames(d, d.store.replaceCopy(d.tenant, data, d.now().toISOString()));
 		d.log({
 			event: 'sync.done',
 			tenant: d.tenant,
@@ -95,7 +95,21 @@ async function healLabels(d: SyncDeps, item: ItemRow): Promise<void> {
 	if (item.labelIds.length === 0) return;
 	const known = new Set(d.store.copy(d.tenant).labels.map((l) => l.id));
 	if (item.labelIds.every((id) => known.has(id))) return;
-	d.store.replaceProjectLabels(d.tenant, item.projectId, await d.plane.listLabels(item.projectId));
+	const labels = await d.plane.listLabels(item.projectId);
+	logRenames(d, d.store.replaceProjectLabels(d.tenant, item.projectId, labels));
+}
+
+/** One line per renamed label; label names stay out of the log. */
+function logRenames(d: SyncDeps, renames: readonly LabelRename[]): void {
+	for (const r of renames) {
+		d.log({
+			event: 'label.renamed',
+			tenant: d.tenant,
+			projectId: r.projectId,
+			labelId: r.labelId,
+			marks: r.marks,
+		});
+	}
 }
 
 /** An item whose state or project the copy does not know is kept, but the copy is stale: ask for a reconcile. */
