@@ -6,3 +6,7 @@ on:
 jobs:
   check:
     uses: alxwlw/stack/.github/workflows/check.yml@v1
+    with:
+      registry: ${{ vars.STACK_REGISTRY || '' }}
+    secrets:
+      registry-token: ${{ secrets.STACK_REGISTRY_TOKEN }}

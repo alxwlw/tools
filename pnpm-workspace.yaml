@@ -13,13 +13,13 @@ catalogs:
     dependency-cruiser: 18.8.0-beta-2
     vitest: 5.1.0
     '@playwright/test': 1.64.1
-    '@alxwlw/stack': 1.9.2
-    '@alxwlw/oxlint-config': 1.9.2
-    '@alxwlw/tsconfig': 1.9.2
+    '@alxwlw/stack': 1.10.0
+    '@alxwlw/oxlint-config': 1.10.0
+    '@alxwlw/tsconfig': 1.10.0
 minimumReleaseAgeExclude:
-  - '@alxwlw/oxlint-config@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2'
-  - '@alxwlw/stack@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2'
-  - '@alxwlw/tsconfig@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2'
+  - '@alxwlw/oxlint-config@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2 || 1.10.0'
+  - '@alxwlw/stack@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2 || 1.10.0'
+  - '@alxwlw/tsconfig@1.7.1 || 1.8.0 || 1.9.0 || 1.9.2 || 1.10.0'
 # wf-sync: ccxt's postinstall only prints a banner; bufferutil is an optional native addon of ws.
 allowBuilds:
   ccxt: false

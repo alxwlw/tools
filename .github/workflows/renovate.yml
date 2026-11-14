@@ -1,5 +1,6 @@
 # Canon file — sync-managed: edits happen in alxwlw/stack, not here.
 # Needs the RENOVATE_TOKEN secret (contents, pull requests, issues, workflows: write).
+# Optional: STACK_REGISTRY variable + STACK_REGISTRY_TOKEN secret for a private npm registry.
 name: renovate
 on:
   schedule:
@@ -15,5 +16,7 @@ jobs:
     uses: alxwlw/stack/.github/workflows/renovate.yml@v1
     with:
       log-level: ${{ inputs.log-level || 'info' }}
+      registry: ${{ vars.STACK_REGISTRY || '' }}
     secrets:
       token: ${{ secrets.RENOVATE_TOKEN }}
+      registry-token: ${{ secrets.STACK_REGISTRY_TOKEN }}

@@ -12,6 +12,8 @@ jobs:
       version: ${{ inputs.version }}
       install: ${{ vars.STACK_SYNC_INSTALL != 'false' }}
       base: ${{ vars.STACK_SYNC_BASE || '' }}
+      registry: ${{ vars.STACK_REGISTRY || '' }}
     secrets:
       app-id: ${{ secrets.STACK_BOT_APP_ID }}
       app-private-key: ${{ secrets.STACK_BOT_PRIVATE_KEY }}
+      registry-token: ${{ secrets.STACK_REGISTRY_TOKEN }}
