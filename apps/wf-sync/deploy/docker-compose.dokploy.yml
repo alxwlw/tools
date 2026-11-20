@@ -56,7 +56,7 @@ services:
       - ALL
 
   wealthfolio:
-    image: wealthfolio/wealthfolio:3.12.0@sha256:5790528fcd9795b571176cad78bcca09e3fa5875ec20968356586939e154c3cb
+    image: wealthfolio/wealthfolio:3.13.1@sha256:a51bf08440ec3c517b728e4d5a7d9134cc564e1749eec45bd4f0b7f39573336e
     restart: unless-stopped
     logging: *logging
     # No published port: only the tailscale service and wf-sync reach it, over the compose network.
